@@ -340,7 +340,7 @@ ${url}`);
 
             <div>
               <p className="text-sm font-bold tracking-wide text-white">
-                ST Market Intelligence
+                مدرسة السوق الأمريكي
               </p>
 
               <p className="text-[11px] text-slate-500">تحليل ذكي للسوق</p>
@@ -493,7 +493,7 @@ ${url}`);
           </a>
         </header>
 
-        <section className="mb-8 grid gap-4 lg:grid-cols-[1.25fr_0.75fr]">
+        <section className="mb-8 grid gap-4 lg:grid-cols-[1.15fr_0.85fr_0.85fr]">
           <form
             onSubmit={handleSearch}
             className="rounded-3xl border border-white/[0.08] bg-slate-950/65 p-5 shadow-2xl shadow-black/20 backdrop-blur-xl sm:p-6"
@@ -543,6 +543,30 @@ ${url}`);
             </div>
 
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-cyan-400/20 bg-cyan-400/10 text-xl text-cyan-300 transition group-hover:-translate-x-1">
+              ←
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => router.push("/whale-trades")}
+            className="group flex items-center justify-between gap-4 rounded-3xl border border-amber-400/20 bg-slate-950/65 p-5 text-right shadow-2xl shadow-amber-950/20 backdrop-blur-xl transition duration-300 hover:-translate-y-1 hover:border-amber-400/40 sm:p-6"
+          >
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.15em] text-amber-400">
+                الرصد المؤسسي
+              </p>
+
+              <h2 className="mt-2 text-xl font-black text-white">
+                صفقات الحيتان
+              </h2>
+
+              <p className="mt-2 text-sm leading-6 text-slate-400">
+                اعرض العقود الكبيرة المرصودة تلقائيًا وتحليل قوتها وسيولتها.
+              </p>
+            </div>
+
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-amber-400/20 bg-amber-400/10 text-xl text-amber-300 transition group-hover:-translate-x-1">
               ←
             </div>
           </button>
