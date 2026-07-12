@@ -1,11 +1,6 @@
 "use client";
 
-import {
-  type FormEvent,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 
 import { useRouter } from "next/navigation";
 
@@ -17,6 +12,63 @@ import {
 } from "../lib/analysis-engine";
 
 const WATCHLIST = ["NVDA", "TSLA", "AMD", "META"];
+const TELEGRAM_CHANNEL_URL = "https://t.me/STtradevip";
+
+function clamp(value: number, minimum: number, maximum: number) {
+  return Math.min(Math.max(value, minimum), maximum);
+}
+
+function getTradePlan(item: Opportunity) {
+  const strength = clamp(item.score, 50, 100);
+  const targetMovePct = 1.2 + ((strength - 50) / 50) * 1.8;
+  const stopMovePct = 0.75 + ((100 - strength) / 50) * 0.45;
+  const direction = item.side === "PUT" ? -1 : 1;
+
+  const entry = item.price;
+  const target = entry * (1 + direction * (targetMovePct / 100));
+  const stop = entry * (1 - direction * (stopMovePct / 100));
+
+  const risk =
+    item.score >= 85 ? "منخفضة" : item.score >= 70 ? "متوسطة" : "مرتفعة";
+
+  return {
+    entry,
+    target,
+    stop,
+    reachProbability: clamp(Math.round(item.score), 1, 99),
+    risk,
+  };
+}
+
+function getSaudiMarketState() {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Riyadh",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date());
+
+  const values = Object.fromEntries(
+    parts.map((part) => [part.type, part.value]),
+  );
+
+  const weekday = values.weekday;
+  const hour = Number(values.hour);
+  const minute = Number(values.minute);
+  const currentMinutes = hour * 60 + minute;
+  const isWeekday = ["Mon", "Tue", "Wed", "Thu", "Fri"].includes(weekday);
+  const isOpen =
+    isWeekday &&
+    currentMinutes >= 14 * 60 + 30 &&
+    currentMinutes <= 23 * 60 + 15;
+
+  return {
+    isOpen,
+    label: isOpen ? "السوق مفتوح" : "السوق مغلق",
+    note: isOpen ? "بيانات الجلسة الحالية" : "بيانات آخر جلسة متاحة",
+  };
+}
 
 function sideColor(side: Side) {
   if (side === "CALL") {
@@ -71,16 +123,12 @@ export default function Home() {
 
   const [symbol, setSymbol] = useState("");
 
-  const [opportunities, setOpportunities] = useState<
-    Opportunity[]
-  >([]);
+  const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  function handleSearch(
-    event: FormEvent<HTMLFormElement>
-  ) {
+  function handleSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     const stock = symbol
@@ -92,9 +140,7 @@ export default function Home() {
       return;
     }
 
-    router.push(
-      `/stocks/${encodeURIComponent(stock)}`
-    );
+    router.push(`/stocks/${encodeURIComponent(stock)}`);
   }
 
   useEffect(() => {
@@ -114,25 +160,20 @@ export default function Home() {
         const results = await Promise.allSettled(
           WATCHLIST.map(async (stockSymbol) => {
             const response = await fetch(
-              `/api/analysis/${encodeURIComponent(
-                stockSymbol
-              )}`,
+              `/api/analysis/${encodeURIComponent(stockSymbol)}`,
               {
                 cache: "no-store",
-              }
+              },
             );
 
             if (!response.ok) {
-              throw new Error(
-                `تعذر تحليل ${stockSymbol}`
-              );
+              throw new Error(`تعذر تحليل ${stockSymbol}`);
             }
 
-            const analysis =
-              (await response.json()) as AnalysisResponse;
+            const analysis = (await response.json()) as AnalysisResponse;
 
             return createOpportunity(analysis);
-          })
+          }),
         );
 
         if (cancelled) {
@@ -141,10 +182,8 @@ export default function Home() {
 
         const validResults = results
           .filter(
-            (
-              result
-            ): result is PromiseFulfilledResult<Opportunity> =>
-              result.status === "fulfilled"
+            (result): result is PromiseFulfilledResult<Opportunity> =>
+              result.status === "fulfilled",
           )
           .map((result) => result.value)
           .sort((a, b) => b.score - a.score);
@@ -152,20 +191,13 @@ export default function Home() {
         setOpportunities(validResults);
 
         if (validResults.length === 0) {
-          setError(
-            "تعذر تحميل فرص السوق حاليًا."
-          );
+          setError("تعذر تحميل فرص السوق حاليًا.");
         }
       } catch (loadError) {
-        console.error(
-          "Failed to load opportunities:",
-          loadError
-        );
+        console.error("Failed to load opportunities:", loadError);
 
         if (!cancelled) {
-          setError(
-            "حدث خطأ أثناء تحميل التحليلات."
-          );
+          setError("حدث خطأ أثناء تحميل التحليلات.");
         }
       } finally {
         requestRunning = false;
@@ -178,12 +210,9 @@ export default function Home() {
 
     void loadOpportunities();
 
-    const refreshTimer = window.setInterval(
-      () => {
-        void loadOpportunities();
-      },
-      120_000
-    );
+    const refreshTimer = window.setInterval(() => {
+      void loadOpportunities();
+    }, 120_000);
 
     return () => {
       cancelled = true;
@@ -191,47 +220,42 @@ export default function Home() {
     };
   }, []);
 
-  const marketScore = useMemo(() => {
+  const marketالتقييم = useMemo(() => {
     if (opportunities.length === 0) {
       return 0;
     }
 
-    const total = opportunities.reduce(
-      (sum, item) => sum + item.score,
-      0
-    );
+    const total = opportunities.reduce((sum, item) => sum + item.score, 0);
 
-    return Math.round(
-      total / opportunities.length
-    );
+    return Math.round(total / opportunities.length);
   }, [opportunities]);
 
   const marketStatus = useMemo(() => {
-    if (marketScore >= 85) {
+    if (marketالتقييم >= 85) {
       return "إيجابي قوي";
     }
 
-    if (marketScore >= 70) {
+    if (marketالتقييم >= 70) {
       return "إيجابي بحذر";
     }
 
-    if (marketScore >= 55) {
+    if (marketالتقييم >= 55) {
       return "محايد";
     }
 
-    if (marketScore > 0) {
+    if (marketالتقييم > 0) {
       return "سلبي";
     }
 
     return "جارٍ التحليل";
-  }, [marketScore]);
+  }, [marketالتقييم]);
 
   const marketStatusColor =
-    marketScore >= 70
+    marketالتقييم >= 70
       ? "text-emerald-400"
-      : marketScore >= 55
+      : marketالتقييم >= 55
         ? "text-amber-400"
-        : marketScore > 0
+        : marketالتقييم > 0
           ? "text-rose-400"
           : "text-slate-400";
 
@@ -239,8 +263,48 @@ export default function Home() {
 
   const tickerItems = useMemo(
     () => [...opportunities, ...opportunities],
-    [opportunities]
+    [opportunities],
   );
+
+  const marketSession = useMemo(() => getSaudiMarketState(), []);
+
+  async function shareOpportunity(item: Opportunity) {
+    const plan = getTradePlan(item);
+    const url = `${window.location.origin}/stocks/${encodeURIComponent(
+      item.symbol,
+    )}`;
+    const text = `${item.symbol} | ${item.side}
+السعر الحالي: $${item.price.toFixed(2)}
+الدخول المقترح: $${plan.entry.toFixed(2)}
+الهدف: $${plan.target.toFixed(2)}
+الوقف: $${plan.stop.toFixed(2)}
+نسبة الوصول التقديرية: ${plan.reachProbability}%`;
+
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: `تحليل ${item.symbol}`,
+          text,
+          url,
+        });
+        return;
+      }
+
+      await navigator.clipboard.writeText(`${text}
+${url}`);
+      window.alert("تم نسخ تفاصيل السهم والرابط.");
+    } catch (shareError) {
+      if (
+        shareError instanceof DOMException &&
+        shareError.name === "AbortError"
+      ) {
+        return;
+      }
+
+      console.error("Share failed:", shareError);
+      window.alert("تعذر فتح المشاركة حاليًا.");
+    }
+  }
 
   return (
     <main
@@ -271,9 +335,7 @@ export default function Home() {
         <nav className="mb-4 flex items-center justify-between rounded-2xl border border-white/[0.07] bg-slate-950/50 px-4 py-3 shadow-2xl shadow-black/20 backdrop-blur-xl sm:px-5">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-cyan-400/20 bg-cyan-400/10 shadow-lg shadow-cyan-500/10">
-              <span className="text-sm font-black text-cyan-300">
-                ST
-              </span>
+              <span className="text-sm font-black text-cyan-300">ST</span>
             </div>
 
             <div>
@@ -281,21 +343,35 @@ export default function Home() {
                 ST Market Intelligence
               </p>
 
-              <p className="text-[11px] text-slate-500">
-                Smart Market Analysis
-              </p>
+              <p className="text-[11px] text-slate-500">تحليل ذكي للسوق</p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/[0.07] px-3 py-1.5">
+          <div
+            className={`flex items-center gap-2 rounded-full border px-3 py-1.5 ${
+              marketSession.isOpen
+                ? "border-emerald-400/20 bg-emerald-400/[0.07]"
+                : "border-amber-400/20 bg-amber-400/[0.07]"
+            }`}
+          >
             <span className="relative flex h-2.5 w-2.5">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
+              {marketSession.isOpen ? (
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
+              ) : null}
 
-              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400" />
+              <span
+                className={`relative inline-flex h-2.5 w-2.5 rounded-full ${
+                  marketSession.isOpen ? "bg-emerald-400" : "bg-amber-400"
+                }`}
+              />
             </span>
 
-            <span className="text-xs font-bold tracking-[0.14em] text-emerald-300">
-              LIVE
+            <span
+              className={`text-xs font-bold ${
+                marketSession.isOpen ? "text-emerald-300" : "text-amber-300"
+              }`}
+            >
+              {marketSession.label}
             </span>
           </div>
         </nav>
@@ -313,7 +389,7 @@ export default function Home() {
               </span>
 
               <span className="whitespace-nowrap text-xs font-black tracking-[0.14em] text-emerald-300">
-                MARKET LIVE
+                السوق مباشر
               </span>
             </div>
 
@@ -321,11 +397,9 @@ export default function Home() {
               {tickerItems.length > 0 ? (
                 <div className="market-ticker-track flex w-max items-center py-4">
                   {tickerItems.map((item, index) => {
-                    const isPositive =
-                      item.changePct > 0;
+                    const isPositive = item.changePct > 0;
 
-                    const isNegative =
-                      item.changePct < 0;
+                    const isNegative = item.changePct < 0;
 
                     return (
                       <button
@@ -333,9 +407,7 @@ export default function Home() {
                         key={`${item.symbol}-${index}`}
                         onClick={() =>
                           router.push(
-                            `/stocks/${encodeURIComponent(
-                              item.symbol
-                            )}`
+                            `/stocks/${encodeURIComponent(item.symbol)}`,
                           )
                         }
                         className="flex shrink-0 items-center gap-2 px-5 text-sm transition hover:opacity-80 sm:px-7"
@@ -353,11 +425,7 @@ export default function Home() {
                                 : "text-slate-400"
                           }`}
                         >
-                          {isPositive
-                            ? "▲"
-                            : isNegative
-                              ? "▼"
-                              : "●"}
+                          {isPositive ? "▲" : isNegative ? "▼" : "●"}
                         </span>
 
                         <span className="font-semibold tabular-nums text-slate-300">
@@ -377,9 +445,7 @@ export default function Home() {
                           {item.changePct.toFixed(2)}%
                         </span>
 
-                        <span className="ml-3 text-slate-800">
-                          |
-                        </span>
+                        <span className="ml-3 text-slate-800">|</span>
                       </button>
                     );
                   })}
@@ -398,24 +464,33 @@ export default function Home() {
         <header className="mx-auto mb-12 max-w-5xl text-center">
           <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-cyan-400/15 bg-cyan-400/[0.06] px-4 py-2 text-xs font-medium text-cyan-300 backdrop-blur">
             <span className="h-1.5 w-1.5 rounded-full bg-cyan-300" />
-
             تحليل لحظي مدعوم بمحركات متعددة
           </div>
 
           <h1 className="text-balance text-4xl font-black leading-[1.2] tracking-tight sm:text-5xl lg:text-7xl">
             اكتشف أقوى فرص السوق
-
             <span className="mt-2 block bg-gradient-to-l from-cyan-300 via-sky-400 to-blue-500 bg-clip-text text-transparent">
               قبل تحركها
             </span>
           </h1>
 
           <p className="mx-auto mt-6 max-w-3xl text-base leading-8 text-slate-400 sm:text-lg">
-            منصة تحليل متقدمة تجمع حركة السعر، تدفق
-            العقود، القاما، الزخم وجودة العقد في قراءة
-            واحدة تساعدك على اكتشاف الفرص الأقوى
-            بوضوح وسرعة.
+            منصة تحليل متقدمة تجمع حركة السعر، تدفق العقود، القاما، الزخم وجودة
+            العقد في قراءة واحدة تساعدك على اكتشاف الفرص الأقوى بوضوح وسرعة.
           </p>
+
+          <a
+            href={TELEGRAM_CHANNEL_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="group mx-auto mt-6 inline-flex items-center gap-3 rounded-2xl border border-sky-400/20 bg-sky-400/[0.08] px-5 py-3 text-sm font-black text-sky-300 shadow-lg shadow-sky-950/20 transition duration-300 hover:-translate-y-0.5 hover:border-sky-400/40 hover:bg-sky-400/[0.14]"
+          >
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-sky-400/10 text-lg">
+              ✈
+            </span>
+
+            <span>انضم إلى قناة تيليجرام</span>
+          </a>
         </header>
 
         <section className="mb-8 grid gap-4 lg:grid-cols-[1.25fr_0.75fr]">
@@ -423,17 +498,13 @@ export default function Home() {
             onSubmit={handleSearch}
             className="rounded-3xl border border-white/[0.08] bg-slate-950/65 p-5 shadow-2xl shadow-black/20 backdrop-blur-xl sm:p-6"
           >
-            <p className="mb-3 text-sm text-slate-400">
-              ابحث عن أي سهم
-            </p>
+            <p className="mb-3 text-sm text-slate-400">ابحث عن أي سهم</p>
 
             <div className="flex gap-3">
               <input
                 type="text"
                 value={symbol}
-                onChange={(event) =>
-                  setSymbol(event.target.value)
-                }
+                onChange={(event) => setSymbol(event.target.value)}
                 placeholder="مثال: NVDA"
                 autoCapitalize="characters"
                 autoComplete="off"
@@ -454,14 +525,12 @@ export default function Home() {
 
           <button
             type="button"
-            onClick={() =>
-              router.push("/options-analyzer")
-            }
+            onClick={() => router.push("/options-analyzer")}
             className="group flex items-center justify-between gap-4 rounded-3xl border border-cyan-400/20 bg-slate-950/65 p-5 text-right shadow-2xl shadow-cyan-950/20 backdrop-blur-xl transition duration-300 hover:-translate-y-1 hover:border-cyan-400/40 sm:p-6"
           >
             <div>
               <p className="text-xs font-bold uppercase tracking-[0.15em] text-cyan-400">
-                Options Analyzer
+                محلل العقود
               </p>
 
               <h2 className="mt-2 text-xl font-black text-white">
@@ -469,8 +538,7 @@ export default function Home() {
               </h2>
 
               <p className="mt-2 text-sm leading-6 text-slate-400">
-                اختر الشركة ونوع العقد وتاريخ
-                الانتهاء واعرض أفضل العقود.
+                اختر الشركة ونوع العقد وتاريخ الانتهاء واعرض أفضل العقود.
               </p>
             </div>
 
@@ -499,31 +567,36 @@ export default function Home() {
                 </h2>
 
                 <p className="mt-3 max-w-lg text-sm leading-7 text-slate-500">
-                  يتم احتساب حالة السوق من متوسط قوة
-                  الفرص الحالية وتوافق محركات التحليل.
+                  يتم احتساب حالة السوق من متوسط قوة الفرص الحالية وتوافق محركات
+                  التحليل.
+                </p>
+
+                <p
+                  className={`mt-3 text-xs font-bold ${
+                    marketSession.isOpen ? "text-emerald-400" : "text-amber-400"
+                  }`}
+                >
+                  {marketSession.label} — {marketSession.note}
                 </p>
               </div>
 
               <div className="flex items-center gap-4">
                 <div>
                   <p className="text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
-                    Market Score
+                    تقييم السوق
                   </p>
 
                   <p className="mt-1 text-left text-5xl font-black tracking-tight text-white">
-                    {loading ? "..." : marketScore}
+                    {loading ? "..." : marketالتقييم}
                   </p>
                 </div>
 
                 <div className="relative flex h-20 w-20 items-center justify-center rounded-full border border-cyan-400/20 bg-cyan-400/[0.05]">
                   <div className="absolute inset-2 animate-[spin_14s_linear_infinite] rounded-full border border-dashed border-cyan-400/20" />
 
-<span
-  dir="ltr"
-  className="text-xs font-bold text-cyan-300"
->
-  {loading ? "..." : `${marketScore} / 100`}
-</span>
+                  <span dir="ltr" className="text-xs font-bold text-cyan-300">
+                    {loading ? "..." : `${marketالتقييم} / 100`}
+                  </span>
                 </div>
               </div>
             </div>
@@ -554,10 +627,8 @@ export default function Home() {
 
                     <div
                       className={`mt-4 inline-flex rounded-lg border px-3 py-1.5 text-xs font-bold ${sideBackground(
-                        bestOpportunity.side
-                      )} ${sideColor(
-                        bestOpportunity.side
-                      )}`}
+                        bestOpportunity.side,
+                      )} ${sideColor(bestOpportunity.side)}`}
                     >
                       {bestOpportunity.side}
                     </div>
@@ -566,15 +637,13 @@ export default function Home() {
                   <div className="text-left">
                     <p
                       className={`text-5xl font-black ${scoreColor(
-                        bestOpportunity.score
+                        bestOpportunity.score,
                       )}`}
                     >
                       {bestOpportunity.score}
                     </p>
 
-                    <p className="mt-1 text-xs text-slate-600">
-                      Opportunity Score
-                    </p>
+                    <p className="mt-1 text-xs text-slate-600">تقييم الفرصة</p>
                   </div>
                 </div>
               ) : (
@@ -589,7 +658,7 @@ export default function Home() {
         <div className="mb-5 flex items-end justify-between gap-4">
           <div>
             <p className="text-xs font-bold uppercase tracking-[0.16em] text-cyan-400">
-              Market Opportunities
+              فرص السوق
             </p>
 
             <h2 className="mt-2 text-2xl font-black sm:text-3xl">
@@ -603,7 +672,6 @@ export default function Home() {
 
               <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
             </span>
-
             تحديث مباشر
           </div>
         </div>
@@ -633,19 +701,13 @@ export default function Home() {
 
         {error ? (
           <div className="rounded-3xl border border-rose-500/20 bg-rose-500/[0.06] p-6 text-rose-300 backdrop-blur-xl">
-            <p className="font-bold">
-              تعذر تحميل البيانات
-            </p>
+            <p className="font-bold">تعذر تحميل البيانات</p>
 
-            <p className="mt-2 text-sm text-rose-300/70">
-              {error}
-            </p>
+            <p className="mt-2 text-sm text-rose-300/70">{error}</p>
           </div>
         ) : null}
 
-        {!loading &&
-        !error &&
-        opportunities.length === 0 ? (
+        {!loading && !error && opportunities.length === 0 ? (
           <div className="rounded-3xl border border-white/[0.07] bg-slate-950/60 p-10 text-center text-slate-400 backdrop-blur-xl">
             لا توجد فرص متاحة حاليًا.
           </div>
@@ -653,129 +715,155 @@ export default function Home() {
 
         {!loading && !error ? (
           <div className="grid gap-4 sm:grid-cols-2">
-            {opportunities.map((item) => (
-              <article
-                key={item.symbol}
-                role="button"
-                tabIndex={0}
-                aria-label={`فتح تحليل ${item.symbol}`}
-                onClick={() =>
-                  router.push(
-                    `/stocks/${encodeURIComponent(
-                      item.symbol
-                    )}`
-                  )
-                }
-                onKeyDown={(event) => {
-                  if (
-                    event.key === "Enter" ||
-                    event.key === " "
-                  ) {
-                    event.preventDefault();
+            {opportunities.map((item) => {
+              const plan = getTradePlan(item);
 
-                    router.push(
-                      `/stocks/${encodeURIComponent(
-                        item.symbol
-                      )}`
-                    );
+              return (
+                <article
+                  key={item.symbol}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`فتح تحليل ${item.symbol}`}
+                  onClick={() =>
+                    router.push(`/stocks/${encodeURIComponent(item.symbol)}`)
                   }
-                }}
-                className="group relative cursor-pointer overflow-hidden rounded-3xl border border-white/[0.07] bg-slate-950/65 p-6 shadow-xl shadow-black/10 backdrop-blur-xl transition duration-500 hover:-translate-y-1 hover:border-cyan-400/25 hover:shadow-2xl hover:shadow-cyan-950/20 focus:border-cyan-400/40 focus:outline-none"
-              >
-                <div className="relative">
-                  <div className="flex items-start justify-between gap-5">
-                    <div>
-                      <div className="flex items-center gap-3">
-                        <h3 className="text-3xl font-black tracking-tight">
-                          {item.symbol}
-                        </h3>
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
 
+                      router.push(`/stocks/${encodeURIComponent(item.symbol)}`);
+                    }
+                  }}
+                  className="group relative cursor-pointer overflow-hidden rounded-3xl border border-white/[0.07] bg-slate-950/65 p-6 shadow-xl shadow-black/10 backdrop-blur-xl transition duration-500 hover:-translate-y-1 hover:border-cyan-400/25 hover:shadow-2xl hover:shadow-cyan-950/20 focus:border-cyan-400/40 focus:outline-none"
+                >
+                  <div className="relative">
+                    <div className="flex items-start justify-between gap-5">
+                      <div>
+                        <div className="flex items-center gap-3">
+                          <h3 className="text-3xl font-black tracking-tight">
+                            {item.symbol}
+                          </h3>
+
+                          <span
+                            className={`rounded-lg border px-2.5 py-1 text-[11px] font-black ${sideBackground(
+                              item.side,
+                            )} ${sideColor(item.side)}`}
+                          >
+                            {item.side}
+                          </span>
+                        </div>
+
+                        <p className="mt-3 text-sm font-medium text-slate-300">
+                          {item.status}
+                        </p>
+
+                        <p className="mt-2 text-xs text-slate-500">
+                          مستوى الثقة:{" "}
+                          <span className="text-slate-300">
+                            {item.confidence}
+                          </span>
+                        </p>
+                      </div>
+
+                      <div
+                        className={`flex h-20 w-20 shrink-0 flex-col items-center justify-center rounded-full border bg-slate-950/80 shadow-xl ${scoreRing(
+                          item.score,
+                        )}`}
+                      >
                         <span
-                          className={`rounded-lg border px-2.5 py-1 text-[11px] font-black ${sideBackground(
-                            item.side
-                          )} ${sideColor(item.side)}`}
+                          className={`text-2xl font-black ${scoreColor(
+                            item.score,
+                          )}`}
                         >
-                          {item.side}
+                          {item.score}
+                        </span>
+
+                        <span className="mt-0.5 text-[9px] uppercase tracking-wider text-slate-600">
+                          التقييم
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="my-5 h-px bg-gradient-to-r from-transparent via-white/[0.07] to-transparent" />
+
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="rounded-2xl border border-white/[0.05] bg-white/[0.025] p-3 text-center">
+                        <p className="text-[11px] text-slate-500">الدخول</p>
+                        <p className="mt-1 font-black text-white">
+                          ${plan.entry.toFixed(2)}
+                        </p>
+                      </div>
+
+                      <div className="rounded-2xl border border-emerald-400/10 bg-emerald-400/[0.04] p-3 text-center">
+                        <p className="text-[11px] text-slate-500">الهدف</p>
+                        <p className="mt-1 font-black text-emerald-400">
+                          ${plan.target.toFixed(2)}
+                        </p>
+                      </div>
+
+                      <div className="rounded-2xl border border-amber-400/10 bg-amber-400/[0.04] p-3 text-center">
+                        <p className="text-[11px] text-slate-500">الوقف</p>
+                        <p className="mt-1 font-black text-amber-400">
+                          ${plan.stop.toFixed(2)}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 rounded-xl border border-emerald-400/10 bg-emerald-400/[0.05] px-4 py-3">
+                      <div className="flex items-center justify-between gap-3 text-sm">
+                        <span className="font-bold text-emerald-300">
+                          نسبة الوصول التقديرية: {plan.reachProbability}%
+                        </span>
+                        <span className="text-xs text-slate-400">
+                          المخاطرة: {plan.risk}
                         </span>
                       </div>
 
-                      <p className="mt-3 text-sm font-medium text-slate-300">
-                        {item.status}
-                      </p>
-
-                      <p className="mt-2 text-xs text-slate-500">
-                        مستوى الثقة:{" "}
-                        <span className="text-slate-300">
-                          {item.confidence}
-                        </span>
-                      </p>
+                      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-800">
+                        <div
+                          className="h-full rounded-full bg-emerald-400"
+                          style={{ width: `${plan.reachProbability}%` }}
+                        />
+                      </div>
                     </div>
 
-                    <div
-                      className={`flex h-20 w-20 shrink-0 flex-col items-center justify-center rounded-full border bg-slate-950/80 shadow-xl ${scoreRing(
-                        item.score
-                      )}`}
-                    >
-                      <span
-                        className={`text-2xl font-black ${scoreColor(
-                          item.score
-                        )}`}
+                    <div className="mt-4 grid grid-cols-[1fr_auto] gap-2">
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          router.push(
+                            `/stocks/${encodeURIComponent(item.symbol)}`,
+                          );
+                        }}
+                        className="rounded-2xl bg-cyan-400 px-4 py-3 text-sm font-black text-slate-950 transition hover:bg-cyan-300"
                       >
-                        {item.score}
-                      </span>
+                        تفاصيل أكثر ←
+                      </button>
 
-                      <span className="mt-0.5 text-[9px] uppercase tracking-wider text-slate-600">
-                        Score
-                      </span>
+                      <button
+                        type="button"
+                        aria-label={`مشاركة تحليل ${item.symbol}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void shareOpportunity(item);
+                        }}
+                        className="flex h-12 w-12 items-center justify-center rounded-2xl border border-white/[0.08] bg-white/[0.035] text-xl text-cyan-300 transition hover:border-cyan-400/25 hover:bg-cyan-400/[0.08]"
+                      >
+                        ↗
+                      </button>
                     </div>
                   </div>
-
-                  <div className="my-5 h-px bg-gradient-to-r from-transparent via-white/[0.07] to-transparent" />
-
-                  <div className="flex items-end justify-between gap-4">
-                    <div>
-                      <p className="text-xs text-slate-600">
-                        السعر الحالي
-                      </p>
-
-                      <p className="mt-1 text-xl font-bold text-white">
-                        ${item.price.toFixed(2)}
-                      </p>
-                    </div>
-
-                    <div className="text-left">
-                      <p className="text-xs text-slate-600">
-                        التغير
-                      </p>
-
-                      <p
-                        className={`mt-1 text-base font-bold ${
-                          item.changePct >= 0
-                            ? "text-emerald-400"
-                            : "text-rose-400"
-                        }`}
-                      >
-                        {item.changePct >= 0
-                          ? "+"
-                          : ""}
-                        {item.changePct.toFixed(2)}%
-                      </p>
-                    </div>
-
-                    <div className="flex h-10 w-10 items-center justify-center rounded-full border border-white/[0.07] bg-white/[0.03] text-slate-500 transition duration-300 group-hover:-translate-x-1 group-hover:border-cyan-400/20 group-hover:bg-cyan-400/[0.08] group-hover:text-cyan-300">
-                      ←
-                    </div>
-                  </div>
-                </div>
-              </article>
-            ))}
+                </article>
+              );
+            })}
           </div>
         ) : null}
 
         <footer className="mt-16 border-t border-white/[0.06] pt-6 text-center">
           <p className="text-xs leading-6 text-slate-600">
-            التحليلات مبنية على بيانات السوق ولا تمثل
-            توصية مباشرة بالشراء أو البيع.
+            التحليلات مبنية على بيانات السوق ولا تمثل توصية مباشرة بالشراء أو
+            البيع.
           </p>
         </footer>
       </section>
@@ -792,8 +880,7 @@ export default function Home() {
         }
 
         .market-ticker-track {
-          animation: marketTickerScroll 34s linear
-            infinite;
+          animation: marketTickerScroll 34s linear infinite;
           will-change: transform;
         }
 

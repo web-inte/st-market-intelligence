@@ -92,6 +92,153 @@ function scoreColor(score: number) {
   return "text-rose-400";
 }
 
+
+function clamp(
+  value: number,
+  minimum: number,
+  maximum: number
+) {
+  return Math.min(
+    Math.max(value, minimum),
+    maximum
+  );
+}
+
+function createPricePlan(
+  price: number,
+  score: number,
+  side: Side
+) {
+  const safePrice = Number(price || 0);
+  const safeScore = clamp(
+    Number(score || 0),
+    0,
+    100
+  );
+
+  if (
+    safePrice <= 0 ||
+    side === "NEUTRAL"
+  ) {
+    return {
+      entry: safePrice,
+      stop: safePrice,
+      levels: [] as Array<{
+        index: number;
+        price: number;
+        movePct: number;
+        probability: number;
+      }>,
+      risk: "مرتفعة",
+    };
+  }
+
+  const direction =
+    side === "PUT" ? -1 : 1;
+
+  const baseMove =
+    0.8 + (safeScore / 100) * 0.9;
+
+  const stopMove =
+    0.7 +
+    ((100 - safeScore) / 100) * 0.5;
+
+  const levelPercentages = [
+    baseMove,
+    baseMove * 1.75,
+    baseMove * 2.6,
+  ];
+
+  const levels = levelPercentages.map(
+    (movePct, index) => ({
+      index: index + 1,
+      price:
+        safePrice *
+        (1 +
+          direction *
+            (movePct / 100)),
+      movePct,
+      probability: clamp(
+        Math.round(
+          safeScore - index * 9
+        ),
+        10,
+        99
+      ),
+    })
+  );
+
+  const stop =
+    safePrice *
+    (1 -
+      direction *
+        (stopMove / 100));
+
+  const risk =
+    safeScore >= 85
+      ? "منخفضة"
+      : safeScore >= 70
+        ? "متوسطة"
+        : "مرتفعة";
+
+  return {
+    entry: safePrice,
+    stop,
+    levels,
+    risk,
+  };
+}
+
+function levelStatus(
+  currentPrice: number,
+  targetPrice: number,
+  side: Side
+) {
+  if (
+    side === "CALL" &&
+    currentPrice >= targetPrice
+  ) {
+    return {
+      label: "تحقق",
+      classes:
+        "border-emerald-400/20 bg-emerald-400/[0.07] text-emerald-300",
+    };
+  }
+
+  if (
+    side === "PUT" &&
+    currentPrice <= targetPrice
+  ) {
+    return {
+      label: "تحقق",
+      classes:
+        "border-emerald-400/20 bg-emerald-400/[0.07] text-emerald-300",
+    };
+  }
+
+  const distance =
+    currentPrice > 0
+      ? Math.abs(
+          (targetPrice - currentPrice) /
+            currentPrice
+        ) * 100
+      : 100;
+
+  if (distance <= 0.5) {
+    return {
+      label: "قريب من التحقق",
+      classes:
+        "border-amber-400/20 bg-amber-400/[0.07] text-amber-300",
+    };
+  }
+
+  return {
+    label: "لم يتحقق",
+    classes:
+      "border-white/[0.07] bg-white/[0.03] text-slate-400",
+  };
+}
+
 async function getAnalysis(symbol: string) {
   const response = await fetch(
     `${getBaseUrl()}/api/analysis/${encodeURIComponent(
@@ -196,6 +343,77 @@ export default async function StockAnalysisPage({
   const sideStyle =
     sideClasses(decision.side);
 
+  const pricePlan = createPricePlan(
+    quote.price,
+    decision.score,
+    decision.side
+  );
+
+  const positiveReasons = [
+    consensus.label,
+    gammaStatus,
+    sideArabic(decision.side),
+    selectedContract
+      ? contractQuality
+      : null,
+    ...consensus.reasons,
+  ].filter(
+    (
+      reason
+    ): reason is string =>
+      Boolean(reason)
+  );
+
+  const riskReasons = [
+    ...gammaRisk.reasons,
+    selectedContract
+      ? selectedContract.spreadPct !==
+          null &&
+        selectedContract.spreadPct > 15
+        ? "السبريد مرتفع نسبيًا."
+        : null
+      : "لا يوجد عقد مطابق للشروط حاليًا.",
+    decision.side === "NEUTRAL"
+      ? "اتجاه المحركات غير محسوم."
+      : null,
+  ].filter(
+    (
+      reason
+    ): reason is string =>
+      Boolean(reason)
+  );
+
+  const stockPageUrl = `${getBaseUrl()}/stocks/${encodeURIComponent(
+    analysis.symbol
+  )}`;
+
+  const shareText = `${analysis.symbol}
+الاتجاه: ${decision.side}
+قوة الإشارة: ${decision.score}%
+السعر الحالي: $${priceFormat(
+    quote.price
+  )}
+الدخول التقديري: $${priceFormat(
+    pricePlan.entry
+  )}
+الهدف الأول: ${
+    pricePlan.levels[0]
+      ? `$${priceFormat(
+          pricePlan.levels[0].price
+        )}`
+      : "غير متاح"
+  }
+الوقف التقديري: $${priceFormat(
+    pricePlan.stop
+  )}`;
+
+  const telegramShareUrl =
+    `https://t.me/share/url?url=${encodeURIComponent(
+      stockPageUrl
+    )}&text=${encodeURIComponent(
+      shareText
+    )}`;
+
   const engines = [
     {
       name: "تدفق العقود",
@@ -275,37 +493,52 @@ export default async function StockAnalysisPage({
       dir="rtl"
       className="min-h-screen bg-[#07111f] text-white"
     >
-      <section className="mx-auto max-w-6xl px-5 py-8">
-        <a
-  href="/"
-  className="group mb-8 inline-flex items-center gap-3 rounded-2xl border border-white/[0.08] bg-slate-900/70 px-4 py-3 text-sm font-semibold text-slate-200 shadow-lg shadow-black/20 backdrop-blur-xl transition duration-300 hover:-translate-y-0.5 hover:border-cyan-400/30 hover:bg-cyan-400/[0.06] hover:text-cyan-300 hover:shadow-cyan-950/30"
->
-  <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/[0.07] bg-slate-950/70 text-cyan-400 transition duration-300 group-hover:border-cyan-400/20 group-hover:bg-cyan-400/10">
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1"
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M5 12h14m-6-6 6 6-6 6"
+      <meta
+        httpEquiv="refresh"
+        content="120"
       />
-    </svg>
-  </span>
+      <section className="mx-auto max-w-6xl px-5 py-8">
+        <div className="mb-8 flex flex-wrap items-center justify-between gap-3">
+          <a
+            href="/"
+            className="group inline-flex items-center gap-3 rounded-2xl border border-white/[0.08] bg-slate-900/70 px-4 py-3 text-sm font-semibold text-slate-200 shadow-lg shadow-black/20 backdrop-blur-xl transition duration-300 hover:-translate-y-0.5 hover:border-cyan-400/30 hover:bg-cyan-400/[0.06] hover:text-cyan-300 hover:shadow-cyan-950/30"
+          >
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/[0.07] bg-slate-950/70 text-cyan-400">
+              ←
+            </span>
 
-  <span className="text-right">
-    <span className="block">
-      العودة لأفضل الفرص
-    </span>
+            <span className="text-right">
+              <span className="block">
+                العودة لأفضل الفرص
+              </span>
 
-    <span className="mt-0.5 block text-[11px] font-normal text-slate-500 transition group-hover:text-cyan-400/70">
-      الصفحة الرئيسية
-    </span>
-  </span>
-</a>
+              <span className="mt-0.5 block text-[11px] font-normal text-slate-500">
+                الصفحة الرئيسية
+              </span>
+            </span>
+          </a>
+
+          <div className="flex items-center gap-2">
+            <a
+              href={`/stocks/${encodeURIComponent(
+                analysis.symbol
+              )}`}
+              className="rounded-2xl border border-white/[0.08] bg-slate-900/70 px-4 py-3 text-sm font-bold text-slate-300 transition hover:border-cyan-400/30 hover:text-cyan-300"
+            >
+              تحديث التحليل
+            </a>
+
+            <a
+              href={telegramShareUrl}
+              target="_blank"
+              rel="noreferrer"
+              aria-label={`مشاركة تحليل ${analysis.symbol}`}
+              className="flex h-12 w-12 items-center justify-center rounded-2xl border border-white/[0.08] bg-slate-900/70 text-xl text-cyan-300 transition hover:border-cyan-400/30 hover:bg-cyan-400/[0.07]"
+            >
+              ↗
+            </a>
+          </div>
+        </div>
 
         <header className="mb-7 flex items-start justify-between gap-4">
           <div>
@@ -349,7 +582,7 @@ export default async function StockAnalysisPage({
 
           <div className="text-left">
             <p className="text-sm text-slate-400">
-              درجة الفرصة
+              قوة الإشارة
             </p>
 
             <p
@@ -363,6 +596,24 @@ export default async function StockAnalysisPage({
             <p className="mt-1 text-sm text-slate-400">
               درجة محسوبة من 100
             </p>
+          </div>
+          <div className="mt-6 h-2 overflow-hidden rounded-full bg-slate-800">
+            <div
+              className={`h-full rounded-full ${
+                decision.side === "CALL"
+                  ? "bg-emerald-400"
+                  : decision.side === "PUT"
+                    ? "bg-rose-400"
+                    : "bg-slate-500"
+              }`}
+              style={{
+                width: `${clamp(
+                  decision.score,
+                  0,
+                  100
+                )}%`,
+              }}
+            />
           </div>
         </header>
 
@@ -390,6 +641,187 @@ export default async function StockAnalysisPage({
           <p className="mt-3 leading-8 text-slate-300">
             {summary}
           </p>
+        </section>
+
+        <section className="mb-5 rounded-3xl border border-slate-800 bg-slate-900/80 p-6">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <p className="text-xs font-bold text-cyan-400">
+                خطة الحركة التقديرية
+              </p>
+
+              <h2 className="mt-2 text-2xl font-black">
+                الدخول والوقف والمستويات
+              </h2>
+            </div>
+
+            <span className="rounded-full border border-white/[0.07] bg-white/[0.03] px-3 py-1.5 text-xs text-slate-400">
+              المخاطرة: {pricePlan.risk}
+            </span>
+          </div>
+
+          {decision.side === "NEUTRAL" ? (
+            <div className="mt-6 rounded-2xl border border-amber-400/20 bg-amber-400/[0.06] p-5 text-amber-200">
+              لا توجد مستويات اتجاهية واضحة لأن التحليل الحالي محايد.
+            </div>
+          ) : (
+            <>
+              <div className="mt-6 grid gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl border border-cyan-400/15 bg-cyan-400/[0.05] p-4">
+                  <p className="text-xs text-slate-500">
+                    الدخول التقديري
+                  </p>
+
+                  <p className="mt-2 text-3xl font-black text-cyan-300">
+                    ${priceFormat(pricePlan.entry)}
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-rose-400/15 bg-rose-400/[0.05] p-4">
+                  <p className="text-xs text-slate-500">
+                    الوقف التقديري
+                  </p>
+
+                  <p className="mt-2 text-3xl font-black text-rose-300">
+                    ${priceFormat(pricePlan.stop)}
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-4 grid gap-4 md:grid-cols-3">
+                {pricePlan.levels.map(
+                  (level) => {
+                    const status =
+                      levelStatus(
+                        quote.price,
+                        level.price,
+                        decision.side
+                      );
+
+                    return (
+                      <article
+                        key={level.index}
+                        className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-5"
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="font-black text-white">
+                            المستوى {level.index}
+                          </p>
+
+                          <span
+                            className={`rounded-full border px-3 py-1 text-[11px] font-bold ${status.classes}`}
+                          >
+                            {status.label}
+                          </span>
+                        </div>
+
+                        <p className="mt-4 text-3xl font-black text-emerald-300">
+                          ${priceFormat(level.price)}
+                        </p>
+
+                        <div className="mt-4 flex items-center justify-between text-xs">
+                          <span className="text-slate-500">
+                            الحركة التقديرية
+                          </span>
+
+                          <span className="font-bold text-slate-300">
+                            {level.movePct.toFixed(2)}%
+                          </span>
+                        </div>
+
+                        <div className="mt-3 flex items-center justify-between text-xs">
+                          <span className="text-slate-500">
+                            نسبة الوصول
+                          </span>
+
+                          <span className="font-bold text-cyan-300">
+                            {level.probability}%
+                          </span>
+                        </div>
+
+                        <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-800">
+                          <div
+                            className="h-full rounded-full bg-cyan-400"
+                            style={{
+                              width: `${level.probability}%`,
+                            }}
+                          />
+                        </div>
+                      </article>
+                    );
+                  }
+                )}
+              </div>
+            </>
+          )}
+
+          <p className="mt-5 text-xs leading-6 text-slate-600">
+            المستويات المعروضة تقديرية ومبنية على السعر الحالي ودرجة الإشارة واتجاه التحليل.
+          </p>
+        </section>
+
+        <section className="mb-5 grid gap-4 md:grid-cols-2">
+          <article className="rounded-3xl border border-emerald-400/15 bg-emerald-400/[0.045] p-6">
+            <h2 className="text-xl font-black text-emerald-300">
+              أسباب قوة الفرصة
+            </h2>
+
+            <div className="mt-5 space-y-3">
+              {positiveReasons.length > 0 ? (
+                positiveReasons
+                  .slice(0, 6)
+                  .map((reason, index) => (
+                    <div
+                      key={`${reason}-${index}`}
+                      className="flex gap-3 rounded-2xl border border-white/[0.05] bg-slate-950/35 p-3"
+                    >
+                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-400/10 text-xs font-black text-emerald-300">
+                        {index + 1}
+                      </span>
+
+                      <p className="text-sm leading-6 text-slate-300">
+                        {reason}
+                      </p>
+                    </div>
+                  ))
+              ) : (
+                <p className="text-sm text-slate-500">
+                  لا توجد أسباب إيجابية كافية حاليًا.
+                </p>
+              )}
+            </div>
+          </article>
+
+          <article className="rounded-3xl border border-amber-400/15 bg-amber-400/[0.045] p-6">
+            <h2 className="text-xl font-black text-amber-300">
+              عوامل الخطر
+            </h2>
+
+            <div className="mt-5 space-y-3">
+              {riskReasons.length > 0 ? (
+                riskReasons
+                  .slice(0, 6)
+                  .map((reason, index) => (
+                    <div
+                      key={`${reason}-${index}`}
+                      className="flex gap-3 rounded-2xl border border-white/[0.05] bg-slate-950/35 p-3"
+                    >
+                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-amber-400/10 text-xs font-black text-amber-300">
+                        {index + 1}
+                      </span>
+
+                      <p className="text-sm leading-6 text-slate-300">
+                        {reason}
+                      </p>
+                    </div>
+                  ))
+              ) : (
+                <p className="text-sm text-slate-500">
+                  لا توجد عوامل خطر بارزة ضمن البيانات الحالية.
+                </p>
+              )}
+            </div>
+          </article>
         </section>
 
         <section className="mb-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -562,7 +994,7 @@ export default async function StockAnalysisPage({
             </h2>
 
             <span className="text-left text-sm text-slate-500">
-              بيانات مباشرة
+              تحديث تلقائي كل دقيقتين
             </span>
           </div>
 
