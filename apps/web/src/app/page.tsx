@@ -33,7 +33,7 @@ const MARKET_LEADERS = [
   "QCOM",
 ];
 
-const TICKER_REFRESH_MS = 25_000;
+const TICKER_REFRESH_MS = 120_000;
 
 type TickerItem = {
   symbol: string;
