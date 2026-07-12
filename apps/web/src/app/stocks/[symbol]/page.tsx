@@ -277,11 +277,35 @@ export default async function StockAnalysisPage({
     >
       <section className="mx-auto max-w-6xl px-5 py-8">
         <a
-          href="/"
-          className="mb-7 inline-flex text-sm text-cyan-400"
-        >
-          ← العودة لأفضل الفرص
-        </a>
+  href="/"
+  className="group mb-8 inline-flex items-center gap-3 rounded-2xl border border-white/[0.08] bg-slate-900/70 px-4 py-3 text-sm font-semibold text-slate-200 shadow-lg shadow-black/20 backdrop-blur-xl transition duration-300 hover:-translate-y-0.5 hover:border-cyan-400/30 hover:bg-cyan-400/[0.06] hover:text-cyan-300 hover:shadow-cyan-950/30"
+>
+  <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/[0.07] bg-slate-950/70 text-cyan-400 transition duration-300 group-hover:border-cyan-400/20 group-hover:bg-cyan-400/10">
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M5 12h14m-6-6 6 6-6 6"
+      />
+    </svg>
+  </span>
+
+  <span className="text-right">
+    <span className="block">
+      العودة لأفضل الفرص
+    </span>
+
+    <span className="mt-0.5 block text-[11px] font-normal text-slate-500 transition group-hover:text-cyan-400/70">
+      الصفحة الرئيسية
+    </span>
+  </span>
+</a>
 
         <header className="mb-7 flex items-start justify-between gap-4">
           <div>
