@@ -518,9 +518,12 @@ export default function Home() {
                 <div className="relative flex h-20 w-20 items-center justify-center rounded-full border border-cyan-400/20 bg-cyan-400/[0.05]">
                   <div className="absolute inset-2 animate-[spin_14s_linear_infinite] rounded-full border border-dashed border-cyan-400/20" />
 
-                  <span className="text-xs font-bold text-cyan-300">
-                    / 100
-                  </span>
+<span
+  dir="ltr"
+  className="text-xs font-bold text-cyan-300"
+>
+  {loading ? "..." : `${marketScore} / 100`}
+</span>
                 </div>
               </div>
             </div>
