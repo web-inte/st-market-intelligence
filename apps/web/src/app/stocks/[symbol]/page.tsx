@@ -451,6 +451,19 @@ export default async function StockAnalysisPage({
                 </p>
               </div>
 
+              <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-3">
+  <p className="text-xs text-slate-400">سعر العقد</p>
+
+  <p className="mt-1 text-2xl font-bold text-emerald-400">
+    ${priceFormat(contract.midpoint)}
+  </p>
+
+  <div className="mt-2 flex justify-between text-xs text-slate-400">
+    <span>Bid: ${priceFormat(contract.bid)}</span>
+    <span>Ask: ${priceFormat(contract.ask)}</span>
+  </div>
+</div>
+
               <div className="rounded-xl bg-slate-950/50 p-3">
                 <p className="text-xs text-slate-500">السبريد</p>
                 <p className="mt-1 font-semibold">
