@@ -11,7 +11,17 @@ import {
   type Side,
 } from "../lib/analysis-engine";
 
-const WATCHLIST = ["NVDA", "TSLA", "AMD", "META"];
+const WATCHLIST = [
+  "NVDA",
+  "TSLA",
+  "AMD",
+  "META",
+  "AAPL",
+  "MSFT",
+  "AMZN",
+  "AVGO",
+  "QQQ",
+];
 const TELEGRAM_CHANNEL_URL = "https://t.me/STtradevip";
 
 function clamp(value: number, minimum: number, maximum: number) {
@@ -180,13 +190,19 @@ export default function Home() {
           return;
         }
 
-        const validResults = results
-          .filter(
-            (result): result is PromiseFulfilledResult<Opportunity> =>
-              result.status === "fulfilled",
-          )
-          .map((result) => result.value)
-          .sort((a, b) => b.score - a.score);
+const validResults = results
+  .filter(
+    (result): result is PromiseFulfilledResult<Opportunity> =>
+      result.status === "fulfilled",
+  )
+  .map((result) => result.value)
+  .filter(
+    (item) =>
+      item.side !== "NEUTRAL" &&
+      item.score >= 70
+  )
+  .sort((a, b) => b.score - a.score)
+  .slice(0, 8);
 
         setOpportunities(validResults);
 
