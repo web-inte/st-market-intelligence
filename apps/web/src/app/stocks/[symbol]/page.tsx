@@ -464,6 +464,16 @@ export default async function StockAnalysisPage({
   </div>
 </div>
 
+             <div className="rounded-xl bg-slate-950/50 p-3">
+  <p className="text-xs text-slate-500">
+    تاريخ الانتهاء
+  </p>
+
+  <p className="mt-1 font-semibold text-white">
+    {contract.expiration || "غير متاح"}
+  </p>
+</div> 
+
               <div className="rounded-xl bg-slate-950/50 p-3">
                 <p className="text-xs text-slate-500">السبريد</p>
                 <p className="mt-1 font-semibold">
