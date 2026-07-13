@@ -1,4 +1,5 @@
 import { getOrCreateStockTradeSetup } from "@/lib/stock-trade-setup";
+import { cookies } from "next/headers";
 import {
   analyzeMarketData,
   type AnalysisError,
@@ -190,6 +191,97 @@ function createPricePlan(
   };
 }
 
+
+function buildGammaTargets(
+  optionsValue: unknown,
+  entryPrice: number,
+  side: Side,
+  score: number
+) {
+  const options =
+    optionsValue as Record<string, any>;
+
+  const collections = [
+    options.callWall,
+    options.putWall,
+    options.magnet,
+    options.support,
+    options.resistance,
+    ...(Array.isArray(options.gammaLevels)
+      ? options.gammaLevels
+      : []),
+    ...(Array.isArray(options.walls)
+      ? options.walls
+      : []),
+    ...(Array.isArray(options.gammaByStrike)
+      ? options.gammaByStrike
+      : []),
+    ...(Array.isArray(options.strikes)
+      ? options.strikes
+      : []),
+    ...(Array.isArray(options.rows)
+      ? options.rows
+      : []),
+  ];
+
+  const strikes = collections
+    .map((item) => {
+      const strike = Number(
+        item?.strike ??
+        item?.price ??
+        item
+      );
+
+      return Number.isFinite(strike)
+        ? strike
+        : null;
+    })
+    .filter(
+      (strike): strike is number =>
+        strike !== null &&
+        strike > 0 &&
+        (
+          side === "CALL"
+            ? strike > entryPrice
+            : side === "PUT"
+              ? strike < entryPrice
+              : false
+        )
+    )
+    .filter(
+      (strike, index, values) =>
+        values.findIndex(
+          (value) =>
+            Math.abs(value - strike) < 0.01
+        ) === index
+    )
+    .sort((first, second) =>
+      side === "PUT"
+        ? second - first
+        : first - second
+    )
+    .slice(0, 3);
+
+  return strikes.map(
+    (price, index) => ({
+      index: index + 1,
+      price,
+      movePct:
+        Math.abs(
+          ((price - entryPrice) /
+            entryPrice) *
+            100
+        ),
+      probability: clamp(
+        Math.round(score - index * 9),
+        10,
+        99
+      ),
+      kind: "gamma" as const,
+    })
+  );
+}
+
 function levelStatus(
   currentPrice: number,
   targetPrice: number,
@@ -241,11 +333,23 @@ function levelStatus(
 }
 
 async function getAnalysis(symbol: string) {
+  const analysisCookieStore = await cookies();
+  const analysisCookieHeader = analysisCookieStore
+    .getAll()
+    .map(
+      ({ name, value }) =>
+        `${name}=${encodeURIComponent(value)}`
+    )
+    .join("; ");
+
   const response = await fetch(
     `${getBaseUrl()}/api/analysis/${encodeURIComponent(
       symbol
     )}`,
     {
+      headers: analysisCookieHeader
+        ? { cookie: analysisCookieHeader }
+        : undefined,
       cache: "no-store",
     }
   );
@@ -288,7 +392,7 @@ export default async function StockAnalysisPage({
     return (
       <main
         dir="rtl"
-        className="min-h-screen bg-[#07111f] px-5 py-10 text-white"
+        className="pt-24 sm:pt-28 min-h-screen bg-[#07111f] px-5 py-10 text-white"
       >
         <section className="mx-auto max-w-3xl">
           <a
@@ -344,60 +448,140 @@ export default async function StockAnalysisPage({
   const sideStyle =
     sideClasses(decision.side);
 
-  const setupContract =
-    recommendedContracts[0] ?? null;
+  const sessionOpen =
+    Number(quote.open);
+
+  const previousClose =
+    Number(quote.previousClose);
+
+  // دخول ثابت طوال الجلسة، وليس سعر لحظة فتح الصفحة
+  const stableEntry =
+    Number.isFinite(sessionOpen) &&
+    sessionOpen > 0
+      ? sessionOpen
+      : Number.isFinite(previousClose) &&
+          previousClose > 0
+        ? previousClose
+        : quote.price;
 
   const fallbackPricePlan = createPricePlan(
-    quote.price,
+    stableEntry,
     decision.score,
     decision.side
   );
 
+  const estimatedLevels =
+    fallbackPricePlan.levels.map(
+      (level) => ({
+        ...level,
+        kind: "estimated" as const,
+      })
+    );
+
+  const directGammaLevels =
+    buildGammaTargets(
+      options,
+      stableEntry,
+      decision.side,
+      decision.score
+    );
+
+  const initialLevels = [
+    ...directGammaLevels,
+    ...estimatedLevels.filter(
+      (estimated) =>
+        !directGammaLevels.some(
+          (gamma) =>
+            Math.abs(
+              gamma.price -
+              estimated.price
+            ) < 0.01
+        )
+    ),
+  ]
+    .slice(0, 3)
+    .map((level, index) => ({
+      ...level,
+      index: index + 1,
+    }));
+
   let pricePlan = {
     ...fallbackPricePlan,
-
-    // منع ظهور الأهداف المئوية القديمة
-    levels: [] as typeof fallbackPricePlan.levels,
+    entry: stableEntry,
+    levels: initialLevels,
   };
 
   if (
-    (decision.side === "CALL" ||
-      decision.side === "PUT") &&
-    setupContract?.ticker
+    decision.side === "CALL" ||
+    decision.side === "PUT"
   ) {
     try {
       const setup =
         await getOrCreateStockTradeSetup({
           symbol: analysis.symbol,
           side: decision.side,
+
+          // مفتاح ثابت حسب السهم والاتجاه،
+          // ولا يتغير عند تغير العقد المقترح
           contractTicker:
-            setupContract.ticker,
-          entryPrice: quote.price,
+            `${analysis.symbol}:${decision.side}`,
+
+          entryPrice: stableEntry,
           score: decision.score,
         });
 
-      pricePlan = {
-        entry: setup.entryPrice,
-
-        stop:
-          setup.stopPrice ??
-          fallbackPricePlan.stop,
-
-        levels: setup.targets.map(
+      const storedGammaLevels =
+        setup.targets.map(
           (target) => ({
             index: target.index,
             price: target.price,
             movePct: target.movePct,
             probability:
               target.probability,
+            kind: "gamma" as const,
           })
-        ),
+        );
 
+      const mergedLevels = [
+        ...storedGammaLevels,
+        ...directGammaLevels,
+        ...estimatedLevels,
+      ]
+        .filter(
+          (level, index, values) =>
+            values.findIndex(
+              (value) =>
+                Math.abs(
+                  value.price -
+                  level.price
+                ) < 0.01
+            ) === index
+        )
+        .slice(0, 3)
+        .map((level, index) => ({
+          ...level,
+          index: index + 1,
+        }));
+
+      pricePlan = {
+        entry:
+          Number.isFinite(
+            Number(setup.entryPrice)
+          ) &&
+          Number(setup.entryPrice) > 0
+            ? Number(setup.entryPrice)
+            : stableEntry,
+
+        stop:
+          setup.stopPrice ??
+          fallbackPricePlan.stop,
+
+        levels: mergedLevels,
         risk: fallbackPricePlan.risk,
       };
     } catch (setupError) {
       console.error(
-        "تعذر إنشاء خطة القاما:",
+        "تعذر تحميل خطة القاما المحفوظة:",
         setupError
       );
     }
@@ -580,21 +764,33 @@ export default async function StockAnalysisPage({
               className="rounded-2xl border border-white/[0.08] bg-slate-900/70 px-4 py-3 text-sm font-bold text-slate-300 transition hover:border-cyan-400/30 hover:text-cyan-300"
             >
               تحديث التحليل
-            <a
+            
+            
+            </a>
+
+<a
   href={`/gamma-liquidity?symbol=${encodeURIComponent(
     analysis.symbol
   )}`}
-  className="rounded-2xl border border-violet-500/30 bg-violet-500/10 px-4 py-3 text-sm font-bold text-violet-300 transition hover:border-violet-400 hover:bg-violet-500/20"
+  className="rounded-2xl border border-violet-500/30 bg-violet-500/10 px-4 py-3 text-sm font-bold text-violet-300 transition hover:border-violet-400 hover:bg-violet-500/20 fixed left-1/2 top-4 z-[80] -translate-x-1/2 max-w-[calc(100vw-10rem)]"
 
-          style={{ position: "absolute", left: 16, right: "auto", top: 16, transform: "none", zIndex: 30 }}
+          style={{
+          position: "fixed",
+          top: 16,
+          left: "50%",
+          right: "auto",
+          transform: "translateX(-50%)",
+          zIndex: 90,
+        }}
+        
+          data-floating-gamma="true"
         >
   ⚡ القاما والسيولة
   <span className="mr-2 rounded-full bg-yellow-400 px-2 py-0.5 text-[10px] font-black text-black">
     PLUS
   </span>
 </a>
-            
-            </a>
+
 
             <a
               href={telegramShareUrl}
@@ -773,7 +969,7 @@ export default async function StockAnalysisPage({
                       >
                         <div className="flex items-center justify-between gap-3">
                           <p className="font-black text-white">
-                            هدف Gamma {level.index}
+                            {level.kind === "gamma" ? "هدف Gamma" : "هدف سعري"} {level.index}
                           </p>
 
                           <span

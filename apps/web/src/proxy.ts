@@ -8,6 +8,8 @@ import {
 const PUBLIC_ROUTES = [
   "/login",
   "/register",
+  "/forgot-password",
+  "/update-password",
   "/auth/callback",
 ];
 

@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 
 import { createClient } from "@/lib/supabase/server";
 
+import SignOutButton from "@/components/sign-out-button";
 export default async function AccountPage() {
   const supabase = await createClient();
 
@@ -125,14 +126,7 @@ export default async function AccountPage() {
             الصفحة الرئيسية
           </Link>
 
-          <form action={signOut}>
-            <button
-              type="submit"
-              className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-5 py-3 font-bold text-rose-300"
-            >
-              تسجيل الخروج
-            </button>
-          </form>
+          <SignOutButton />
         </div>
       </section>
     </main>

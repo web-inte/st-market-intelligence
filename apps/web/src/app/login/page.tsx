@@ -100,7 +100,14 @@ export default function LoginPage() {
           >
             {loading ? "جارٍ الدخول..." : "تسجيل الدخول"}
           </button>
-        </form>
+        
+        <Link
+          href="/forgot-password"
+          className="block text-center text-sm font-bold text-cyan-300 transition hover:text-cyan-200"
+        >
+          نسيت كلمة المرور؟
+        </Link>
+</form>
 
         <p className="mt-6 text-center text-sm text-slate-400">
           ليس لديك حساب؟{" "}
