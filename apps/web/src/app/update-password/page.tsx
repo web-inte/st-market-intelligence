@@ -42,7 +42,70 @@ export default function UpdatePasswordPage() {
   useEffect(() => {
     let active = true;
 
-    async function checkSession() {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(
+      (event, session) => {
+        if (!active) {
+          return;
+        }
+
+        if (
+          event === "PASSWORD_RECOVERY" ||
+          event === "SIGNED_IN" ||
+          event === "INITIAL_SESSION"
+        ) {
+          setValidSession(
+            Boolean(session?.user)
+          );
+
+          setChecking(false);
+        }
+      }
+    );
+
+    async function checkRecoverySession() {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!active) {
+        return;
+      }
+
+      if (session?.user) {
+        setValidSession(true);
+        setChecking(false);
+        return;
+      }
+
+      const code =
+        new URLSearchParams(
+          window.location.search
+        ).get("code");
+
+      if (code) {
+        const { error: exchangeError } =
+          await supabase.auth
+            .exchangeCodeForSession(code);
+
+        if (!active) {
+          return;
+        }
+
+        if (!exchangeError) {
+          window.history.replaceState(
+            {},
+            "",
+            "/update-password"
+          );
+
+          setValidSession(true);
+          setChecking(false);
+          return;
+        }
+      }
+
       const {
         data: { user },
       } = await supabase.auth.getUser();
@@ -55,10 +118,11 @@ export default function UpdatePasswordPage() {
       setChecking(false);
     }
 
-    void checkSession();
+    void checkRecoverySession();
 
     return () => {
       active = false;
+      subscription.unsubscribe();
     };
   }, [supabase]);
 
