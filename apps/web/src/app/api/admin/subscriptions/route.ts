@@ -4,6 +4,41 @@ import { type NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
+
+function isAllowedRequestOrigin(request: Request) {
+  const origin = request.headers.get("origin");
+
+  // بعض الطلبات الداخلية لا ترسل Origin
+  if (!origin) {
+    return true;
+  }
+
+  let originHost = "";
+
+  try {
+    originHost = new URL(origin).host
+      .trim()
+      .toLowerCase();
+  } catch {
+    return false;
+  }
+
+  const possibleHosts = [
+    request.headers.get("x-forwarded-host"),
+    request.headers.get("host"),
+  ]
+    .filter(Boolean)
+    .flatMap((value) =>
+      String(value)
+        .split(",")
+        .map((host) =>
+          host.trim().toLowerCase()
+        )
+    );
+
+  return possibleHosts.includes(originHost);
+}
+
 export const dynamic = "force-dynamic";
 
 function normalizeEmail(value: unknown) {
@@ -92,10 +127,7 @@ export async function POST(request: NextRequest) {
   try {
     const origin = request.headers.get("origin");
 
-    if (
-      origin &&
-      origin !== request.nextUrl.origin
-    ) {
+    if (!isAllowedRequestOrigin(request)) {
       return NextResponse.json(
         { error: "طلب غير مسموح" },
         { status: 403 }

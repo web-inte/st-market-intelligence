@@ -1,9 +1,13 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import SignOutButton from "@/components/sign-out-button";
 import { createClient } from "@/lib/supabase/server";
 
-import SignOutButton from "@/components/sign-out-button";
+export const dynamic = "force-dynamic";
+
+const DAY_MS = 86_400_000;
+
 export default async function AccountPage() {
   const supabase = await createClient();
 
@@ -15,106 +19,163 @@ export default async function AccountPage() {
     redirect("/login");
   }
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("full_name,is_blocked")
-    .eq("id", user.id)
-    .maybeSingle();
+  const [profileResult, subscriptionResult] =
+    await Promise.all([
+      supabase
+        .from("profiles")
+        .select("full_name,role,is_blocked")
+        .eq("id", user.id)
+        .maybeSingle(),
 
-  const { data: subscription } = await supabase
-    .from("subscriptions")
-    .select(`
-      status,
-      starts_at,
-      ends_at,
-      source,
-      plans (
-        code,
-        name,
-        is_trial
-      )
-    `)
-    .eq("user_id", user.id)
-    .eq("status", "active")
-    .gt("ends_at", new Date().toISOString())
-    .order("ends_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+      supabase
+        .from("subscriptions")
+        .select(`
+          id,
+          status,
+          starts_at,
+          ends_at,
+          source,
+          plans (
+            name,
+            is_trial
+          )
+        `)
+        .eq("user_id", user.id)
+        .order("ends_at", {
+          ascending: false,
+        })
+        .limit(1)
+        .maybeSingle(),
+    ]);
 
-  const planValue = subscription?.plans;
-  const plan = Array.isArray(planValue)
-    ? planValue[0]
-    : planValue;
+  const profile = profileResult.data;
+  const subscription = subscriptionResult.data;
 
-  const remainingDays = subscription?.ends_at
+  const isAdmin =
+    profile?.role === "admin";
+
+  const fullName =
+    profile?.full_name ||
+    String(
+      user.user_metadata?.full_name ||
+      user.user_metadata?.name ||
+      "مستخدم"
+    );
+
+  const rawPlan =
+    (subscription as any)?.plans;
+
+  const plan = Array.isArray(rawPlan)
+    ? rawPlan[0]
+    : rawPlan;
+
+  const endsAt = subscription?.ends_at
+    ? new Date(subscription.ends_at)
+    : null;
+
+  const remainingDays = endsAt
     ? Math.max(
         0,
         Math.ceil(
-          (new Date(subscription.ends_at).getTime() - Date.now()) /
-            86_400_000
+          (endsAt.getTime() - Date.now()) /
+            DAY_MS
         )
       )
     : 0;
 
-  async function signOut() {
-    "use server";
+  const subscriptionActive =
+    subscription?.status === "active" &&
+    remainingDays > 0;
 
-    const supabase = await createClient();
-    await supabase.auth.signOut();
-    redirect("/login");
-  }
+  const subscriptionTitle = isAdmin
+    ? "مسؤول النظام"
+    : subscriptionActive
+      ? plan?.is_trial
+        ? "الفترة التجريبية"
+        : plan?.name || "اشتراك فعال"
+      : "لا يوجد اشتراك فعال";
+
+  const subscriptionDescription = isAdmin
+    ? "دخول كامل وغير محدود"
+    : subscriptionActive
+      ? `متبقي ${remainingDays} يوم`
+      : "انتهت صلاحية الاشتراك";
 
   return (
     <main
       dir="rtl"
       className="min-h-screen bg-slate-950 px-4 py-12 text-white"
     >
-      <section className="mx-auto max-w-3xl rounded-3xl border border-white/10 bg-slate-900 p-6">
-        <p className="text-sm font-bold text-cyan-400">
+      <section className="mx-auto max-w-3xl rounded-3xl border border-white/10 bg-slate-900 p-7 shadow-2xl">
+        <p className="text-sm font-black text-cyan-400">
           ST MARKET INTELLIGENCE
         </p>
 
-        <h1 className="mt-2 text-3xl font-black">
+        <h1 className="mt-3 text-4xl font-black">
           حسابي
         </h1>
 
-        <div className="mt-8 space-y-4">
+        <div className="mt-8 grid gap-4">
           <div className="rounded-2xl bg-slate-950 p-5">
-            <p className="text-sm text-slate-400">الاسم</p>
-            <p className="mt-1 font-bold">
-              {profile?.full_name || "مستخدم"}
+            <p className="text-sm text-slate-500">
+              الاسم
+            </p>
+
+            <p className="mt-2 text-xl font-black">
+              {fullName}
             </p>
           </div>
 
           <div className="rounded-2xl bg-slate-950 p-5">
-            <p className="text-sm text-slate-400">
+            <p className="text-sm text-slate-500">
               البريد الإلكتروني
             </p>
-            <p className="mt-1 break-all font-bold">
+
+            <p
+              dir="ltr"
+              className="mt-2 break-all text-left text-xl font-black"
+            >
               {user.email}
             </p>
           </div>
 
-          <div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/5 p-5">
+          <div
+            className={`rounded-2xl border p-5 ${
+              isAdmin
+                ? "border-violet-400/30 bg-violet-400/10"
+                : subscriptionActive
+                  ? "border-cyan-400/30 bg-cyan-400/10"
+                  : "border-rose-400/30 bg-rose-400/10"
+            }`}
+          >
             <p className="text-sm text-slate-400">
-              الاشتراك الحالي
+              حالة الحساب
             </p>
 
-            {subscription ? (
-              <>
-                <p className="mt-2 text-xl font-black">
-                  {plan?.name || plan?.code || "اشتراك فعال"}
-                </p>
+            <p className="mt-2 text-3xl font-black">
+              {subscriptionTitle}
+            </p>
 
-                <p className="mt-2 text-cyan-300">
-                  متبقي {remainingDays} يوم
-                </p>
-              </>
-            ) : (
-              <p className="mt-2 text-slate-300">
-                لا يوجد اشتراك فعال.
+            <p
+              className={`mt-2 font-bold ${
+                isAdmin
+                  ? "text-violet-300"
+                  : subscriptionActive
+                    ? "text-cyan-300"
+                    : "text-rose-300"
+              }`}
+            >
+              {subscriptionDescription}
+            </p>
+
+            {!isAdmin && endsAt ? (
+              <p className="mt-2 text-sm text-slate-400">
+                ينتهي في{" "}
+                {endsAt.toLocaleDateString(
+                  "ar-SA"
+                )}
               </p>
-            )}
+            ) : null}
           </div>
         </div>
 
@@ -125,6 +186,15 @@ export default async function AccountPage() {
           >
             الصفحة الرئيسية
           </Link>
+
+          {isAdmin ? (
+            <Link
+              href="/admin"
+              className="rounded-xl border border-violet-400/30 bg-violet-400/10 px-5 py-3 font-bold text-violet-300"
+            >
+              لوحة المسؤول
+            </Link>
+          ) : null}
 
           <SignOutButton />
         </div>
