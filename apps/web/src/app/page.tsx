@@ -24,6 +24,21 @@ const WATCHLIST = [
 ];
 const TELEGRAM_CHANNEL_URL = "https://t.me/STtradevip";
 
+type MarketOverviewResponse = {
+  ok: boolean;
+  updatedAt: string;
+  market: {
+    score: number;
+    bias: "CALL" | "PUT" | "NEUTRAL";
+    status: string;
+    confidence: string;
+    agreementPct: number;
+    reasons: string[];
+    risks: string[];
+  };
+};
+
+
 function clamp(value: number, minimum: number, maximum: number) {
   return Math.min(Math.max(value, minimum), maximum);
 }
@@ -135,6 +150,12 @@ export default function Home() {
 
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
 
+  const [marketOverview, setMarketOverview] =
+    useState<MarketOverviewResponse | null>(null);
+
+  const [marketOverviewLoading, setMarketOverviewLoading] =
+    useState(true);
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -236,44 +257,86 @@ const validResults = results
     };
   }, []);
 
-  const marketالتقييم = useMemo(() => {
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadMarketOverview() {
+      setMarketOverviewLoading(true);
+
+      try {
+        const response = await fetch("/api/market-overview", {
+          cache: "no-store",
+        });
+
+        const result =
+          (await response.json()) as MarketOverviewResponse;
+
+        if (!response.ok || !result.ok) {
+          throw new Error("تعذر تحميل نظرة السوق");
+        }
+
+        if (!cancelled) {
+          setMarketOverview(result);
+        }
+      } catch (overviewError) {
+        console.error(
+          "Failed to load market overview:",
+          overviewError,
+        );
+      } finally {
+        if (!cancelled) {
+          setMarketOverviewLoading(false);
+        }
+      }
+    }
+
+    void loadMarketOverview();
+
+    const timer = window.setInterval(() => {
+      void loadMarketOverview();
+    }, 120_000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  const fallbackMarketScore = useMemo(() => {
     if (opportunities.length === 0) {
       return 0;
     }
 
-    const total = opportunities.reduce((sum, item) => sum + item.score, 0);
+    const total = opportunities.reduce(
+      (sum, item) => sum + item.score,
+      0,
+    );
 
     return Math.round(total / opportunities.length);
   }, [opportunities]);
 
-  const marketStatus = useMemo(() => {
-    if (marketالتقييم >= 85) {
-      return "إيجابي قوي";
-    }
+  const marketالتقييم =
+    marketOverview?.market.score ?? fallbackMarketScore;
 
-    if (marketالتقييم >= 70) {
-      return "إيجابي بحذر";
-    }
-
-    if (marketالتقييم >= 55) {
-      return "محايد";
-    }
-
-    if (marketالتقييم > 0) {
-      return "سلبي";
-    }
-
-    return "جارٍ التحليل";
-  }, [marketالتقييم]);
+  const marketStatus =
+    marketOverview?.market.status ??
+    (marketالتقييم >= 85
+      ? "إيجابي قوي"
+      : marketالتقييم >= 70
+        ? "إيجابي بحذر"
+        : marketالتقييم >= 55
+          ? "محايد"
+          : marketالتقييم > 0
+            ? "سلبي"
+            : "جارٍ التحليل");
 
   const marketStatusColor =
-    marketالتقييم >= 70
+    marketالتقييم >= 15
       ? "text-emerald-400"
-      : marketالتقييم >= 55
-        ? "text-amber-400"
-        : marketالتقييم > 0
-          ? "text-rose-400"
-          : "text-slate-400";
+      : marketالتقييم <= -15
+        ? "text-rose-400"
+        : "text-amber-400";
 
   const bestOpportunity = opportunities[0];
 
@@ -509,7 +572,7 @@ ${url}`);
           </a>
         </header>
 
-        <section className="mb-8 grid gap-4 lg:grid-cols-[1.15fr_0.85fr_0.85fr]">
+        <section className="mb-8 grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
           <form
             onSubmit={handleSearch}
             className="rounded-3xl border border-white/[0.08] bg-slate-950/65 p-5 shadow-2xl shadow-black/20 backdrop-blur-xl sm:p-6"
@@ -538,6 +601,30 @@ ${url}`);
               </button>
             </div>
           </form>
+
+          <button
+            type="button"
+            onClick={() => router.push("/gamma-liquidity?symbol=NVDA")}
+            className="group flex items-center justify-between gap-4 rounded-3xl border border-violet-400/20 bg-slate-950/65 p-5 text-right shadow-2xl shadow-violet-950/20 backdrop-blur-xl transition duration-300 hover:-translate-y-1 hover:border-violet-400/40 sm:p-6"
+          >
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.15em] text-violet-400">
+                القاما والسيولة
+              </p>
+
+              <h2 className="mt-2 text-xl font-black text-white">
+                تحليل القاما والسيولة
+              </h2>
+
+              <p className="mt-2 text-sm leading-6 text-slate-400">
+                اعرض صافي GEX والجدران والمغناطيس وتدفق CALL وPUT وأفضل العقود.
+              </p>
+            </div>
+
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-violet-400/20 bg-violet-400/10 text-xl text-violet-300 transition group-hover:-translate-x-1">
+              ←
+            </div>
+          </button>
 
           <button
             type="button"
@@ -607,8 +694,8 @@ ${url}`);
                 </h2>
 
                 <p className="mt-3 max-w-lg text-sm leading-7 text-slate-500">
-                  يتم احتساب حالة السوق من متوسط قوة الفرص الحالية وتوافق محركات
-                  التحليل.
+                  يتم احتساب حالة السوق من SPY وQQQ وIWM وDIA عبر تدفق
+                  العقود والاهتمام المفتوح وNet GEX وIV Skew.
                 </p>
 
                 <p
@@ -617,6 +704,9 @@ ${url}`);
                   }`}
                 >
                   {marketSession.label} — {marketSession.note}
+                  {marketOverview
+                    ? ` • الثقة ${marketOverview.market.confidence} • توافق ${marketOverview.market.agreementPct.toFixed(0)}%`
+                    : ""}
                 </p>
               </div>
 
@@ -627,7 +717,9 @@ ${url}`);
                   </p>
 
                   <p className="mt-1 text-left text-5xl font-black tracking-tight text-white">
-                    {loading ? "..." : marketالتقييم}
+                    {marketOverviewLoading && !marketOverview
+                      ? "..."
+                      : Math.round(marketالتقييم)}
                   </p>
                 </div>
 
@@ -635,7 +727,9 @@ ${url}`);
                   <div className="absolute inset-2 animate-[spin_14s_linear_infinite] rounded-full border border-dashed border-cyan-400/20" />
 
                   <span dir="ltr" className="text-xs font-bold text-cyan-300">
-                    {loading ? "..." : `${marketالتقييم} / 100`}
+                    {marketOverviewLoading && !marketOverview
+                      ? "..."
+                      : `${Math.round(marketالتقييم)} / 100`}
                   </span>
                 </div>
               </div>

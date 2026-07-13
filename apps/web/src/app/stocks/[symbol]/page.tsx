@@ -526,6 +526,18 @@ export default async function StockAnalysisPage({
               className="rounded-2xl border border-white/[0.08] bg-slate-900/70 px-4 py-3 text-sm font-bold text-slate-300 transition hover:border-cyan-400/30 hover:text-cyan-300"
             >
               تحديث التحليل
+            <a
+  href={`/gamma-liquidity?symbol=${encodeURIComponent(
+    analysis.symbol
+  )}`}
+  className="rounded-2xl border border-violet-500/30 bg-violet-500/10 px-4 py-3 text-sm font-bold text-violet-300 transition hover:border-violet-400 hover:bg-violet-500/20"
+>
+  ⚡ القاما والسيولة
+  <span className="mr-2 rounded-full bg-yellow-400 px-2 py-0.5 text-[10px] font-black text-black">
+    PLUS
+  </span>
+</a>
+            
             </a>
 
             <a

@@ -1,1 +1,4 @@
 apps/whale-stream/.env
+apps/web/.env.local
+.env
+.env.local
