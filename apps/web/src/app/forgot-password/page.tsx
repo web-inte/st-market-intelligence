@@ -7,13 +7,42 @@ import {
   useState,
 } from "react";
 
-import { createClient } from "@/lib/supabase/client";
+import {
+  createClient as createSupabaseClient,
+} from "@supabase/supabase-js";
 
 export default function ForgotPasswordPage() {
-  const supabase = useMemo(
-    () => createClient(),
-    []
-  );
+  const supabase = useMemo(() => {
+    const url =
+      process.env.NEXT_PUBLIC_SUPABASE_URL;
+
+    const key =
+      process.env
+        .NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+      process.env
+        .NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+    if (!url || !key) {
+      throw new Error(
+        "متغيرات Supabase غير موجودة"
+      );
+    }
+
+    // استعادة كلمة المرور بالتدفق المباشر.
+    // لا تعتمد على متصفح طلب الرابط.
+    return createSupabaseClient(
+      url,
+      key,
+      {
+        auth: {
+          flowType: "implicit",
+          detectSessionInUrl: false,
+          persistSession: false,
+          autoRefreshToken: false,
+        },
+      }
+    );
+  }, []);
 
   const [email, setEmail] =
     useState("");
@@ -42,6 +71,7 @@ export default function ForgotPasswordPage() {
       setError(
         "أدخل بريدًا إلكترونيًا صحيحًا"
       );
+
       return;
     }
 
@@ -50,7 +80,8 @@ export default function ForgotPasswordPage() {
 
     try {
       const redirectTo =
-        `${window.location.origin}/update-password`;
+        `${window.location.origin}` +
+        "/auth/recovery";
 
       const { error: resetError } =
         await supabase.auth
@@ -104,7 +135,7 @@ export default function ForgotPasswordPage() {
                 </p>
 
                 <p className="mt-2 text-sm leading-7 text-slate-300">
-                  افحص صندوق الوارد والبريد غير المرغوب فيه، ثم افتح الرابط المرسل إليك.
+                  افتح أحدث رسالة وصلتك واضغط رابط استعادة كلمة المرور.
                 </p>
               </div>
 
@@ -136,8 +167,8 @@ export default function ForgotPasswordPage() {
                   }
                   placeholder="name@example.com"
                   autoComplete="email"
-                  className="w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-4 text-left outline-none transition focus:border-cyan-400"
                   dir="ltr"
+                  className="w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-4 text-left outline-none transition focus:border-cyan-400"
                 />
               </div>
 

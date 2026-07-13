@@ -1,107 +1,68 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
-import { useRouter } from "next/navigation";
+import {
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
 import { createClient } from "@/lib/supabase/client";
 
-export default function PasswordRecoveryCallbackPage() {
-  const router = useRouter();
+export default function RecoveryPage() {
   const supabase = useMemo(
     () => createClient(),
     []
   );
 
+  const [error, setError] =
+    useState("");
+
   useEffect(() => {
     let active = true;
-    let completed = false;
 
-    function finishSuccess() {
-      if (!active || completed) {
-        return;
-      }
-
-      completed = true;
-      router.replace("/update-password");
-      router.refresh();
-    }
-
-    function finishError() {
-      if (!active || completed) {
-        return;
-      }
-
-      completed = true;
-      router.replace(
-        "/forgot-password?error=invalid_recovery_link"
-      );
-    }
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        if (
-          event === "PASSWORD_RECOVERY" &&
-          session?.user
-        ) {
-          finishSuccess();
-        }
-      }
-    );
-
-    async function processRecoveryLink() {
+    async function processRecovery() {
       try {
-        const url =
+        const currentUrl =
           new URL(window.location.href);
 
-        const code =
-          url.searchParams.get("code");
-
-        const hashParameters =
+        const hash =
           new URLSearchParams(
-            url.hash.replace(/^#/, "")
+            currentUrl.hash.replace(
+              /^#/,
+              ""
+            )
           );
 
         const accessToken =
-          hashParameters.get(
-            "access_token"
-          );
+          hash.get("access_token");
 
         const refreshToken =
-          hashParameters.get(
-            "refresh_token"
+          hash.get("refresh_token");
+
+        const hashError =
+          hash.get(
+            "error_description"
           );
 
-        // تدفق Implicit
+        if (hashError) {
+          throw new Error(
+            decodeURIComponent(hashError)
+          );
+        }
+
+        // الرابط الجديد بالتدفق المباشر
         if (
           accessToken &&
           refreshToken
         ) {
-          const { error } =
+          const { error: sessionError } =
             await supabase.auth.setSession({
               access_token: accessToken,
               refresh_token: refreshToken,
             });
 
-          if (error) {
-            throw error;
-          }
-
-          finishSuccess();
-          return;
-        }
-
-        // تدفق PKCE
-        if (code) {
-          const { error } =
-            await supabase.auth
-              .exchangeCodeForSession(
-                code
-              );
-
-          if (error) {
-            throw error;
+          if (sessionError) {
+            throw sessionError;
           }
 
           window.history.replaceState(
@@ -110,11 +71,63 @@ export default function PasswordRecoveryCallbackPage() {
             "/auth/recovery"
           );
 
-          finishSuccess();
+          await new Promise(
+            (resolve) =>
+              window.setTimeout(
+                resolve,
+                300
+              )
+          );
+
+          if (active) {
+            window.location.replace(
+              "/update-password"
+            );
+          }
+
           return;
         }
 
-        // قد تكون المكتبة أنشأت الجلسة تلقائيًا
+        // احتياط للرسائل التي تصل بكود PKCE
+        const code =
+          currentUrl.searchParams.get(
+            "code"
+          );
+
+        if (code) {
+          const { error: codeError } =
+            await supabase.auth
+              .exchangeCodeForSession(
+                code
+              );
+
+          if (codeError) {
+            throw codeError;
+          }
+
+          window.history.replaceState(
+            {},
+            "",
+            "/auth/recovery"
+          );
+
+          await new Promise(
+            (resolve) =>
+              window.setTimeout(
+                resolve,
+                300
+              )
+          );
+
+          if (active) {
+            window.location.replace(
+              "/update-password"
+            );
+          }
+
+          return;
+        }
+
         const {
           data: { session },
         } =
@@ -122,47 +135,80 @@ export default function PasswordRecoveryCallbackPage() {
             .getSession();
 
         if (session?.user) {
-          finishSuccess();
+          window.location.replace(
+            "/update-password"
+          );
+
           return;
         }
 
-        finishError();
-      } catch (error) {
+        throw new Error(
+          "رابط الاستعادة غير صالح أو انتهت صلاحيته"
+        );
+      } catch (recoveryError) {
+        if (!active) {
+          return;
+        }
+
         console.error(
-          "Password recovery error:",
-          error
+          "Recovery error:",
+          recoveryError
         );
 
-        finishError();
+        setError(
+          recoveryError instanceof Error
+            ? recoveryError.message
+            : "تعذر التحقق من رابط الاستعادة"
+        );
       }
     }
 
-    void processRecoveryLink();
+    void processRecovery();
 
     return () => {
       active = false;
-      subscription.unsubscribe();
     };
-  }, [router, supabase]);
+  }, [supabase]);
 
   return (
     <main
       dir="rtl"
       className="flex min-h-screen items-center justify-center bg-slate-950 px-4 text-white"
     >
-      <div className="w-full max-w-md rounded-3xl border border-white/10 bg-slate-900 p-8 text-center">
+      <section className="w-full max-w-lg rounded-3xl border border-white/10 bg-slate-900 p-8 text-center">
         <p className="text-sm font-bold text-cyan-400">
           ST MARKET INTELLIGENCE
         </p>
 
-        <h1 className="mt-4 text-2xl font-black">
-          جارٍ التحقق من رابط الاستعادة
-        </h1>
+        {error ? (
+          <>
+            <h1 className="mt-4 text-3xl font-black text-rose-300">
+              تعذر فتح رابط الاستعادة
+            </h1>
 
-        <p className="mt-3 text-slate-400">
-          سيتم تحويلك تلقائيًا لتعيين كلمة مرور جديدة.
-        </p>
-      </div>
+            <p className="mt-4 leading-7 text-slate-300">
+              {error}
+            </p>
+
+            <a
+              href="/forgot-password"
+              className="mt-6 block rounded-xl bg-cyan-400 px-5 py-4 font-black text-slate-950"
+            >
+              إرسال رابط جديد
+            </a>
+          </>
+        ) : (
+          <>
+            <h1 className="mt-4 text-3xl font-black">
+              جارٍ التحقق من الرابط
+            </h1>
+
+            <p className="mt-4 text-slate-400">
+              سيتم تحويلك تلقائيًا لتعيين كلمة مرور جديدة.
+            </p>
+          </>
+        )}
+      </section>
     </main>
   );
 }

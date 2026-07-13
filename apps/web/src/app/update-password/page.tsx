@@ -45,80 +45,37 @@ export default function UpdatePasswordPage() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(
-      (event, session) => {
+      (_event, session) => {
         if (!active) {
           return;
         }
 
-        if (
-          event === "PASSWORD_RECOVERY" ||
-          event === "SIGNED_IN" ||
-          event === "INITIAL_SESSION"
-        ) {
-          setValidSession(
-            Boolean(session?.user)
-          );
-
+        if (session?.user) {
+          setValidSession(true);
           setChecking(false);
         }
       }
     );
 
-    async function checkRecoverySession() {
+    async function checkSession() {
       const {
         data: { session },
-      } = await supabase.auth.getSession();
+      } =
+        await supabase.auth
+          .getSession();
 
       if (!active) {
         return;
       }
 
-      if (session?.user) {
-        setValidSession(true);
-        setChecking(false);
-        return;
-      }
+      setValidSession(
+        Boolean(session?.user)
+      );
 
-      const code =
-        new URLSearchParams(
-          window.location.search
-        ).get("code");
-
-      if (code) {
-        const { error: exchangeError } =
-          await supabase.auth
-            .exchangeCodeForSession(code);
-
-        if (!active) {
-          return;
-        }
-
-        if (!exchangeError) {
-          window.history.replaceState(
-            {},
-            "",
-            "/update-password"
-          );
-
-          setValidSession(true);
-          setChecking(false);
-          return;
-        }
-      }
-
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (!active) {
-        return;
-      }
-
-      setValidSession(Boolean(user));
       setChecking(false);
     }
 
-    void checkRecoverySession();
+    void checkSession();
 
     return () => {
       active = false;
@@ -136,13 +93,18 @@ export default function UpdatePasswordPage() {
       setError(
         "كلمة المرور يجب ألا تقل عن 8 أحرف"
       );
+
       return;
     }
 
-    if (password !== confirmPassword) {
+    if (
+      password !==
+      confirmPassword
+    ) {
       setError(
         "كلمتا المرور غير متطابقتين"
       );
+
       return;
     }
 
@@ -163,8 +125,10 @@ export default function UpdatePasswordPage() {
       await supabase.auth.signOut();
 
       window.setTimeout(() => {
-        window.location.replace("/login");
-      }, 1500);
+        window.location.replace(
+          "/login?password_updated=1"
+        );
+      }, 1200);
     } catch (updateError) {
       setError(
         updateError instanceof Error
@@ -193,17 +157,13 @@ export default function UpdatePasswordPage() {
 
           {checking ? (
             <p className="mt-7 text-slate-400">
-              جارٍ التحقق من رابط الاستعادة...
+              جارٍ التحقق من جلسة الاستعادة...
             </p>
           ) : !validSession ? (
             <div className="mt-7">
               <div className="rounded-2xl border border-rose-500/30 bg-rose-500/10 p-5">
                 <p className="font-black text-rose-300">
                   رابط الاستعادة غير صالح أو منتهي
-                </p>
-
-                <p className="mt-2 text-sm leading-7 text-slate-300">
-                  اطلب رابطًا جديدًا لاستعادة كلمة المرور.
                 </p>
               </div>
 
@@ -218,10 +178,6 @@ export default function UpdatePasswordPage() {
             <div className="mt-7 rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-5">
               <p className="font-black text-emerald-300">
                 تم تغيير كلمة المرور بنجاح
-              </p>
-
-              <p className="mt-2 text-sm text-slate-300">
-                سيتم تحويلك إلى صفحة تسجيل الدخول.
               </p>
             </div>
           ) : (
