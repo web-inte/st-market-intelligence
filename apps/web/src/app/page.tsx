@@ -279,9 +279,7 @@ const validResults = results
 
         setOpportunities(validResults);
 
-        if (validResults.length === 0) {
-          setError("تعذر تحميل فرص السوق حاليًا.");
-        }
+        setError("");
       } catch (loadError) {
         console.error("Failed to load opportunities:", loadError);
 
