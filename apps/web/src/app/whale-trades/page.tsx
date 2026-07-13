@@ -1,4 +1,5 @@
 import Link from "next/link";
+import AutoRefresh from "./auto-refresh";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -443,6 +444,7 @@ export default async function WhaleTradesPage({
       className="min-h-screen bg-[#020617] px-4 py-6 text-white sm:px-6 sm:py-10"
     >
       <div className="mx-auto max-w-7xl">
+        <AutoRefresh intervalMs={20_000} />
         <header className="mb-7 overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-l from-cyan-500/10 via-slate-900/90 to-amber-400/10 p-5 shadow-2xl shadow-black/30 sm:p-8">
           <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
             <div>

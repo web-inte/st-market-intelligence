@@ -65,9 +65,16 @@ function getTradePlan(item: Opportunity) {
   };
 }
 
-function getSaudiMarketState() {
+type MarketSession = {
+  isOpen: boolean;
+  phase: "REGULAR" | "PRE_MARKET" | "AFTER_HOURS" | "CLOSED";
+  label: string;
+  note: string;
+};
+
+function getNewYorkMarketFallback(): MarketSession {
   const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Riyadh",
+    timeZone: "America/New_York",
     weekday: "short",
     hour: "2-digit",
     minute: "2-digit",
@@ -79,19 +86,64 @@ function getSaudiMarketState() {
   );
 
   const weekday = values.weekday;
-  const hour = Number(values.hour);
+  const hour = Number(values.hour) % 24;
   const minute = Number(values.minute);
   const currentMinutes = hour * 60 + minute;
-  const isWeekday = ["Mon", "Tue", "Wed", "Thu", "Fri"].includes(weekday);
-  const isOpen =
-    isWeekday &&
-    currentMinutes >= 14 * 60 + 30 &&
-    currentMinutes <= 23 * 60 + 15;
+
+  const isWeekday = ["Mon", "Tue", "Wed", "Thu", "Fri"].includes(
+    weekday,
+  );
+
+  if (!isWeekday) {
+    return {
+      isOpen: false,
+      phase: "CLOSED",
+      label: "السوق مغلق",
+      note: "بيانات الأوبشن من آخر جلسة مكتملة",
+    };
+  }
+
+  if (
+    currentMinutes >= 9 * 60 + 30 &&
+    currentMinutes < 16 * 60
+  ) {
+    return {
+      isOpen: true,
+      phase: "REGULAR",
+      label: "السوق الأمريكي مفتوح",
+      note: "بيانات الأوبشن من الجلسة الحالية",
+    };
+  }
+
+  if (
+    currentMinutes >= 4 * 60 &&
+    currentMinutes < 9 * 60 + 30
+  ) {
+    return {
+      isOpen: false,
+      phase: "PRE_MARKET",
+      label: "ما قبل السوق",
+      note: "بيانات الأوبشن من آخر جلسة مكتملة",
+    };
+  }
+
+  if (
+    currentMinutes >= 16 * 60 &&
+    currentMinutes < 20 * 60
+  ) {
+    return {
+      isOpen: false,
+      phase: "AFTER_HOURS",
+      label: "ما بعد السوق",
+      note: "انتهت جلسة الأوبشن — البيانات من الجلسة المكتملة",
+    };
+  }
 
   return {
-    isOpen,
-    label: isOpen ? "السوق مفتوح" : "السوق مغلق",
-    note: isOpen ? "بيانات الجلسة الحالية" : "بيانات آخر جلسة متاحة",
+    isOpen: false,
+    phase: "CLOSED",
+    label: "السوق مغلق",
+    note: "بيانات الأوبشن من آخر جلسة مكتملة",
   };
 }
 
@@ -345,7 +397,62 @@ const validResults = results
     [opportunities],
   );
 
-  const marketSession = useMemo(() => getSaudiMarketState(), []);
+  const [marketSession, setMarketSession] =
+    useState<MarketSession>({
+      isOpen: false,
+      phase: "CLOSED",
+      label: "جارٍ التحقق من السوق",
+      note: "جارٍ تحميل حالة الجلسة",
+    });
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadMarketSession() {
+      try {
+        const response = await fetch("/api/market-session", {
+          cache: "no-store",
+        });
+
+        const result = (await response.json()) as
+          | (MarketSession & { ok: true })
+          | { ok: false };
+
+        if (!response.ok || !result.ok) {
+          throw new Error("تعذر تحميل حالة السوق");
+        }
+
+        if (!cancelled) {
+          setMarketSession({
+            isOpen: result.isOpen,
+            phase: result.phase,
+            label: result.label,
+            note: result.note,
+          });
+        }
+      } catch (sessionError) {
+        console.error(
+          "Failed to load market session:",
+          sessionError,
+        );
+
+        if (!cancelled) {
+          setMarketSession(getNewYorkMarketFallback());
+        }
+      }
+    }
+
+    void loadMarketSession();
+
+    const timer = window.setInterval(() => {
+      void loadMarketSession();
+    }, 60_000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, []);
 
   async function shareOpportunity(item: Opportunity) {
     const plan = getTradePlan(item);
@@ -468,7 +575,7 @@ ${url}`);
               </span>
 
               <span className="whitespace-nowrap text-xs font-black tracking-[0.14em] text-emerald-300">
-                السوق مباشر
+                {marketSession.isOpen ? "السوق مباشر" : marketSession.label}
               </span>
             </div>
 
