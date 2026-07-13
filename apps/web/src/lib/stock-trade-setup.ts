@@ -472,13 +472,28 @@ function mapSetup(
   };
 }
 
+function resolveBaseUrl() {
+  const configuredUrl =
+    process.env.NEXT_PUBLIC_SITE_URL ||
+    process.env.SITE_URL;
+
+  if (configuredUrl) {
+    return configuredUrl.replace(/\/+$/, "");
+  }
+
+  if (process.env.VERCEL_URL) {
+    return `https://${process.env.VERCEL_URL}`;
+  }
+
+  return "http://localhost:3000";
+}
+
 export async function getOrCreateStockTradeSetup(input: {
   symbol: string;
   side: SetupSide;
   contractTicker: string;
   entryPrice: number;
   score: number;
-  baseUrl: string;
 }): Promise<StockTradeSetup> {
   const symbol = input.symbol
     .trim()
@@ -593,10 +608,7 @@ export async function getOrCreateStockTradeSetup(input: {
   }
 
   const gammaResponse = await fetch(
-    `${input.baseUrl.replace(
-      /\/+$/,
-      ""
-    )}/api/gamma-liquidity/${encodeURIComponent(
+    `${resolveBaseUrl()}/api/gamma-liquidity/${encodeURIComponent(
       symbol
     )}`,
     {

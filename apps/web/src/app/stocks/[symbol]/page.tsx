@@ -1,3 +1,4 @@
+import { getOrCreateStockTradeSetup } from "@/lib/stock-trade-setup";
 import {
   analyzeMarketData,
   type AnalysisError,
@@ -343,11 +344,64 @@ export default async function StockAnalysisPage({
   const sideStyle =
     sideClasses(decision.side);
 
-  const pricePlan = createPricePlan(
+  const setupContract =
+    recommendedContracts[0] ?? null;
+
+  const fallbackPricePlan = createPricePlan(
     quote.price,
     decision.score,
     decision.side
   );
+
+  let pricePlan = {
+    ...fallbackPricePlan,
+
+    // منع ظهور الأهداف المئوية القديمة
+    levels: [] as typeof fallbackPricePlan.levels,
+  };
+
+  if (
+    (decision.side === "CALL" ||
+      decision.side === "PUT") &&
+    setupContract?.ticker
+  ) {
+    try {
+      const setup =
+        await getOrCreateStockTradeSetup({
+          symbol: analysis.symbol,
+          side: decision.side,
+          contractTicker:
+            setupContract.ticker,
+          entryPrice: quote.price,
+          score: decision.score,
+        });
+
+      pricePlan = {
+        entry: setup.entryPrice,
+
+        stop:
+          setup.stopPrice ??
+          fallbackPricePlan.stop,
+
+        levels: setup.targets.map(
+          (target) => ({
+            index: target.index,
+            price: target.price,
+            movePct: target.movePct,
+            probability:
+              target.probability,
+          })
+        ),
+
+        risk: fallbackPricePlan.risk,
+      };
+    } catch (setupError) {
+      console.error(
+        "تعذر إنشاء خطة القاما:",
+        setupError
+      );
+    }
+  }
 
   const positiveReasons = [
     consensus.label,
@@ -393,7 +447,7 @@ export default async function StockAnalysisPage({
 السعر الحالي: $${priceFormat(
     quote.price
   )}
-الدخول التقديري: $${priceFormat(
+الدخول المرجعي: $${priceFormat(
     pricePlan.entry
   )}
 الهدف الأول: ${
@@ -683,7 +737,7 @@ export default async function StockAnalysisPage({
               <div className="mt-6 grid gap-3 sm:grid-cols-2">
                 <div className="rounded-2xl border border-cyan-400/15 bg-cyan-400/[0.05] p-4">
                   <p className="text-xs text-slate-500">
-                    الدخول التقديري
+                    الدخول المرجعي
                   </p>
 
                   <p className="mt-2 text-3xl font-black text-cyan-300">
@@ -719,7 +773,7 @@ export default async function StockAnalysisPage({
                       >
                         <div className="flex items-center justify-between gap-3">
                           <p className="font-black text-white">
-                            المستوى {level.index}
+                            هدف Gamma {level.index}
                           </p>
 
                           <span
