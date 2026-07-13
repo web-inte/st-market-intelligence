@@ -531,7 +531,9 @@ export default async function StockAnalysisPage({
     analysis.symbol
   )}`}
   className="rounded-2xl border border-violet-500/30 bg-violet-500/10 px-4 py-3 text-sm font-bold text-violet-300 transition hover:border-violet-400 hover:bg-violet-500/20"
->
+
+          style={{ position: "absolute", left: 16, right: "auto", top: 16, transform: "none", zIndex: 30 }}
+        >
   ⚡ القاما والسيولة
   <span className="mr-2 rounded-full bg-yellow-400 px-2 py-0.5 text-[10px] font-black text-black">
     PLUS
