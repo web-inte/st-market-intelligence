@@ -11,6 +11,7 @@ const PUBLIC_ROUTES = [
   "/forgot-password",
   "/update-password",
   "/auth/callback",
+  "/auth/confirm",
 ];
 
 const AUTH_ONLY_ROUTES = [
