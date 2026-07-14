@@ -1,12 +1,22 @@
-type WhaleRecord = Record<string, any>;
+export type WhaleRecord = Record<string, any>;
 
-function isRecord(value: unknown): value is WhaleRecord {
+function isRecord(
+  value: unknown
+): value is WhaleRecord {
   return Boolean(
     value &&
       typeof value === "object" &&
       !Array.isArray(value)
   );
 }
+
+export function hydrateWhaleTrade<
+  T extends WhaleRecord
+>(value: T): T & WhaleRecord;
+
+export function hydrateWhaleTrade(
+  value: unknown
+): WhaleRecord;
 
 export function hydrateWhaleTrade(
   value: unknown
@@ -25,28 +35,41 @@ export function hydrateWhaleTrade(
     ? raw.full_processed_row
     : {};
 
-  return {
-    // بيانات الجدول أولًا
-    ...databaseRow,
+  const fallbackId = [
+    databaseRow.option_ticker ??
+      processedRow.option_ticker ??
+      databaseRow.symbol ??
+      processedRow.symbol ??
+      "whale",
 
-    // التفاصيل الكاملة المحفوظة داخل raw
+    databaseRow.created_at ??
+      processedRow.created_at ??
+      "unknown-time",
+
+    databaseRow.premium_value ??
+      processedRow.premium_value ??
+      0,
+  ].join("-");
+
+  return {
+    ...databaseRow,
     ...processedRow,
 
-    // الحقول الأساسية من الجدول هي المعتمدة
     id:
       databaseRow.id ??
       processedRow.id ??
-      null,
+      processedRow.trade_key ??
+      fallbackId,
 
     symbol:
       databaseRow.symbol ??
       processedRow.symbol ??
-      null,
+      "",
 
     option_ticker:
       databaseRow.option_ticker ??
       processedRow.option_ticker ??
-      null,
+      "",
 
     contract_type:
       databaseRow.contract_type ??

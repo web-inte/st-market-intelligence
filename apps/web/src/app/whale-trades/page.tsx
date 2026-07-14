@@ -1,6 +1,7 @@
 import Link from "next/link";
 import AutoRefresh from "./auto-refresh";
 
+import { hydrateWhaleTrade } from "@/lib/hydrate-whale-trade";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
@@ -303,7 +304,13 @@ export default async function WhaleTradesPage({
     safeNumber(readParam(params.minPremium)),
   );
 
-  const filteredTrades = trades.filter((trade) => {
+  const hydratedTrades = Array.isArray(trades)
+    ? trades.map((trade) =>
+        hydrateWhaleTrade(trade)
+      )
+    : [];
+
+  const filteredTrades = hydratedTrades.filter((trade) => {
     const symbol = String(trade.symbol || "").toUpperCase();
     const contractType = getContractType(trade);
     const estimatedSide = String(
