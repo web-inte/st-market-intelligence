@@ -28,7 +28,7 @@ export default function ForgotPasswordPage() {
 
     return createSupabaseClient(url, key, {
       auth: {
-        flowType: "implicit",
+        flowType: "pkce",
         detectSessionInUrl: false,
         persistSession: false,
         autoRefreshToken: false,
