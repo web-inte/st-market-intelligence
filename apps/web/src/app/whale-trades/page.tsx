@@ -311,6 +311,118 @@ export default async function WhaleTradesPage({
     : [];
 
   const filteredTrades = hydratedTrades.filter((trade) => {
+    const ruleRecord =
+      trade as WhaleTrade &
+        Record<string, unknown>;
+
+    const displayStrength = safeNumber(
+      ruleRecord.whale_score ??
+        ruleRecord.score ??
+        ruleRecord.strength ??
+        0
+    );
+
+    const expirationValue =
+      ruleRecord.expiration ??
+      ruleRecord.expiration_date ??
+      ruleRecord.expiry ??
+      ruleRecord.expiry_date;
+
+    let expirationKey: string | null = null;
+
+    if (typeof expirationValue === "string") {
+      const cleanedExpiration =
+        expirationValue.trim();
+
+      const isoMatch =
+        cleanedExpiration.match(
+          /^(\d{4})-(\d{2})-(\d{2})/
+        );
+
+      const displayMatch =
+        cleanedExpiration.match(
+          /^(\d{2})[-/](\d{2})[-/](\d{4})$/
+        );
+
+      if (isoMatch) {
+        expirationKey =
+          `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+      } else if (displayMatch) {
+        expirationKey =
+          `${displayMatch[3]}-${displayMatch[2]}-${displayMatch[1]}`;
+      }
+    }
+
+    const newYorkParts =
+      new Intl.DateTimeFormat("en-CA", {
+        timeZone: "America/New_York",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).formatToParts(new Date());
+
+    const newYorkValues =
+      Object.fromEntries(
+        newYorkParts.map((part) => [
+          part.type,
+          part.value,
+        ])
+      );
+
+    const todayKey =
+      `${newYorkValues.year}-${newYorkValues.month}-${newYorkValues.day}`;
+
+    const keyToUtc = (dateKey: string) => {
+      const [year, month, day] =
+        dateKey.split("-").map(Number);
+
+      return Date.UTC(
+        year,
+        month - 1,
+        day
+      );
+    };
+
+    const daysToExpiration =
+      expirationKey
+        ? Math.round(
+            (
+              keyToUtc(expirationKey) -
+              keyToUtc(todayKey)
+            ) /
+              86_400_000
+          )
+        : null;
+
+    const ruleSymbol = String(
+      trade.symbol ?? ""
+    ).toUpperCase();
+
+    const isDailyIndex = [
+      "SPX",
+      "SPXW",
+      "NDX",
+      "NDXP",
+    ].includes(ruleSymbol);
+
+    if (isDailyIndex) {
+      if (
+        displayStrength < 90 ||
+        daysToExpiration !== 0
+      ) {
+        return false;
+      }
+    } else {
+      if (
+        displayStrength < 80 ||
+        daysToExpiration === null ||
+        daysToExpiration < 0 ||
+        daysToExpiration > 14
+      ) {
+        return false;
+      }
+    }
+
     const symbol = String(trade.symbol || "").toUpperCase();
     const contractType = getContractType(trade);
     const estimatedSide = String(
