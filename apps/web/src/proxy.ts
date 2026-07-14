@@ -26,6 +26,16 @@ function isPublicRoute(pathname: string) {
 export async function proxy(
   request: NextRequest
 ) {
+  // RECOVERY_ROUTE_BYPASS
+  // لا تطرد المستخدم من صفحة تغيير كلمة المرور
+  if (
+    request.nextUrl.pathname === "/update-password" ||
+    request.nextUrl.pathname === "/auth/confirm"
+  ) {
+    return NextResponse.next();
+  }
+
+
   const pathname =
     request.nextUrl.pathname;
 
