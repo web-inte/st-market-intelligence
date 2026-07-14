@@ -1,3 +1,4 @@
+import { hydrateWhaleTrade } from "@/lib/hydrate-whale-trade";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -78,7 +79,11 @@ export async function GET(request: Request) {
       {
         ok: true,
         count: Array.isArray(trades) ? trades.length : 0,
-        trades: Array.isArray(trades) ? trades : [],
+        trades: Array.isArray(trades)
+          ? trades.map((trade) =>
+              hydrateWhaleTrade(trade)
+            )
+          : [],
         updatedAt: new Date().toISOString(),
       },
       {
