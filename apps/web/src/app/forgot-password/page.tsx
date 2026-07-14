@@ -80,8 +80,7 @@ export default function ForgotPasswordPage() {
 
     try {
       const redirectTo =
-        `${window.location.origin}` +
-        "/auth/recovery";
+        `${window.location.origin}/auth/callback?next=/update-password`;
 
       const { error: resetError } =
         await supabase.auth
