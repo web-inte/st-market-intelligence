@@ -7,42 +7,10 @@ import {
   useState,
 } from "react";
 
-import {
-  createClient as createSupabaseClient,
-} from "@supabase/supabase-js";
+import { createClient } from "@/lib/supabase/client";
 
 export default function ForgotPasswordPage() {
-  const supabase = useMemo(() => {
-    const url =
-      process.env.NEXT_PUBLIC_SUPABASE_URL;
-
-    const key =
-      process.env
-        .NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
-      process.env
-        .NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-    if (!url || !key) {
-      throw new Error(
-        "متغيرات Supabase غير موجودة"
-      );
-    }
-
-    // استعادة كلمة المرور بالتدفق المباشر.
-    // لا تعتمد على متصفح طلب الرابط.
-    return createSupabaseClient(
-      url,
-      key,
-      {
-        auth: {
-          flowType: "implicit",
-          detectSessionInUrl: false,
-          persistSession: false,
-          autoRefreshToken: false,
-        },
-      }
-    );
-  }, []);
+  const supabase = useMemo(() => createClient(), []);
 
   const [email, setEmail] =
     useState("");
@@ -79,8 +47,7 @@ export default function ForgotPasswordPage() {
     setError("");
 
     try {
-      const redirectTo =
-        `${window.location.origin}/auth/callback?next=/update-password`;
+      const redirectTo = `${window.location.origin}/auth/callback?next=/update-password`;
 
       const { error: resetError } =
         await supabase.auth
