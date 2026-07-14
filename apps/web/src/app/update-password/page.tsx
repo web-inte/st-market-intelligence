@@ -8,13 +8,32 @@ import {
   useState,
 } from "react";
 
-import { createClient } from "@/lib/supabase/client";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
 export default function UpdatePasswordPage() {
-  const supabase = useMemo(
-    () => createClient(),
-    []
-  );
+  const supabase = useMemo(() => {
+    const url =
+      process.env.NEXT_PUBLIC_SUPABASE_URL;
+
+    const key =
+      process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+    if (!url || !key) {
+      throw new Error(
+        "متغيرات Supabase العامة غير موجودة"
+      );
+    }
+
+    return createSupabaseClient(url, key, {
+      auth: {
+        flowType: "implicit",
+        detectSessionInUrl: true,
+        persistSession: true,
+        autoRefreshToken: true,
+      },
+    });
+  }, []);
 
   const [password, setPassword] =
     useState("");
