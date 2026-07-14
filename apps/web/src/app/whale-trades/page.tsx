@@ -277,6 +277,66 @@ async function getWhaleTrades(): Promise<WhaleTrade[]> {
   }
 }
 
+
+function getClearTradeDecision(
+  trade: WhaleTrade
+): {
+  label: string;
+  reason: string;
+} {
+  const contractType =
+    getContractType(trade);
+
+  const estimatedSide = String(
+    trade.estimated_side ?? "UNKNOWN"
+  ).toUpperCase();
+
+  if (
+    estimatedSide === "BUY" &&
+    contractType === "call"
+  ) {
+    return {
+      label: "القرار: CALL — صعودي",
+      reason: "شراء عقد CALL محتمل",
+    };
+  }
+
+  if (
+    estimatedSide === "BUY" &&
+    contractType === "put"
+  ) {
+    return {
+      label: "القرار: PUT — هبوطي",
+      reason: "شراء عقد PUT محتمل",
+    };
+  }
+
+  if (
+    estimatedSide === "SELL" &&
+    contractType === "call"
+  ) {
+    return {
+      label: "القرار: PUT — هبوطي",
+      reason: "بيع عقد CALL محتمل",
+    };
+  }
+
+  if (
+    estimatedSide === "SELL" &&
+    contractType === "put"
+  ) {
+    return {
+      label: "القرار: CALL — صعودي",
+      reason: "بيع عقد PUT محتمل",
+    };
+  }
+
+  return {
+    label: "القرار: اتركها",
+    reason: "اتجاه التنفيذ غير محسوم",
+  };
+}
+
 export default async function WhaleTradesPage({
   searchParams,
 }: PageProps) {
@@ -907,7 +967,7 @@ export default async function WhaleTradesPage({
                           trade.estimated_side,
                         )}`}
                       >
-                        {getSideLabel(trade.estimated_side)}
+                        {getClearTradeDecision(trade).label}
                       </span>
 
                       <span className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-bold text-slate-300">
