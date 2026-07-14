@@ -408,7 +408,11 @@ export default async function WhaleTradesPage({
     if (isDailyIndex) {
       if (
         displayStrength < 90 ||
-        daysToExpiration !== 0
+        (
+          daysToExpiration === null ||
+          daysToExpiration < 1 ||
+          daysToExpiration > 3
+        )
       ) {
         return false;
       }
