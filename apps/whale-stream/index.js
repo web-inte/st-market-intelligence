@@ -1,5 +1,39 @@
 require("dotenv").config();
 
+
+function toSafeWhaleDbRow(input) {
+  if (Array.isArray(input)) {
+    return input.map(toSafeWhaleDbRow);
+  }
+
+  const row =
+    input && typeof input === "object"
+      ? input
+      : {};
+
+  return {
+    symbol: row.symbol ?? null,
+    option_ticker: row.option_ticker ?? null,
+    contract_type: row.contract_type ?? null,
+    premium_value: row.premium_value ?? null,
+    created_at:
+      row.created_at ??
+      new Date().toISOString(),
+
+    // جميع البيانات الإضافية محفوظة هنا
+    raw:
+      row.raw &&
+      typeof row.raw === "object"
+        ? {
+            ...row.raw,
+            full_processed_row: row,
+          }
+        : {
+            full_processed_row: row,
+          },
+  };
+}
+
 const http = require("http");
 const WebSocket = require("ws");
 const { createClient } = require("@supabase/supabase-js");
@@ -1027,7 +1061,7 @@ function buildReason({
 async function saveWhaleTrade(row) {
   const { error } = await supabase
     .from("whale_trades")
-    .insert(row);
+    .insert(toSafeWhaleDbRow(row));
 
   if (!error) {
     metrics.savedTrades += 1;
