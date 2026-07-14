@@ -630,6 +630,31 @@ function subscribeToQuote(optionTicker) {
    Option Contract Snapshot
 ========================================================= */
 
+
+function getSnapshotUnderlying(underlying) {
+  const symbol = String(underlying || "")
+    .trim()
+    .toUpperCase();
+
+  if (
+    symbol === "SPX" ||
+    symbol === "SPXW" ||
+    symbol === "I:SPX"
+  ) {
+    return "I:SPX";
+  }
+
+  if (
+    symbol === "NDX" ||
+    symbol === "NDXP" ||
+    symbol === "I:NDX"
+  ) {
+    return "I:NDX";
+  }
+
+  return symbol;
+}
+
 async function fetchContractSnapshot(
   underlying,
   optionTicker,
@@ -1114,7 +1139,7 @@ async function processCandidateTrade(
   try {
     snapshot =
       await fetchContractSnapshot(
-        parsed.underlying,
+        getSnapshotUnderlying(parsed.underlying),
         optionTicker,
       );
   } catch (error) {
