@@ -181,10 +181,10 @@ export default async function AccountPage() {
 
         <div className="mt-8 flex flex-wrap gap-3">
           <Link
-            href="/"
-            className="rounded-xl border border-white/10 px-5 py-3 font-bold"
+            href="/dashboard"
+            className="rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-5 py-3 font-bold text-cyan-300"
           >
-            الصفحة الرئيسية
+            دخول المنصة
           </Link>
 
           {isAdmin ? (
