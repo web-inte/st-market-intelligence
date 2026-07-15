@@ -1,159 +1,71 @@
-"use client";
-
-import Link from "next/link";
 import {
-  type FormEvent,
-  useMemo,
-  useState,
-} from "react";
+  type NextRequest,
+  NextResponse,
+} from "next/server";
 
-import { createClient } from "@/lib/supabase/client";
+import { createClient } from "@/lib/supabase/server";
 
-export default function ForgotPasswordPage() {
-  const supabase = useMemo(() => createClient(), []);
+export async function GET(
+  request: NextRequest
+) {
+  const code =
+    request.nextUrl.searchParams.get(
+      "code"
+    );
 
-  const [email, setEmail] = useState("");
-  const [loading, setLoading] =
-    useState(false);
-  const [error, setError] = useState("");
-  const [sent, setSent] = useState(false);
+  const requestedNext =
+    request.nextUrl.searchParams.get(
+      "next"
+    ) || "/account";
 
-  async function handleSubmit(
-    event: FormEvent<HTMLFormElement>
-  ) {
-    event.preventDefault();
+  const next =
+    requestedNext.startsWith("/") &&
+    !requestedNext.startsWith("//")
+      ? requestedNext
+      : "/account";
 
-    const normalizedEmail =
-      email.trim().toLowerCase();
-
-    if (
-      !normalizedEmail ||
-      !normalizedEmail.includes("@")
-    ) {
-      setError(
-        "أدخل بريدًا إلكترونيًا صحيحًا"
-      );
-      return;
-    }
-
-    setLoading(true);
-    setError("");
-
-    try {
-      const redirectTo =
-  "https://st-market.com/auth/callback?next=/update-password";
-
-      const { error: resetError } =
-        await supabase.auth.resetPasswordForEmail(
-          normalizedEmail,
-          {
-            redirectTo,
-          }
-        );
-
-      if (resetError) {
-        throw resetError;
-      }
-
-      setSent(true);
-    } catch (resetError) {
-      setError(
-        resetError instanceof Error
-          ? resetError.message
-          : "تعذر إرسال رابط الاستعادة"
-      );
-    } finally {
-      setLoading(false);
-    }
+  if (!code) {
+    return NextResponse.redirect(
+      new URL(
+        "/login?error=missing_auth_code",
+        request.url
+      )
+    );
   }
 
-  return (
-    <main
-      dir="rtl"
-      className="min-h-screen bg-slate-950 px-4 py-12 text-white"
-    >
-      <section className="mx-auto max-w-lg rounded-3xl border border-white/10 bg-slate-900 p-7 shadow-2xl">
-        <p className="text-sm font-bold text-cyan-300">
-          ST MARKET INTELLIGENCE
-        </p>
+  const supabase =
+    await createClient();
 
-        <h1 className="mt-3 text-3xl font-black">
-          استعادة كلمة المرور
-        </h1>
+  const { error } =
+    await supabase.auth
+      .exchangeCodeForSession(code);
 
-        <p className="mt-3 leading-7 text-slate-400">
-          اكتب بريدك الإلكتروني وسنرسل لك
-          رابطًا لتعيين كلمة مرور جديدة.
-        </p>
+  if (error) {
+    return NextResponse.redirect(
+      new URL(
+        "/login?error=auth_callback_failed",
+        request.url
+      )
+    );
+  }
 
-        {sent ? (
-          <div className="mt-7">
-            <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-5">
-              <p className="font-black text-emerald-300">
-                تم إرسال رابط الاستعادة
-              </p>
+  const forwardedHost =
+    request.headers.get(
+      "x-forwarded-host"
+    );
 
-              <p className="mt-2 text-sm leading-7 text-slate-300">
-                افتح أحدث رسالة وصلتك واضغط
-                رابط استعادة كلمة المرور.
-              </p>
-            </div>
+  const forwardedProto =
+    request.headers.get(
+      "x-forwarded-proto"
+    ) || "https";
 
-            <Link
-              href="/login"
-              className="mt-5 block text-center font-bold text-cyan-300"
-            >
-              العودة إلى تسجيل الدخول
-            </Link>
-          </div>
-        ) : (
-          <form
-            onSubmit={handleSubmit}
-            className="mt-7 space-y-5"
-          >
-            <label className="block">
-              <span className="mb-2 block text-sm text-slate-300">
-                البريد الإلكتروني
-              </span>
+  if (forwardedHost) {
+    return NextResponse.redirect(
+      `${forwardedProto}://${forwardedHost}${next}`
+    );
+  }
 
-              <input
-                type="email"
-                value={email}
-                onChange={(event) =>
-                  setEmail(event.target.value)
-                }
-                placeholder="name@example.com"
-                autoComplete="email"
-                dir="ltr"
-                className="w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-4 text-left outline-none transition focus:border-cyan-400"
-              />
-            </label>
-
-            {error ? (
-              <div className="rounded-xl border border-rose-400/20 bg-rose-400/10 p-4 text-sm text-rose-300">
-                {error}
-              </div>
-            ) : null}
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full rounded-xl bg-cyan-400 px-4 py-4 font-black text-slate-950 disabled:opacity-60"
-            >
-              {loading
-                ? "جارٍ الإرسال..."
-                : "إرسال رابط الاستعادة"}
-            </button>
-
-            <Link
-              href="/login"
-              className="block text-center font-bold text-slate-400"
-            >
-              العودة إلى تسجيل الدخول
-            </Link>
-          </form>
-        )}
-      </section>
-    </main>
+  return NextResponse.redirect(
+    new URL(next, request.url)
   );
 }
