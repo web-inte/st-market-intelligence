@@ -25,7 +25,7 @@ export async function GET(
     return NextResponse.redirect(
       new URL(
         "/login?error=missing_auth_code",
-        "https://st-market.com"
+        "https://www.st-market.com"
       )
     );
   }
@@ -48,12 +48,12 @@ export async function GET(
         `/login?error=auth_callback_failed&message=${encodeURIComponent(
           error.message
         )}`,
-        "https://st-market.com"
+        "https://www.st-market.com"
       )
     );
   }
 
   return NextResponse.redirect(
-    new URL(next, "https://st-market.com")
+    new URL(next, "https://www.st-market.com")
   );
 }

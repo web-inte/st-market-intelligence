@@ -5,7 +5,7 @@ import {
 
 import { createClient } from "@/lib/supabase/server";
 
-const APP_URL = "https://st-market.com";
+const APP_URL = "https://www.st-market.com";
 
 export async function GET(
   request: NextRequest
