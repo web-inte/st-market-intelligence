@@ -2,6 +2,45 @@ import { buildDecision } from "./decision-engine";
 
 export type Side = "CALL" | "PUT" | "NEUTRAL";
 
+export type AnalysisTradePlanTarget = {
+  index: number;
+  price: number;
+  movePct: number;
+  probability: number;
+  strength: number;
+  level: string;
+  source: "GAMMA" | "ESTIMATED";
+};
+
+export type AnalysisTradePlanStatus =
+  | "ACTIVE"
+  | "TARGET_1"
+  | "TARGET_2"
+  | "TARGET_3"
+  | "STOPPED";
+
+export type AnalysisTradePlan = {
+  id: string;
+  symbol: string;
+  side: Exclude<Side, "NEUTRAL">;
+  contractTicker: string;
+  entryPrice: number;
+  entryScore: number;
+  stopPrice: number | null;
+  targets: AnalysisTradePlanTarget[];
+  firstSeenAt: string;
+  lastSeenAt: string;
+  expiresAt: string;
+  currentPrice: number;
+  rawMovePct: number;
+  currentProfitPct: number;
+  ageMinutes: number;
+  lifecycleStatus: AnalysisTradePlanStatus;
+  lifecycleLabel: string;
+  highestTargetHit: number;
+  isNew: boolean;
+};
+
 export type OptionContract = {
   ticker: string;
   type: "call" | "put";
@@ -150,6 +189,8 @@ export type AnalysisResponse = {
     note: string;
   };
 
+  tradePlan?: AnalysisTradePlan | null;
+
   capturedAt?: string;
 };
 
@@ -166,6 +207,7 @@ export type Opportunity = {
   score: number;
   status: string;
   confidence: string;
+  tradePlan: AnalysisTradePlan | null;
 };
 
 export type MarketAnalysis = {
@@ -1088,5 +1130,7 @@ export function createOpportunity(
     status: marketAnalysis.decision.status,
     confidence:
       marketAnalysis.decision.confidence,
+    tradePlan:
+      analysis.tradePlan ?? null,
   };
 }

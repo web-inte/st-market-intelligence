@@ -1,4 +1,3 @@
-import { getOrCreateStockTradeSetup } from "@/lib/stock-trade-setup";
 import { cookies } from "next/headers";
 import {
   analyzeMarketData,
@@ -43,6 +42,81 @@ function percentFormat(value: number | null) {
   }
 
   return `${value.toFixed(2)}%`;
+}
+
+function formatFirstSeen(
+  value?: string
+) {
+  if (!value) {
+    return "غير متاح";
+  }
+
+  const date = new Date(value);
+
+  if (
+    Number.isNaN(
+      date.getTime()
+    )
+  ) {
+    return "غير متاح";
+  }
+
+  return new Intl.DateTimeFormat(
+    "ar-SA",
+    {
+      timeZone:
+        "Asia/Riyadh",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    }
+  ).format(date);
+}
+
+function formatAge(
+  minutes?: number
+) {
+  const safeMinutes =
+    Math.max(
+      0,
+      Math.floor(
+        Number(minutes) || 0
+      )
+    );
+
+  if (safeMinutes < 1) {
+    return "الآن";
+  }
+
+  if (safeMinutes < 60) {
+    return `منذ ${safeMinutes} دقيقة`;
+  }
+
+  const hours =
+    Math.floor(
+      safeMinutes / 60
+    );
+
+  const remainingMinutes =
+    safeMinutes % 60;
+
+  return remainingMinutes > 0
+    ? `منذ ${hours} س و${remainingMinutes} د`
+    : `منذ ${hours} ساعة`;
+}
+
+function profitClasses(
+  value: number
+) {
+  if (value > 0) {
+    return "text-emerald-300";
+  }
+
+  if (value < 0) {
+    return "text-rose-300";
+  }
+
+  return "text-slate-300";
 }
 
 function compactNumber(value: number) {
@@ -396,10 +470,10 @@ export default async function StockAnalysisPage({
       >
         <section className="mx-auto max-w-3xl">
           <a
-            href="/"
+            href="/dashboard"
             className="mb-7 inline-flex text-sm text-cyan-400"
           >
-            ← العودة للصفحة الرئيسية
+            ← العودة إلى المنصة
           </a>
 
           <div className="rounded-3xl border border-rose-900/60 bg-rose-950/20 p-6">
@@ -448,144 +522,63 @@ export default async function StockAnalysisPage({
   const sideStyle =
     sideClasses(decision.side);
 
-  const sessionOpen =
-    Number(quote.open);
+  const storedPlan =
+    analysis.tradePlan;
 
-  const previousClose =
-    Number(quote.previousClose);
+  const fallbackEntry =
+    Number(quote.price);
 
-  // دخول ثابت طوال الجلسة، وليس سعر لحظة فتح الصفحة
-  const stableEntry =
-    Number.isFinite(sessionOpen) &&
-    sessionOpen > 0
-      ? sessionOpen
-      : Number.isFinite(previousClose) &&
-          previousClose > 0
-        ? previousClose
-        : quote.price;
+  const fallbackPricePlan =
+    createPricePlan(
+      fallbackEntry,
+      decision.score,
+      decision.side
+    );
 
-  const fallbackPricePlan = createPricePlan(
-    stableEntry,
-    decision.score,
-    decision.side
-  );
-
-  const estimatedLevels =
-    fallbackPricePlan.levels.map(
-      (level) => ({
-        ...level,
-        kind: "estimated" as const,
+  const storedLevels =
+    storedPlan?.targets?.map(
+      (target) => ({
+        index: target.index,
+        price: target.price,
+        movePct:
+          target.movePct,
+        probability:
+          target.probability,
+        kind:
+          target.source ===
+          "GAMMA"
+            ? "gamma" as const
+            : "estimated" as const,
       })
-    );
+    ) || [];
 
-  const directGammaLevels =
-    buildGammaTargets(
-      options,
-      stableEntry,
-      decision.side,
-      decision.score
-    );
+  const pricePlan = {
+    entry:
+      storedPlan?.entryPrice &&
+      storedPlan.entryPrice > 0
+        ? storedPlan.entryPrice
+        : fallbackPricePlan.entry,
 
-  const initialLevels = [
-    ...directGammaLevels,
-    ...estimatedLevels.filter(
-      (estimated) =>
-        !directGammaLevels.some(
-          (gamma) =>
-            Math.abs(
-              gamma.price -
-              estimated.price
-            ) < 0.01
-        )
-    ),
-  ]
-    .slice(0, 3)
-    .map((level, index) => ({
-      ...level,
-      index: index + 1,
-    }));
+    stop:
+      storedPlan?.stopPrice &&
+      storedPlan.stopPrice > 0
+        ? storedPlan.stopPrice
+        : fallbackPricePlan.stop,
 
-  let pricePlan = {
-    ...fallbackPricePlan,
-    entry: stableEntry,
-    levels: initialLevels,
+    levels:
+      storedLevels.length > 0
+        ? storedLevels
+        : fallbackPricePlan.levels.map(
+            (level) => ({
+              ...level,
+              kind:
+                "estimated" as const,
+            })
+          ),
+
+    risk:
+      fallbackPricePlan.risk,
   };
-
-  if (
-    decision.side === "CALL" ||
-    decision.side === "PUT"
-  ) {
-    try {
-      const setup =
-        await getOrCreateStockTradeSetup({
-          symbol: analysis.symbol,
-          side: decision.side,
-
-          // مفتاح ثابت حسب السهم والاتجاه،
-          // ولا يتغير عند تغير العقد المقترح
-          contractTicker:
-            `${analysis.symbol}:${decision.side}`,
-
-          entryPrice: stableEntry,
-          score: decision.score,
-        });
-
-      const storedGammaLevels =
-        setup.targets.map(
-          (target) => ({
-            index: target.index,
-            price: target.price,
-            movePct: target.movePct,
-            probability:
-              target.probability,
-            kind: "gamma" as const,
-          })
-        );
-
-      const mergedLevels = [
-        ...storedGammaLevels,
-        ...directGammaLevels,
-        ...estimatedLevels,
-      ]
-        .filter(
-          (level, index, values) =>
-            values.findIndex(
-              (value) =>
-                Math.abs(
-                  value.price -
-                  level.price
-                ) < 0.01
-            ) === index
-        )
-        .slice(0, 3)
-        .map((level, index) => ({
-          ...level,
-          index: index + 1,
-        }));
-
-      pricePlan = {
-        entry:
-          Number.isFinite(
-            Number(setup.entryPrice)
-          ) &&
-          Number(setup.entryPrice) > 0
-            ? Number(setup.entryPrice)
-            : stableEntry,
-
-        stop:
-          setup.stopPrice ??
-          fallbackPricePlan.stop,
-
-        levels: mergedLevels,
-        risk: fallbackPricePlan.risk,
-      };
-    } catch (setupError) {
-      console.error(
-        "تعذر تحميل خطة القاما المحفوظة:",
-        setupError
-      );
-    }
-  }
 
   const positiveReasons = [
     consensus.label,
@@ -643,7 +636,20 @@ export default async function StockAnalysisPage({
   }
 الوقف التقديري: $${priceFormat(
     pricePlan.stop
-  )}`;
+  )}${
+    storedPlan
+      ? `
+أول ظهور: ${formatFirstSeen(
+          storedPlan.firstSeenAt
+        )}
+الأداء منذ الظهور: ${
+          storedPlan.currentProfitPct >= 0
+            ? "+"
+            : ""
+        }${storedPlan.currentProfitPct.toFixed(2)}%
+الحالة: ${storedPlan.lifecycleLabel}`
+      : ""
+  }`;
 
   const telegramShareUrl =
     `https://t.me/share/url?url=${encodeURIComponent(
@@ -738,7 +744,7 @@ export default async function StockAnalysisPage({
       <section className="mx-auto max-w-6xl px-5 py-8">
         <div className="mb-8 flex flex-wrap items-center justify-between gap-3">
           <a
-            href="/"
+            href="/dashboard"
             className="group inline-flex items-center gap-3 rounded-2xl border border-white/[0.08] bg-slate-900/70 px-4 py-3 text-sm font-semibold text-slate-200 shadow-lg shadow-black/20 backdrop-blur-xl transition duration-300 hover:-translate-y-0.5 hover:border-cyan-400/30 hover:bg-cyan-400/[0.06] hover:text-cyan-300 hover:shadow-cyan-950/30"
           >
             <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/[0.07] bg-slate-950/70 text-cyan-400">
@@ -747,11 +753,11 @@ export default async function StockAnalysisPage({
 
             <span className="text-right">
               <span className="block">
-                العودة لأفضل الفرص
+                العودة إلى المنصة
               </span>
 
               <span className="mt-0.5 block text-[11px] font-normal text-slate-500">
-                الصفحة الرئيسية
+                لوحة التحليل
               </span>
             </span>
           </a>
@@ -924,6 +930,62 @@ export default async function StockAnalysisPage({
             </span>
           </div>
 
+          {storedPlan ? (
+            <div className="mt-6 grid gap-3 sm:grid-cols-4">
+              <div className="rounded-2xl border border-cyan-400/15 bg-cyan-400/[0.05] p-4">
+                <p className="text-xs text-slate-500">
+                  وقت أول ظهور
+                </p>
+                <p className="mt-2 font-black text-cyan-300">
+                  {formatFirstSeen(
+                    storedPlan.firstSeenAt
+                  )}
+                </p>
+                <p className="mt-1 text-xs text-slate-600">
+                  {formatAge(
+                    storedPlan.ageMinutes
+                  )}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-4">
+                <p className="text-xs text-slate-500">
+                  السعر الحالي
+                </p>
+                <p className="mt-2 font-black text-white">
+                  ${priceFormat(
+                    quote.price
+                  )}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-4">
+                <p className="text-xs text-slate-500">
+                  الأداء منذ الظهور
+                </p>
+                <p
+                  className={`mt-2 font-black ${profitClasses(
+                    storedPlan.currentProfitPct
+                  )}`}
+                >
+                  {storedPlan.currentProfitPct >= 0
+                    ? "+"
+                    : ""}
+                  {storedPlan.currentProfitPct.toFixed(2)}%
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-4">
+                <p className="text-xs text-slate-500">
+                  حالة المتابعة
+                </p>
+                <p className="mt-2 font-black text-amber-300">
+                  {storedPlan.lifecycleLabel}
+                </p>
+              </div>
+            </div>
+          ) : null}
+
           {decision.side === "NEUTRAL" ? (
             <div className="mt-6 rounded-2xl border border-amber-400/20 bg-amber-400/[0.06] p-5 text-amber-200">
               لا توجد مستويات اتجاهية واضحة لأن التحليل الحالي محايد.
@@ -1020,7 +1082,7 @@ export default async function StockAnalysisPage({
           )}
 
           <p className="mt-5 text-xs leading-6 text-slate-600">
-            المستويات المعروضة تقديرية ومبنية على السعر الحالي ودرجة الإشارة واتجاه التحليل.
+            المستويات مبنية على سعر أول ظهور للفرصة وتبقى ثابتة طوال مدة الخطة، بينما يتحدث السعر الحالي تلقائيًا.
           </p>
         </section>
 

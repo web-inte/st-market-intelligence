@@ -330,7 +330,7 @@ export default function OptionsAnalyzerPage() {
       <section className="relative z-10 mx-auto max-w-7xl px-5 pb-16 pt-6 sm:px-8 lg:px-10">
         <nav className="mb-10 flex items-center justify-between rounded-2xl border border-white/[0.07] bg-slate-950/55 px-4 py-3 shadow-2xl shadow-black/20 backdrop-blur-xl sm:px-5">
           <a
-            href="/"
+            href="/dashboard"
             className="group flex items-center gap-3 rounded-xl transition hover:opacity-90"
           >
             <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-cyan-400/20 bg-cyan-400/10">
@@ -364,7 +364,7 @@ export default function OptionsAnalyzerPage() {
         </nav>
 
         <a
-          href="/"
+          href="/dashboard"
           className="group mb-8 inline-flex items-center gap-3 rounded-2xl border border-white/[0.08] bg-slate-950/65 px-4 py-3 text-sm font-semibold text-slate-200 shadow-lg shadow-black/20 backdrop-blur-xl transition duration-300 hover:-translate-y-0.5 hover:border-cyan-400/30 hover:bg-cyan-400/[0.06] hover:text-cyan-300"
         >
           <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/[0.07] bg-slate-950 text-cyan-400 transition group-hover:bg-cyan-400/10">
@@ -373,7 +373,7 @@ export default function OptionsAnalyzerPage() {
 
           <span className="text-right">
             <span className="block">
-              العودة للصفحة الرئيسية
+              العودة إلى المنصة
             </span>
 
             <span className="mt-0.5 block text-[11px] font-normal text-slate-500">

@@ -1,4 +1,13 @@
 import { NextResponse } from "next/server";
+
+import {
+  analyzeMarketData,
+  type AnalysisResponse,
+  type AnalysisTradePlan,
+} from "../../../../lib/analysis-engine";
+import {
+  syncAnalysisTradePlan,
+} from "../../../../lib/analysis-trade-plan";
 import { getOrSetCache } from "../../../../lib/market-cache";
 
 export const dynamic = "force-dynamic";
@@ -349,6 +358,8 @@ type AnalysisPayload = {
     chainComplete: boolean;
     note: string;
   };
+
+  tradePlan?: AnalysisTradePlan | null;
 
   capturedAt: string;
 };
@@ -1086,7 +1097,38 @@ export async function GET(
           )
       );
 
-    return NextResponse.json(analysis, {
+    const typedAnalysis =
+      analysis as AnalysisResponse;
+
+    const marketAnalysis =
+      analyzeMarketData(
+        typedAnalysis
+      );
+
+    let tradePlan:
+      AnalysisTradePlan | null =
+      null;
+
+    try {
+      tradePlan =
+        await syncAnalysisTradePlan(
+          typedAnalysis,
+          marketAnalysis.decision.side,
+          marketAnalysis.decision.score
+        );
+    } catch (tradePlanError) {
+      console.error(
+        `Trade plan sync failed for ${cleanSymbol}:`,
+        tradePlanError
+      );
+    }
+
+    return NextResponse.json(
+      {
+        ...analysis,
+        tradePlan,
+      },
+      {
       status: 200,
       headers: {
         /*
@@ -1099,7 +1141,8 @@ export async function GET(
         "X-Market-Cache":
           "memory-deduplicated",
       },
-    });
+    }
+    );
   } catch (error) {
     console.error(
       `Analysis API error for ${cleanSymbol}:`,

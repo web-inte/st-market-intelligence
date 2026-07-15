@@ -2,6 +2,8 @@ import Link from "next/link";
 import AutoRefresh from "./auto-refresh";
 
 import { hydrateWhaleTrade } from "@/lib/hydrate-whale-trade";
+import { detectOptionStrategies } from "@/lib/options-strategy-engine";
+import WhaleStrategyCard from "./whale-strategy-card";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
@@ -296,7 +298,7 @@ function getClearTradeDecision(
     contractType === "call"
   ) {
     return {
-      label: "القرار: CALL — صعودي",
+      label: "التدفق: صعودي — شراء CALL",
       reason: "شراء عقد CALL محتمل",
     };
   }
@@ -306,7 +308,7 @@ function getClearTradeDecision(
     contractType === "put"
   ) {
     return {
-      label: "القرار: PUT — هبوطي",
+      label: "التدفق: هبوطي — شراء PUT",
       reason: "شراء عقد PUT محتمل",
     };
   }
@@ -316,7 +318,7 @@ function getClearTradeDecision(
     contractType === "call"
   ) {
     return {
-      label: "القرار: PUT — هبوطي",
+      label: "التدفق: هبوطي — بيع CALL",
       reason: "بيع عقد CALL محتمل",
     };
   }
@@ -326,13 +328,13 @@ function getClearTradeDecision(
     contractType === "put"
   ) {
     return {
-      label: "القرار: CALL — صعودي",
+      label: "التدفق: صعودي — بيع PUT",
       reason: "بيع عقد PUT محتمل",
     };
   }
 
   return {
-    label: "القرار: اتركها",
+    label: "التدفق: غير محسوم",
     reason: "اتجاه التنفيذ غير محسوم",
   };
 }
@@ -537,6 +539,13 @@ export default async function WhaleTradesPage({
     return true;
   });
 
+  const strategyDetection =
+    detectOptionStrategies(filteredTrades);
+
+  const displayedItemsCount =
+    strategyDetection.strategies.length +
+    strategyDetection.unmatchedTrades.length;
+
   const totalPremium = filteredTrades.reduce(
     (total, trade) => total + safeNumber(trade.premium_value),
     0,
@@ -654,10 +663,10 @@ export default async function WhaleTradesPage({
 
             <div className="flex flex-wrap gap-3">
               <Link
-                href="/"
+                href="/dashboard"
                 className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-bold transition hover:bg-white/10"
               >
-                ← الرئيسية
+                ← العودة إلى المنصة
               </Link>
 
               <Link
@@ -674,7 +683,7 @@ export default async function WhaleTradesPage({
           <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
             <p className="text-xs text-slate-500">الصفقات الظاهرة</p>
             <p className="mt-2 text-3xl font-black">
-              {filteredTrades.length}
+              {displayedItemsCount}
             </p>
           </div>
 
@@ -857,7 +866,14 @@ export default async function WhaleTradesPage({
           </section>
         ) : (
           <section className="grid gap-5 xl:grid-cols-2">
-            {filteredTrades.map((trade) => {
+            {strategyDetection.strategies.map((strategy) => (
+              <WhaleStrategyCard
+                key={strategy.id}
+                strategy={strategy}
+              />
+            ))}
+
+            {strategyDetection.unmatchedTrades.map((trade) => {
               const contractType = getContractType(trade);
               const whaleScore = Math.round(
                 safeNumber(trade.whale_score),

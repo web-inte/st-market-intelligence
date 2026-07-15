@@ -652,10 +652,10 @@ export default function GammaLiquidityPage() {
         <header className="rounded-3xl border border-white/10 bg-white/[0.04] p-5 backdrop-blur sm:p-7">
           <div className="mb-5">
             <a
-              href="/"
+              href="/dashboard"
               className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.05] px-4 py-2.5 text-sm font-bold text-slate-300 transition hover:border-cyan-400/30 hover:text-cyan-300"
             >
-              ← العودة للقائمة الرئيسية
+              ← العودة إلى المنصة
             </a>
           </div>
           <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">

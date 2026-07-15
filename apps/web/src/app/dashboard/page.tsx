@@ -45,26 +45,168 @@ function clamp(value: number, minimum: number, maximum: number) {
   return Math.min(Math.max(value, minimum), maximum);
 }
 
-function getTradePlan(item: Opportunity) {
-  const strength = clamp(item.score, 50, 100);
-  const targetMovePct = 1.2 + ((strength - 50) / 50) * 1.8;
-  const stopMovePct = 0.75 + ((100 - strength) / 50) * 0.45;
-  const direction = item.side === "PUT" ? -1 : 1;
+function getTradePlan(
+  item: Opportunity
+) {
+  const strength =
+    clamp(item.score, 50, 100);
 
-  const entry = item.price;
-  const target = entry * (1 + direction * (targetMovePct / 100));
-  const stop = entry * (1 - direction * (stopMovePct / 100));
+  const targetMovePct =
+    1.2 +
+    ((strength - 50) / 50) *
+      1.8;
+
+  const stopMovePct =
+    0.75 +
+    ((100 - strength) / 50) *
+      0.45;
+
+  const direction =
+    item.side === "PUT"
+      ? -1
+      : 1;
+
+  const fallbackEntry =
+    item.price;
+
+  const fallbackTarget =
+    fallbackEntry *
+    (1 +
+      direction *
+        (targetMovePct / 100));
+
+  const fallbackStop =
+    fallbackEntry *
+    (1 -
+      direction *
+        (stopMovePct / 100));
+
+  const storedPlan =
+    item.tradePlan;
+
+  const target =
+    storedPlan?.targets?.[0];
 
   const risk =
-    item.score >= 85 ? "منخفضة" : item.score >= 70 ? "متوسطة" : "مرتفعة";
+    item.score >= 85
+      ? "منخفضة"
+      : item.score >= 70
+        ? "متوسطة"
+        : "مرتفعة";
 
   return {
-    entry,
-    target,
-    stop,
-    reachProbability: clamp(Math.round(item.score), 1, 99),
+    entry:
+      storedPlan?.entryPrice &&
+      storedPlan.entryPrice > 0
+        ? storedPlan.entryPrice
+        : fallbackEntry,
+
+    target:
+      target?.price &&
+      target.price > 0
+        ? target.price
+        : fallbackTarget,
+
+    stop:
+      storedPlan?.stopPrice &&
+      storedPlan.stopPrice > 0
+        ? storedPlan.stopPrice
+        : fallbackStop,
+
+    reachProbability:
+      target?.probability
+        ? clamp(
+            Math.round(
+              target.probability
+            ),
+            1,
+            99
+          )
+        : clamp(
+            Math.round(
+              item.score
+            ),
+            1,
+            99
+          ),
+
     risk,
   };
+}
+
+function formatFirstSeen(
+  value?: string
+) {
+  if (!value) {
+    return "غير متاح";
+  }
+
+  const date = new Date(value);
+
+  if (
+    Number.isNaN(
+      date.getTime()
+    )
+  ) {
+    return "غير متاح";
+  }
+
+  return new Intl.DateTimeFormat(
+    "ar-SA",
+    {
+      timeZone:
+        "Asia/Riyadh",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    }
+  ).format(date);
+}
+
+function formatAge(
+  minutes?: number
+) {
+  const safeMinutes =
+    Math.max(
+      0,
+      Math.floor(
+        Number(minutes) || 0
+      )
+    );
+
+  if (safeMinutes < 1) {
+    return "الآن";
+  }
+
+  if (safeMinutes < 60) {
+    return `منذ ${safeMinutes} دقيقة`;
+  }
+
+  const hours =
+    Math.floor(
+      safeMinutes / 60
+    );
+
+  const remainingMinutes =
+    safeMinutes % 60;
+
+  return remainingMinutes > 0
+    ? `منذ ${hours} س و${remainingMinutes} د`
+    : `منذ ${hours} ساعة`;
+}
+
+function profitClasses(
+  value: number
+) {
+  if (value > 0) {
+    return "text-emerald-400";
+  }
+
+  if (value < 0) {
+    return "text-rose-400";
+  }
+
+  return "text-slate-300";
 }
 
 type MarketSession = {
@@ -464,7 +606,19 @@ const validResults = results
 الدخول المقترح: $${plan.entry.toFixed(2)}
 الهدف: $${plan.target.toFixed(2)}
 الوقف: $${plan.stop.toFixed(2)}
-نسبة الوصول التقديرية: ${plan.reachProbability}%`;
+نسبة الوصول التقديرية: ${plan.reachProbability}%${
+  item.tradePlan
+    ? `
+أول ظهور: ${formatFirstSeen(
+        item.tradePlan.firstSeenAt
+      )}
+الأداء منذ الظهور: ${
+        item.tradePlan.currentProfitPct >= 0
+          ? "+"
+          : ""
+      }${item.tradePlan.currentProfitPct.toFixed(2)}%`
+    : ""
+}`;
 
     try {
       if (navigator.share) {
@@ -1059,6 +1213,57 @@ ${url}`);
                         </p>
                       </div>
                     </div>
+
+                    {item.tradePlan ? (
+                      <div className="mt-3 grid grid-cols-3 gap-2">
+                        <div className="rounded-xl border border-white/[0.05] bg-white/[0.02] p-3 text-center">
+                          <p className="text-[10px] text-slate-500">
+                            أول ظهور
+                          </p>
+                          <p className="mt-1 text-xs font-black text-cyan-300">
+                            {formatFirstSeen(
+                              item.tradePlan.firstSeenAt
+                            )}
+                          </p>
+                          <p className="mt-1 text-[10px] text-slate-600">
+                            {formatAge(
+                              item.tradePlan.ageMinutes
+                            )}
+                          </p>
+                        </div>
+
+                        <div className="rounded-xl border border-white/[0.05] bg-white/[0.02] p-3 text-center">
+                          <p className="text-[10px] text-slate-500">
+                            السعر الحالي
+                          </p>
+                          <p className="mt-1 text-xs font-black text-white">
+                            ${item.price.toFixed(2)}
+                          </p>
+                          <p className="mt-1 text-[10px] text-slate-600">
+                            {item.tradePlan.lifecycleLabel}
+                          </p>
+                        </div>
+
+                        <div className="rounded-xl border border-white/[0.05] bg-white/[0.02] p-3 text-center">
+                          <p className="text-[10px] text-slate-500">
+                            منذ الظهور
+                          </p>
+                          <p
+                            className={`mt-1 text-xs font-black ${profitClasses(
+                              item.tradePlan.currentProfitPct
+                            )}`}
+                          >
+                            {item.tradePlan.currentProfitPct >= 0
+                              ? "+"
+                              : ""}
+                            {item.tradePlan.currentProfitPct.toFixed(2)}%
+                          </p>
+                          <p className="mt-1 text-[10px] text-slate-600">
+                            حسب اتجاه الفرصة
+                          </p>
+                        </div>
+                      </div>
+                    ) : null}
 
                     <div className="mt-3 rounded-xl border border-emerald-400/10 bg-emerald-400/[0.05] px-4 py-3">
                       <div className="flex items-center justify-between gap-3 text-sm">
