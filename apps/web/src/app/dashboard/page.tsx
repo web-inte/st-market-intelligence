@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 
 import { useRouter } from "next/navigation";
@@ -646,6 +648,16 @@ ${url}`);
         </section>
 
         <header className="mx-auto mb-12 max-w-5xl text-center">
+          {/* ACCOUNT_BUTTON_BETWEEN_TICKER_AND_ANALYSIS */}
+          <div className="mb-3 mt-5 flex justify-center px-4">
+            <Link
+              href="/account"
+              className="inline-flex min-h-12 items-center justify-center rounded-2xl border border-cyan-400/30 bg-slate-950/90 px-8 py-3 text-base font-black text-cyan-300 shadow-lg shadow-cyan-500/10 transition hover:border-cyan-300 hover:bg-cyan-400/10"
+            >
+              حسابي
+            </Link>
+          </div>
+
           <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-cyan-400/15 bg-cyan-400/[0.06] px-4 py-2 text-xs font-medium text-cyan-300 backdrop-blur">
             <span className="h-1.5 w-1.5 rounded-full bg-cyan-300" />
             تحليل لحظي مدعوم بمحركات متعددة
