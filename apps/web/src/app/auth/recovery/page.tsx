@@ -2,211 +2,79 @@
 
 import {
   useEffect,
-  useMemo,
   useState,
 } from "react";
 
-import { createClient } from "@/lib/supabase/client";
-
 export default function RecoveryPage() {
-  const supabase = useMemo(
-    () => createClient(),
-    []
-  );
+  const [tokenHash, setTokenHash] =
+    useState<string | null>(null);
 
-  const [error, setError] =
-    useState("");
+  const [ready, setReady] =
+    useState(false);
 
   useEffect(() => {
-    let active = true;
+    const params =
+      new URLSearchParams(
+        window.location.search
+      );
 
-    async function processRecovery() {
-      try {
-        const currentUrl =
-          new URL(window.location.href);
+    setTokenHash(
+      params.get("token_hash")
+    );
 
-        const hash =
-          new URLSearchParams(
-            currentUrl.hash.replace(
-              /^#/,
-              ""
-            )
-          );
+    setReady(true);
+  }, []);
 
-        const accessToken =
-          hash.get("access_token");
-
-        const refreshToken =
-          hash.get("refresh_token");
-
-        const hashError =
-          hash.get(
-            "error_description"
-          );
-
-        if (hashError) {
-          throw new Error(
-            decodeURIComponent(hashError)
-          );
-        }
-
-        // الرابط الجديد بالتدفق المباشر
-        if (
-          accessToken &&
-          refreshToken
-        ) {
-          const { error: sessionError } =
-            await supabase.auth.setSession({
-              access_token: accessToken,
-              refresh_token: refreshToken,
-            });
-
-          if (sessionError) {
-            throw sessionError;
-          }
-
-          window.history.replaceState(
-            {},
-            "",
-            "/auth/recovery"
-          );
-
-          await new Promise(
-            (resolve) =>
-              window.setTimeout(
-                resolve,
-                300
-              )
-          );
-
-          if (active) {
-            window.location.replace(
-              "/update-password"
-            );
-          }
-
-          return;
-        }
-
-        // احتياط للرسائل التي تصل بكود PKCE
-        const code =
-          currentUrl.searchParams.get(
-            "code"
-          );
-
-        if (code) {
-          const { error: codeError } =
-            await supabase.auth
-              .exchangeCodeForSession(
-                code
-              );
-
-          if (codeError) {
-            throw codeError;
-          }
-
-          window.history.replaceState(
-            {},
-            "",
-            "/auth/recovery"
-          );
-
-          await new Promise(
-            (resolve) =>
-              window.setTimeout(
-                resolve,
-                300
-              )
-          );
-
-          if (active) {
-            window.location.replace(
-              "/update-password"
-            );
-          }
-
-          return;
-        }
-
-        const {
-          data: { session },
-        } =
-          await supabase.auth
-            .getSession();
-
-        if (session?.user) {
-          window.location.replace(
-            "/update-password"
-          );
-
-          return;
-        }
-
-        throw new Error(
-          "رابط الاستعادة غير صالح أو انتهت صلاحيته"
-        );
-      } catch (recoveryError) {
-        if (!active) {
-          return;
-        }
-
-        console.error(
-          "Recovery error:",
-          recoveryError
-        );
-
-        setError(
-          recoveryError instanceof Error
-            ? recoveryError.message
-            : "تعذر التحقق من رابط الاستعادة"
-        );
-      }
+  function continueRecovery() {
+    if (!tokenHash) {
+      return;
     }
 
-    void processRecovery();
-
-    return () => {
-      active = false;
-    };
-  }, [supabase]);
+    window.location.assign(
+      `/auth/recovery-callback?token_hash=${encodeURIComponent(
+        tokenHash
+      )}`
+    );
+  }
 
   return (
     <main
       dir="rtl"
       className="flex min-h-screen items-center justify-center bg-slate-950 px-4 text-white"
     >
-      <section className="w-full max-w-lg rounded-3xl border border-white/10 bg-slate-900 p-8 text-center">
-        <p className="text-sm font-bold text-cyan-400">
+      <section className="w-full max-w-lg rounded-3xl border border-white/10 bg-slate-900 p-7 text-center shadow-2xl">
+        <p className="text-sm font-bold text-cyan-300">
           ST MARKET INTELLIGENCE
         </p>
 
-        {error ? (
-          <>
-            <h1 className="mt-4 text-3xl font-black text-rose-300">
-              تعذر فتح رابط الاستعادة
-            </h1>
+        <h1 className="mt-4 text-3xl font-black">
+          استعادة كلمة المرور
+        </h1>
 
-            <p className="mt-4 leading-7 text-slate-300">
-              {error}
+        {!ready ? (
+          <p className="mt-5 text-slate-300">
+            جارٍ التحقق من الرابط...
+          </p>
+        ) : tokenHash ? (
+          <>
+            <p className="mt-5 leading-8 text-slate-300">
+              اضغط الزر التالي للانتقال إلى
+              صفحة تعيين كلمة المرور الجديدة.
             </p>
 
-            <a
-              href="/forgot-password"
-              className="mt-6 block rounded-xl bg-cyan-400 px-5 py-4 font-black text-slate-950"
+            <button
+              type="button"
+              onClick={continueRecovery}
+              className="mt-7 w-full rounded-xl bg-cyan-400 px-4 py-4 font-black text-slate-950"
             >
-              إرسال رابط جديد
-            </a>
+              متابعة استعادة كلمة المرور
+            </button>
           </>
         ) : (
-          <>
-            <h1 className="mt-4 text-3xl font-black">
-              جارٍ التحقق من الرابط
-            </h1>
-
-            <p className="mt-4 text-slate-400">
-              سيتم تحويلك تلقائيًا لتعيين كلمة مرور جديدة.
-            </p>
-          </>
+          <div className="mt-6 rounded-xl border border-rose-400/20 bg-rose-400/10 p-4 text-rose-300">
+            رابط الاستعادة غير صحيح. اطلب
+            رابطًا جديدًا.
+          </div>
         )}
       </section>
     </main>

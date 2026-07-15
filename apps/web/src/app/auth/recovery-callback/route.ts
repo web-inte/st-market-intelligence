@@ -5,56 +5,54 @@ import {
 
 import { createClient } from "@/lib/supabase/server";
 
-function appUrl(
-  request: NextRequest,
-  path: string
-) {
-  const host =
-    request.headers.get("x-forwarded-host");
-
-  const protocol =
-    request.headers.get("x-forwarded-proto") ||
-    "https";
-
-  if (host) {
-    return `${protocol}://${host}${path}`;
-  }
-
-  return new URL(path, request.url);
-}
+const APP_URL = "https://st-market.com";
 
 export async function GET(
   request: NextRequest
 ) {
-  const code =
-    request.nextUrl.searchParams.get("code");
+  const tokenHash =
+    request.nextUrl.searchParams.get(
+      "token_hash"
+    );
 
-  if (!code) {
+  if (!tokenHash) {
     return NextResponse.redirect(
-      appUrl(
-        request,
-        "/forgot-password?error=missing_recovery_code"
+      new URL(
+        "/forgot-password?error=missing_recovery_token",
+        APP_URL
       )
     );
   }
 
-  const supabase = await createClient();
+  const supabase =
+    await createClient();
 
   const { error } =
-    await supabase.auth.exchangeCodeForSession(
-      code
-    );
+    await supabase.auth.verifyOtp({
+      token_hash: tokenHash,
+      type: "recovery",
+    });
 
   if (error) {
+    console.error(
+      "Recovery verification error:",
+      error.message
+    );
+
     return NextResponse.redirect(
-      appUrl(
-        request,
-        "/forgot-password?error=recovery_failed"
+      new URL(
+        `/forgot-password?error=recovery_failed&message=${encodeURIComponent(
+          error.message
+        )}`,
+        APP_URL
       )
     );
   }
 
   return NextResponse.redirect(
-    appUrl(request, "/update-password")
+    new URL(
+      "/update-password",
+      APP_URL
+    )
   );
 }
