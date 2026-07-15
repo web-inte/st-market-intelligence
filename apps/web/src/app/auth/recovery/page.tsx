@@ -2,15 +2,29 @@
 
 import {
   useEffect,
+  useMemo,
   useState,
 } from "react";
 
+import { createClient } from "@/lib/supabase/client";
+
 export default function RecoveryPage() {
+  const supabase = useMemo(
+    () => createClient(),
+    []
+  );
+
   const [tokenHash, setTokenHash] =
     useState<string | null>(null);
 
   const [ready, setReady] =
     useState(false);
+
+  const [loading, setLoading] =
+    useState(false);
+
+  const [error, setError] =
+    useState("");
 
   useEffect(() => {
     const params =
@@ -25,16 +39,48 @@ export default function RecoveryPage() {
     setReady(true);
   }, []);
 
-  function continueRecovery() {
+  async function continueRecovery() {
     if (!tokenHash) {
+      setError(
+        "رابط الاستعادة غير صحيح. اطلب رابطًا جديدًا."
+      );
       return;
     }
 
-    window.location.assign(
-      `/auth/recovery-callback?token_hash=${encodeURIComponent(
-        tokenHash
-      )}`
-    );
+    setLoading(true);
+    setError("");
+
+    try {
+      const {
+        data,
+        error: verifyError,
+      } = await supabase.auth.verifyOtp({
+        token_hash: tokenHash,
+        type: "recovery",
+      });
+
+      if (verifyError) {
+        throw verifyError;
+      }
+
+      if (!data.session) {
+        throw new Error(
+          "تعذر إنشاء جلسة استعادة كلمة المرور"
+        );
+      }
+
+      window.location.replace(
+        "/update-password"
+      );
+    } catch (recoveryError) {
+      setError(
+        recoveryError instanceof Error
+          ? recoveryError.message
+          : "رابط الاستعادة غير صالح أو منتهي"
+      );
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -53,7 +99,7 @@ export default function RecoveryPage() {
 
         {!ready ? (
           <p className="mt-5 text-slate-300">
-            جارٍ التحقق من الرابط...
+            جارٍ تجهيز رابط الاستعادة...
           </p>
         ) : tokenHash ? (
           <>
@@ -62,12 +108,21 @@ export default function RecoveryPage() {
               صفحة تعيين كلمة المرور الجديدة.
             </p>
 
+            {error ? (
+              <div className="mt-5 rounded-xl border border-rose-400/20 bg-rose-400/10 p-4 text-rose-300">
+                {error}
+              </div>
+            ) : null}
+
             <button
               type="button"
+              disabled={loading}
               onClick={continueRecovery}
-              className="mt-7 w-full rounded-xl bg-cyan-400 px-4 py-4 font-black text-slate-950"
+              className="mt-7 w-full rounded-xl bg-cyan-400 px-4 py-4 font-black text-slate-950 disabled:opacity-60"
             >
-              متابعة استعادة كلمة المرور
+              {loading
+                ? "جارٍ التحقق..."
+                : "متابعة استعادة كلمة المرور"}
             </button>
           </>
         ) : (
