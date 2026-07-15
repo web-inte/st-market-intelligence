@@ -8,6 +8,7 @@ import {
 } from "@/lib/supabase/proxy";
 
 const PUBLIC_ROUTES = [
+  "/",
   "/login",
   "/register",
   "/forgot-password",
