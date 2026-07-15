@@ -6,6 +6,7 @@ import {
 import { updateSession } from "@/lib/supabase/proxy";
 
 const PUBLIC_ROUTES = [
+  "/auth/recovery-callback",
   "/api/analysis",
   "/login",
   "/register",

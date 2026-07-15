@@ -40,7 +40,7 @@ export default function ForgotPasswordPage() {
     setError("");
 
     try {
-      const redirectTo = `${window.location.origin}/auth/callback?next=/update-password`;
+      const redirectTo = "https://st-market.com/auth/recovery-callback";
 
       const { error: resetError } =
         await supabase.auth.resetPasswordForEmail(
