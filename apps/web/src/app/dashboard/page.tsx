@@ -136,6 +136,41 @@ function getTradePlan(
   };
 }
 
+function cleanContractTicker(value: string) {
+  return value.replace(/^O:/, "");
+}
+
+function formatExpiration(value: string) {
+  if (!value) {
+    return "غير متاح";
+  }
+
+  const date = new Date(`${value}T12:00:00Z`);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat("ar-SA", {
+    timeZone: "UTC",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(date);
+}
+
+function gammaRiskText(level: Opportunity["gammaRiskLevel"]) {
+  if (level === "LOW") {
+    return "منخفضة";
+  }
+
+  if (level === "HIGH") {
+    return "مرتفعة";
+  }
+
+  return "متوسطة";
+}
+
 function formatFirstSeen(
   value?: string
 ) {
@@ -418,10 +453,18 @@ const validResults = results
   .filter(
     (item) =>
       item.side !== "NEUTRAL" &&
-      item.score >= 70
+      item.score >= 70 &&
+      item.contract !== null &&
+      item.contractScore >= 75 &&
+      item.consensusStatus !== "CONFLICTED" &&
+      item.gammaRiskLevel !== "HIGH"
   )
-  .sort((a, b) => b.score - a.score)
-  .slice(0, 8);
+  .sort((a, b) =>
+    b.score - a.score ||
+    b.contractScore - a.contractScore ||
+    a.gammaRiskScore - b.gammaRiskScore
+  )
+  .slice(0, 5);
 
         setOpportunities(validResults);
 
@@ -600,14 +643,24 @@ const validResults = results
 
   async function shareOpportunity(item: Opportunity) {
     const plan = getTradePlan(item);
+    const contract = item.contract;
     const url = `${window.location.origin}/stocks/${encodeURIComponent(
       item.symbol,
     )}`;
     const text = `${item.symbol} | ${item.side}
-السعر الحالي: $${item.price.toFixed(2)}
-الدخول المقترح: $${plan.entry.toFixed(2)}
-الهدف: $${plan.target.toFixed(2)}
-الوقف: $${plan.stop.toFixed(2)}
+السعر الحالي للسهم: $${item.price.toFixed(2)}${
+  contract
+    ? `
+العقد المختار: ${contract.ticker}
+سترايك: $${contract.strike.toFixed(2)}
+الانتهاء: ${contract.expiration}
+سعر العقد المرجعي: $${contract.midpoint.toFixed(2)}
+جودة العقد: ${item.contractQuality} (${item.contractScore}/100)`
+    : ""
+}
+دخول السهم: $${plan.entry.toFixed(2)}
+هدف السهم الأول: $${plan.target.toFixed(2)}
+وقف السهم: $${plan.stop.toFixed(2)}
 نسبة الوصول التقديرية: ${plan.reachProbability}%${
   item.tradePlan
     ? `
@@ -1118,7 +1171,7 @@ ${url}`);
 
         {!loading && !error && opportunities.length === 0 ? (
           <div className="rounded-3xl border border-white/[0.07] bg-slate-950/60 p-10 text-center text-slate-400 backdrop-blur-xl">
-            لا توجد فرص متاحة حاليًا.
+            لا توجد فرصة اجتازت شروط العقد والتوافق والمخاطرة حاليًا.
           </div>
         ) : null}
 
@@ -1126,6 +1179,7 @@ ${url}`);
           <div className="grid gap-4 sm:grid-cols-2">
             {opportunities.map((item) => {
               const plan = getTradePlan(item);
+              const contract = item.contract;
 
               return (
                 <article
@@ -1172,6 +1226,20 @@ ${url}`);
                             {item.confidence}
                           </span>
                         </p>
+
+                        <div className="mt-3 flex flex-wrap gap-2 text-[10px] font-bold">
+                          <span className="rounded-lg border border-cyan-400/15 bg-cyan-400/[0.06] px-2.5 py-1 text-cyan-300">
+                            {item.contractQuality} • {item.contractScore}/100
+                          </span>
+
+                          <span className="rounded-lg border border-white/[0.07] bg-white/[0.03] px-2.5 py-1 text-slate-300">
+                            {item.consensusLabel}
+                          </span>
+
+                          <span className="rounded-lg border border-amber-400/15 bg-amber-400/[0.05] px-2.5 py-1 text-amber-300">
+                            مخاطرة القاما: {gammaRiskText(item.gammaRiskLevel)}
+                          </span>
+                        </div>
                       </div>
 
                       <div
@@ -1195,23 +1263,61 @@ ${url}`);
 
                     <div className="my-5 h-px bg-gradient-to-r from-transparent via-white/[0.07] to-transparent" />
 
+                    {contract ? (
+                      <div className="mb-4 overflow-hidden rounded-2xl border border-cyan-400/15 bg-cyan-400/[0.035]">
+                        <div className="flex flex-col gap-2 border-b border-white/[0.06] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                          <div>
+                            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-cyan-400">
+                              العقد المختار
+                            </p>
+                            <p dir="ltr" className="mt-1 break-all text-left text-sm font-black text-white">
+                              {cleanContractTicker(contract.ticker)}
+                            </p>
+                          </div>
+
+                          <div className="text-right sm:text-left">
+                            <p className="text-[10px] text-slate-500">سعر العقد المرجعي</p>
+                            <p className="mt-1 text-lg font-black text-cyan-300">
+                              ${contract.midpoint.toFixed(2)}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-px bg-white/[0.05] sm:grid-cols-6">
+                          {[
+                            ["السترايك", `$${contract.strike.toFixed(2)}`],
+                            ["الانتهاء", formatExpiration(contract.expiration)],
+                            ["دلتا", Math.abs(contract.delta).toFixed(2)],
+                            ["السبريد", contract.spreadPct === null ? "—" : `${contract.spreadPct.toFixed(1)}%`],
+                            ["الفوليوم", contract.volume.toLocaleString("en-US")],
+                            ["OI", contract.openInterest.toLocaleString("en-US")],
+                          ].map(([label, value]) => (
+                            <div key={label} className="bg-[#07111f]/90 px-2 py-3 text-center">
+                              <p className="text-[9px] text-slate-600">{label}</p>
+                              <p className="mt-1 text-[11px] font-black text-slate-200">{value}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+
                     <div className="grid grid-cols-3 gap-2">
                       <div className="rounded-2xl border border-white/[0.05] bg-white/[0.025] p-3 text-center">
-                        <p className="text-[11px] text-slate-500">الدخول</p>
+                        <p className="text-[11px] text-slate-500">دخول السهم</p>
                         <p className="mt-1 font-black text-white">
                           ${plan.entry.toFixed(2)}
                         </p>
                       </div>
 
                       <div className="rounded-2xl border border-emerald-400/10 bg-emerald-400/[0.04] p-3 text-center">
-                        <p className="text-[11px] text-slate-500">الهدف</p>
+                        <p className="text-[11px] text-slate-500">هدف السهم</p>
                         <p className="mt-1 font-black text-emerald-400">
                           ${plan.target.toFixed(2)}
                         </p>
                       </div>
 
                       <div className="rounded-2xl border border-amber-400/10 bg-amber-400/[0.04] p-3 text-center">
-                        <p className="text-[11px] text-slate-500">الوقف</p>
+                        <p className="text-[11px] text-slate-500">وقف السهم</p>
                         <p className="mt-1 font-black text-amber-400">
                           ${plan.stop.toFixed(2)}
                         </p>
@@ -1275,7 +1381,7 @@ ${url}`);
                           نسبة الوصول التقديرية: {plan.reachProbability}%
                         </span>
                         <span className="text-xs text-slate-400">
-                          المخاطرة: {plan.risk}
+                          المخاطرة السعرية: {plan.risk}
                         </span>
                       </div>
 
