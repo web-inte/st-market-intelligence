@@ -207,6 +207,17 @@ export type Opportunity = {
   score: number;
   status: string;
   confidence: string;
+
+  contract: OptionContract | null;
+  contractScore: number;
+  contractQuality: string;
+
+  consensusStatus: ConsensusResult["status"];
+  consensusLabel: string;
+
+  gammaRiskScore: number;
+  gammaRiskLevel: GammaRiskResult["riskLevel"];
+
   tradePlan: AnalysisTradePlan | null;
 };
 
@@ -363,15 +374,33 @@ export function calculateOpportunityScore(
         : 35;
 
   const score =
-    flowScore * 0.35 +
-    contractScore * 0.35 +
+    flowScore * 0.30 +
+    contractScore * 0.40 +
     momentumScore * 0.20 +
     alignmentScore * 0.10;
 
-  return Math.max(
+  const roundedScore = Math.max(
     0,
     Math.min(100, Math.round(score))
   );
+
+  /*
+    لا نسمح لتدفق قوي أو زخم مرتفع أن يخفي عقدًا ضعيفًا.
+    أفضل الفرص يجب أن تبدأ من عقد قابل للتنفيذ فعليًا.
+  */
+  if (contractScore < 60) {
+    return Math.min(roundedScore, 54);
+  }
+
+  if (contractScore < 70) {
+    return Math.min(roundedScore, 64);
+  }
+
+  if (contractScore < 75) {
+    return Math.min(roundedScore, 69);
+  }
+
+  return roundedScore;
 }
 
 export function calculateGammaScore(
@@ -1130,6 +1159,24 @@ export function createOpportunity(
     status: marketAnalysis.decision.status,
     confidence:
       marketAnalysis.decision.confidence,
+
+    contract:
+      marketAnalysis.selectedContract,
+    contractScore:
+      marketAnalysis.contractScore,
+    contractQuality:
+      marketAnalysis.contractQuality,
+
+    consensusStatus:
+      marketAnalysis.consensus.status,
+    consensusLabel:
+      marketAnalysis.consensus.label,
+
+    gammaRiskScore:
+      marketAnalysis.gammaRisk.score,
+    gammaRiskLevel:
+      marketAnalysis.gammaRisk.riskLevel,
+
     tradePlan:
       analysis.tradePlan ?? null,
   };
