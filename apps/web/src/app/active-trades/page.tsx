@@ -109,7 +109,7 @@ function formatDate(value: string) {
   }
 
   return new Intl.DateTimeFormat(
-    "ar-SA",
+    "ar-SA-u-ca-gregory",
     {
       year: "numeric",
       month: "2-digit",
