@@ -954,6 +954,32 @@ ${url}`);
 
           <button
             type="button"
+            onClick={() =>
+              router.push("/active-trades")
+            }
+            className="group flex items-center justify-between gap-4 rounded-3xl border border-emerald-400/20 bg-gradient-to-br from-emerald-500/10 via-slate-950/80 to-cyan-500/10 p-6 text-right transition duration-300 hover:-translate-y-1 hover:border-emerald-300/40 hover:shadow-[0_18px_45px_rgba(16,185,129,0.15)]"
+          >
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.15em] text-emerald-400">
+                المتابعة المباشرة
+              </p>
+
+              <h2 className="mt-2 text-xl font-black text-white">
+                الصفقات النشطة
+              </h2>
+
+              <p className="mt-2 text-sm leading-6 text-slate-400">
+                متابعة سعر العقد والربح والوقف وحالة الصفقة لحظيًا.
+              </p>
+            </div>
+
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-emerald-400/20 bg-emerald-400/10 text-2xl text-emerald-300 transition group-hover:scale-110">
+              ↗
+            </div>
+          </button>
+
+          <button
+            type="button"
             onClick={() => router.push("/options-analyzer")}
             className="group flex items-center justify-between gap-4 rounded-3xl border border-cyan-400/20 bg-slate-950/65 p-5 text-right shadow-2xl shadow-cyan-950/20 backdrop-blur-xl transition duration-300 hover:-translate-y-1 hover:border-cyan-400/40 sm:p-6"
           >
