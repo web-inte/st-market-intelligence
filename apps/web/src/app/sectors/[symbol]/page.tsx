@@ -60,6 +60,12 @@ type DetailResponse = {
   };
 };
 
+function sectorDetailStorageKey(
+  symbol: string
+) {
+  return `st-sector-detail-v11:${symbol}`;
+}
+
 function signed(value: number) {
   return `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
 }
@@ -145,11 +151,40 @@ export default function SectorDetailsPage() {
     let cancelled = false;
     let running = false;
 
+    try {
+      const cached =
+        window.localStorage.getItem(
+          sectorDetailStorageKey(
+            symbol
+          )
+        );
+
+      if (cached) {
+        const parsed =
+          JSON.parse(
+            cached
+          ) as DetailResponse;
+
+        if (
+          parsed?.ok &&
+          parsed.sector?.symbol ===
+            symbol
+        ) {
+          setData(parsed);
+          setLoading(false);
+        }
+      }
+    } catch (cacheError) {
+      console.warn(
+        "Failed to restore sector detail cache:",
+        cacheError
+      );
+    }
+
     async function load() {
       if (running) return;
 
       running = true;
-      setLoading(true);
 
       try {
         const response =
@@ -178,6 +213,22 @@ export default function SectorDetailsPage() {
         if (!cancelled) {
           setData(payload);
           setError("");
+
+          try {
+            window.localStorage.setItem(
+              sectorDetailStorageKey(
+                symbol
+              ),
+              JSON.stringify(
+                payload
+              )
+            );
+          } catch (cacheError) {
+            console.warn(
+              "Failed to save sector detail cache:",
+              cacheError
+            );
+          }
         }
       } catch (loadError) {
         if (!cancelled) {

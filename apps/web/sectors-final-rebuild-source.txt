@@ -1,0 +1,3299 @@
+
+
+==========================================================================================
+FILE: src/app/api/sectors/route.ts
+==========================================================================================
+
+import {
+  getOrSetCache,
+} from "../../../lib/market-cache";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+type CompanyDefinition = {
+  symbol: string;
+  name: string;
+};
+
+type SectorDefinition = {
+  symbol: string;
+  name: string;
+  icon: string;
+  companies: CompanyDefinition[];
+};
+
+type Trend = "UP" | "DOWN" | "FLAT";
+
+type MassiveGroupedRow = {
+  T?: string;
+  c?: number;
+  v?: number;
+  t?: number;
+};
+
+type MassiveGroupedResponse = {
+  results?: MassiveGroupedRow[];
+  error?: string;
+  message?: string;
+};
+
+type FinnhubQuote = {
+  c?: number;
+  pc?: number;
+  t?: number;
+};
+
+type MarketMetrics = {
+  symbol: string;
+  price: number;
+  dailyChangePct: number;
+  fiveDayChangePct: number;
+  relativeStrengthPct: number;
+  volumeRatio: number;
+  strengthScore: number;
+  status: string;
+  trend: Trend;
+  flowState: string;
+  dataAvailable: boolean;
+  dataError: string | null;
+};
+
+type SectorItem = MarketMetrics & {
+  name: string;
+  icon: string;
+  rank: number;
+  rotationScore: number;
+  companies: CompanyDefinition[];
+};
+
+type CompanyItem = MarketMetrics &
+  CompanyDefinition & {
+    rank: number;
+  };
+
+type SessionDates = {
+  latest: Date;
+  previous: Date;
+  fiveDay: Date;
+  dailyReference: "LATEST" | "PREVIOUS";
+};
+
+const MASSIVE_ORIGIN =
+  "https://api.massive.com";
+
+const FINNHUB_ORIGIN =
+  "https://finnhub.io/api/v1";
+
+const SECTORS: SectorDefinition[] = [
+  {
+    symbol: "XLK",
+    name: "التكنولوجيا",
+    icon: "💻",
+    companies: [
+      { symbol: "AAPL", name: "آبل" },
+      { symbol: "MSFT", name: "مايكروسوفت" },
+      { symbol: "NVDA", name: "إنفيديا" },
+      { symbol: "AVGO", name: "برودكوم" },
+    ],
+  },
+  {
+    symbol: "SOXX",
+    name: "أشباه الموصلات",
+    icon: "🧩",
+    companies: [
+      { symbol: "NVDA", name: "إنفيديا" },
+      { symbol: "AVGO", name: "برودكوم" },
+      { symbol: "AMD", name: "إيه إم دي" },
+      { symbol: "QCOM", name: "كوالكوم" },
+      { symbol: "MU", name: "ميكرون" },
+    ],
+  },
+  {
+    symbol: "XLF",
+    name: "البنوك والخدمات المالية",
+    icon: "🏦",
+    companies: [
+      { symbol: "JPM", name: "جي بي مورغان" },
+      { symbol: "BAC", name: "بنك أوف أمريكا" },
+      { symbol: "GS", name: "غولدمان ساكس" },
+      { symbol: "MS", name: "مورغان ستانلي" },
+      { symbol: "V", name: "فيزا" },
+      { symbol: "MA", name: "ماستركارد" },
+    ],
+  },
+  {
+    symbol: "XLE",
+    name: "الطاقة",
+    icon: "⛽",
+    companies: [
+      { symbol: "XOM", name: "إكسون موبيل" },
+      { symbol: "CVX", name: "شيفرون" },
+      { symbol: "COP", name: "كونوكو فيليبس" },
+      { symbol: "SLB", name: "شلمبرجير" },
+    ],
+  },
+  {
+    symbol: "XLV",
+    name: "الرعاية الصحية",
+    icon: "🏥",
+    companies: [
+      { symbol: "LLY", name: "إيلي ليلي" },
+      { symbol: "UNH", name: "يونايتد هيلث" },
+      { symbol: "JNJ", name: "جونسون آند جونسون" },
+      { symbol: "ABBV", name: "آبفي" },
+    ],
+  },
+  {
+    symbol: "XLI",
+    name: "الصناعات",
+    icon: "🏭",
+    companies: [
+      { symbol: "GE", name: "جي إي إيروسبيس" },
+      { symbol: "CAT", name: "كاتربيلر" },
+      { symbol: "HON", name: "هانيويل" },
+      { symbol: "BA", name: "بوينغ" },
+    ],
+  },
+  {
+    symbol: "XLY",
+    name: "السلع الاستهلاكية الكمالية",
+    icon: "🛒",
+    companies: [
+      { symbol: "AMZN", name: "أمازون" },
+      { symbol: "TSLA", name: "تسلا" },
+      { symbol: "HD", name: "هوم ديبوت" },
+      { symbol: "MCD", name: "ماكدونالدز" },
+    ],
+  },
+  {
+    symbol: "XLP",
+    name: "السلع الاستهلاكية الأساسية",
+    icon: "🥤",
+    companies: [
+      { symbol: "COST", name: "كوستكو" },
+      { symbol: "WMT", name: "وولمارت" },
+      { symbol: "KO", name: "كوكاكولا" },
+      { symbol: "PG", name: "بروكتر آند غامبل" },
+      { symbol: "PEP", name: "بيبسيكو" },
+    ],
+  },
+  {
+    symbol: "XLC",
+    name: "خدمات الاتصالات",
+    icon: "📡",
+    companies: [
+      { symbol: "META", name: "ميتا" },
+      { symbol: "GOOGL", name: "ألفابت" },
+      { symbol: "NFLX", name: "نتفليكس" },
+      { symbol: "CMCSA", name: "كومكاست" },
+    ],
+  },
+  {
+    symbol: "XLB",
+    name: "المواد الأساسية",
+    icon: "🧱",
+    companies: [
+      { symbol: "LIN", name: "ليندي" },
+      { symbol: "SHW", name: "شيروين ويليامز" },
+      { symbol: "FCX", name: "فريبورت ماكموران" },
+    ],
+  },
+  {
+    symbol: "XLRE",
+    name: "العقارات",
+    icon: "🏢",
+    companies: [
+      { symbol: "PLD", name: "برولوجيس" },
+      { symbol: "AMT", name: "أمريكان تاور" },
+      { symbol: "O", name: "ريالتي إنكم" },
+    ],
+  },
+  {
+    symbol: "XLU",
+    name: "المرافق",
+    icon: "⚡",
+    companies: [
+      { symbol: "NEE", name: "نكست إيرا إنرجي" },
+      { symbol: "SO", name: "ساذرن كومباني" },
+      { symbol: "DUK", name: "ديوك إنرجي" },
+    ],
+  },
+];
+
+function num(
+  value: unknown,
+  fallback = 0
+) {
+  const parsed =
+    Number(value);
+
+  return Number.isFinite(parsed)
+    ? parsed
+    : fallback;
+}
+
+function round(
+  value: number,
+  digits = 2
+) {
+  const factor =
+    10 ** digits;
+
+  return (
+    Math.round(
+      value * factor
+    ) / factor
+  );
+}
+
+function clamp(
+  value: number,
+  minimum: number,
+  maximum: number
+) {
+  return Math.min(
+    Math.max(
+      value,
+      minimum
+    ),
+    maximum
+  );
+}
+
+function percentChange(
+  current: number,
+  previous: number
+) {
+  return previous > 0
+    ? ((current - previous) /
+        previous) *
+        100
+    : 0;
+}
+
+function dateKey(
+  date: Date
+) {
+  return date
+    .toISOString()
+    .slice(0, 10);
+}
+
+function statusLabel(
+  score: number,
+  available: boolean
+) {
+  if (!available) {
+    return "بيانات غير متاحة";
+  }
+
+  if (score >= 80) {
+    return "قوي جدًا";
+  }
+
+  if (score >= 65) {
+    return "إيجابي";
+  }
+
+  if (score >= 45) {
+    return "محايد";
+  }
+
+  if (score >= 30) {
+    return "ضعيف";
+  }
+
+  return "ضعيف جدًا";
+}
+
+function flowState(
+  score: number,
+  available: boolean
+) {
+  if (!available) {
+    return "غير متاح";
+  }
+
+  if (score >= 1.5) {
+    return "دخول سيولة نسبي قوي";
+  }
+
+  if (score >= 0.45) {
+    return "دخول سيولة نسبي";
+  }
+
+  if (score <= -1.5) {
+    return "خروج سيولة نسبي قوي";
+  }
+
+  if (score <= -0.45) {
+    return "خروج سيولة نسبي";
+  }
+
+  return "تدفق متوازن";
+}
+
+function calculateRotationScore(
+  metrics: Pick<
+    MarketMetrics,
+    | "dailyChangePct"
+    | "fiveDayChangePct"
+    | "relativeStrengthPct"
+    | "volumeRatio"
+  >
+) {
+  return round(
+    metrics.relativeStrengthPct *
+      0.55 +
+      metrics.fiveDayChangePct *
+        0.28 +
+      metrics.dailyChangePct *
+        0.17 +
+      clamp(
+        (metrics.volumeRatio - 1) *
+          1.4,
+        -1.2,
+        1.4
+      ),
+    3
+  );
+}
+
+function unavailableMetrics(
+  symbol: string,
+  error: string
+): MarketMetrics {
+  return {
+    symbol,
+    price: 0,
+    dailyChangePct: 0,
+    fiveDayChangePct: 0,
+    relativeStrengthPct: 0,
+    volumeRatio: 0,
+    strengthScore: 0,
+    status:
+      statusLabel(
+        0,
+        false
+      ),
+    trend: "FLAT",
+    flowState:
+      "غير متاح",
+    dataAvailable: false,
+    dataError: error,
+  };
+}
+
+function previousBusinessDay(
+  date: Date,
+  count = 1
+) {
+  const result =
+    new Date(date);
+
+  let moved = 0;
+
+  while (
+    moved < count
+  ) {
+    result.setUTCDate(
+      result.getUTCDate() -
+        1
+    );
+
+    const day =
+      result.getUTCDay();
+
+    if (
+      day !== 0 &&
+      day !== 6
+    ) {
+      moved += 1;
+    }
+  }
+
+  return result;
+}
+
+function getNewYorkParts() {
+  const parts =
+    new Intl.DateTimeFormat(
+      "en-US",
+      {
+        timeZone:
+          "America/New_York",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        weekday: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      }
+    ).formatToParts(
+      new Date()
+    );
+
+  return Object.fromEntries(
+    parts.map(
+      (part) => [
+        part.type,
+        part.value,
+      ]
+    )
+  );
+}
+
+function getSessionDates(): SessionDates {
+  const parts =
+    getNewYorkParts();
+
+  const today =
+    new Date(
+      Date.UTC(
+        Number(parts.year),
+        Number(parts.month) -
+          1,
+        Number(parts.day)
+      )
+    );
+
+  const weekday =
+    String(parts.weekday);
+
+  const hour =
+    Number(parts.hour) %
+    24;
+
+  const minute =
+    Number(parts.minute);
+
+  const isWeekday =
+    [
+      "Mon",
+      "Tue",
+      "Wed",
+      "Thu",
+      "Fri",
+    ].includes(
+      weekday
+    );
+
+  const afterClose =
+    hour > 16 ||
+    (hour === 16 &&
+      minute >= 15);
+
+  const latest =
+    isWeekday &&
+    afterClose
+      ? today
+      : previousBusinessDay(
+          today,
+          1
+        );
+
+  return {
+    latest,
+    previous:
+      previousBusinessDay(
+        latest,
+        1
+      ),
+    fiveDay:
+      previousBusinessDay(
+        latest,
+        5
+      ),
+    dailyReference:
+      isWeekday &&
+      afterClose
+        ? "PREVIOUS"
+        : "LATEST",
+  };
+}
+
+async function fetchGroupedDirect(
+  date: string
+) {
+  const apiKey =
+    process.env.MASSIVE_API_KEY;
+
+  if (!apiKey) {
+    throw new Error(
+      "MASSIVE_API_KEY غير موجود."
+    );
+  }
+
+  const url =
+    `${MASSIVE_ORIGIN}/v2/aggs/grouped/locale/us/market/stocks/${date}` +
+    `?adjusted=true&include_otc=false&apiKey=${encodeURIComponent(
+      apiKey
+    )}`;
+
+  const controller =
+    new AbortController();
+
+  const timeout =
+    setTimeout(
+      () =>
+        controller.abort(),
+      25_000
+    );
+
+  try {
+    const response =
+      await fetch(
+        url,
+        {
+          cache: "no-store",
+          headers: {
+            Accept:
+              "application/json",
+            Authorization:
+              `Bearer ${apiKey}`,
+          },
+          signal:
+            controller.signal,
+        }
+      );
+
+    const payload =
+      (await response.json()) as
+        MassiveGroupedResponse;
+
+    if (!response.ok) {
+      throw new Error(
+        payload.error ||
+          payload.message ||
+          `تعذر تحميل جلسة ${date} من Massive.`
+      );
+    }
+
+    return (
+      payload.results ??
+      []
+    );
+  } finally {
+    clearTimeout(
+      timeout
+    );
+  }
+}
+
+function getGroupedRows(
+  date: string
+) {
+  return getOrSetCache<
+    MassiveGroupedRow[]
+  >(
+    `sector-grouped:v8:${date}`,
+    {
+      ttlMs:
+        15 * 60_000,
+      staleMs:
+        2 * 60 * 60_000,
+    },
+    () =>
+      fetchGroupedDirect(
+        date
+      )
+  );
+}
+
+function groupedMap(
+  rows: MassiveGroupedRow[]
+) {
+  const result =
+    new Map<
+      string,
+      MassiveGroupedRow
+    >();
+
+  for (
+    const row of rows
+  ) {
+    const symbol =
+      String(
+        row.T ?? ""
+      ).toUpperCase();
+
+    if (symbol) {
+      result.set(
+        symbol,
+        row
+      );
+    }
+  }
+
+  return result;
+}
+
+async function fetchFinnhubPriceDirect(
+  symbol: string
+) {
+  const apiKey =
+    process.env.FINNHUB_API_KEY;
+
+  if (!apiKey) {
+    return 0;
+  }
+
+  const url =
+    `${FINNHUB_ORIGIN}/quote` +
+    `?symbol=${encodeURIComponent(
+      symbol
+    )}` +
+    `&token=${encodeURIComponent(
+      apiKey
+    )}`;
+
+  const controller =
+    new AbortController();
+
+  const timeout =
+    setTimeout(
+      () =>
+        controller.abort(),
+      8_000
+    );
+
+  try {
+    const response =
+      await fetch(
+        url,
+        {
+          cache: "no-store",
+          signal:
+            controller.signal,
+        }
+      );
+
+    if (!response.ok) {
+      return 0;
+    }
+
+    const quote =
+      (await response.json()) as
+        FinnhubQuote;
+
+    const price =
+      num(quote.c);
+
+    return price > 0
+      ? price
+      : 0;
+  } catch {
+    return 0;
+  } finally {
+    clearTimeout(
+      timeout
+    );
+  }
+}
+
+function getFinnhubPrice(
+  symbol: string
+) {
+  return getOrSetCache<number>(
+    `sector-price:v8:${symbol}`,
+    {
+      ttlMs: 60_000,
+      staleMs:
+        5 * 60_000,
+    },
+    () =>
+      fetchFinnhubPriceDirect(
+        symbol
+      )
+  );
+}
+
+async function mapLimit<
+  T,
+  R
+>(
+  items: T[],
+  concurrency: number,
+  worker: (
+    item: T
+  ) => Promise<R>
+) {
+  const results =
+    new Array<R>(
+      items.length
+    );
+
+  let nextIndex = 0;
+
+  async function run() {
+    while (true) {
+      const index =
+        nextIndex;
+
+      nextIndex += 1;
+
+      if (
+        index >=
+        items.length
+      ) {
+        return;
+      }
+
+      results[index] =
+        await worker(
+          items[index]
+        );
+    }
+  }
+
+  await Promise.all(
+    Array.from(
+      {
+        length:
+          Math.min(
+            concurrency,
+            Math.max(
+              items.length,
+              1
+            )
+          ),
+      },
+      () => run()
+    )
+  );
+
+  return results;
+}
+
+async function getPrices(
+  symbols: string[]
+) {
+  const cleanSymbols =
+    Array.from(
+      new Set(
+        symbols.map(
+          (symbol) =>
+            symbol
+              .trim()
+              .toUpperCase()
+        )
+      )
+    );
+
+  const pairs =
+    await mapLimit(
+      cleanSymbols,
+      4,
+      async (
+        symbol
+      ) =>
+        [
+          symbol,
+          await getFinnhubPrice(
+            symbol
+          ),
+        ] as const
+    );
+
+  return new Map<
+    string,
+    number
+  >(pairs);
+}
+
+async function loadMarketContext(
+  symbols: string[]
+) {
+  const dates =
+    getSessionDates();
+
+  const [
+    latestRows,
+    previousRows,
+    fiveDayRows,
+    prices,
+  ] =
+    await Promise.all([
+      getGroupedRows(
+        dateKey(
+          dates.latest
+        )
+      ),
+      getGroupedRows(
+        dateKey(
+          dates.previous
+        )
+      ),
+      getGroupedRows(
+        dateKey(
+          dates.fiveDay
+        )
+      ),
+      getPrices(
+        symbols
+      ),
+    ]);
+
+  return {
+    dates,
+    latestMap:
+      groupedMap(
+        latestRows
+      ),
+    previousMap:
+      groupedMap(
+        previousRows
+      ),
+    fiveDayMap:
+      groupedMap(
+        fiveDayRows
+      ),
+    prices,
+  };
+}
+
+function buildMetrics(
+  symbol: string,
+  currentPrice: number,
+  latest:
+    | MassiveGroupedRow
+    | undefined,
+  previous:
+    | MassiveGroupedRow
+    | undefined,
+  fiveDay:
+    | MassiveGroupedRow
+    | undefined,
+  dailyReference:
+    | "LATEST"
+    | "PREVIOUS",
+  benchmarkFiveDayChangePct = 0
+): MarketMetrics {
+  if (
+    !latest ||
+    !previous ||
+    !fiveDay
+  ) {
+    return unavailableMetrics(
+      symbol,
+      "بيانات Massive التاريخية غير مكتملة."
+    );
+  }
+
+  const latestClose =
+    num(latest.c);
+
+  const previousClose =
+    num(previous.c);
+
+  const fiveDayClose =
+    num(fiveDay.c);
+
+  const price =
+    currentPrice > 0
+      ? currentPrice
+      : latestClose;
+
+  const dailyReferenceClose =
+    dailyReference ===
+    "PREVIOUS"
+      ? previousClose
+      : latestClose;
+
+  if (
+    price <= 0 ||
+    dailyReferenceClose <= 0 ||
+    fiveDayClose <= 0
+  ) {
+    return unavailableMetrics(
+      symbol,
+      "تعذر حساب بيانات القطاع."
+    );
+  }
+
+  const dailyChangePct =
+    round(
+      percentChange(
+        price,
+        dailyReferenceClose
+      )
+    );
+
+  const fiveDayChangePct =
+    round(
+      percentChange(
+        price,
+        fiveDayClose
+      )
+    );
+
+  const latestVolume =
+    num(latest.v);
+
+  const previousVolume =
+    num(previous.v);
+
+  const volumeRatio =
+    previousVolume > 0
+      ? round(
+          latestVolume /
+            previousVolume
+        )
+      : 0;
+
+  const relativeStrengthPct =
+    round(
+      fiveDayChangePct -
+        benchmarkFiveDayChangePct
+    );
+
+  const volumeImpact =
+    clamp(
+      (volumeRatio - 1) *
+        7,
+      -7,
+      8
+    );
+
+  const strengthScore =
+    clamp(
+      Math.round(
+        50 +
+          dailyChangePct *
+            8 +
+          fiveDayChangePct *
+            4 +
+          relativeStrengthPct *
+            6 +
+          volumeImpact
+      ),
+      0,
+      100
+    );
+
+  const metrics = {
+    symbol,
+    price:
+      round(
+        price
+      ),
+    dailyChangePct,
+    fiveDayChangePct,
+    relativeStrengthPct,
+    volumeRatio,
+    strengthScore,
+    status:
+      statusLabel(
+        strengthScore,
+        true
+      ),
+    trend:
+      dailyChangePct >
+      0.05
+        ? ("UP" as const)
+        : dailyChangePct <
+            -0.05
+          ? ("DOWN" as const)
+          : ("FLAT" as const),
+    dataAvailable: true,
+    dataError: null,
+  };
+
+  return {
+    ...metrics,
+    flowState:
+      flowState(
+        calculateRotationScore(
+          metrics
+        ),
+        true
+      ),
+  };
+}
+
+function sortByStrength<
+  T extends {
+    dataAvailable: boolean;
+    strengthScore: number;
+    relativeStrengthPct: number;
+  }
+>(
+  items: T[]
+) {
+  return [...items].sort(
+    (
+      left,
+      right
+    ) => {
+      if (
+        left.dataAvailable !==
+        right.dataAvailable
+      ) {
+        return left.dataAvailable
+          ? -1
+          : 1;
+      }
+
+      if (
+        right.strengthScore !==
+        left.strengthScore
+      ) {
+        return (
+          right.strengthScore -
+          left.strengthScore
+        );
+      }
+
+      return (
+        right.relativeStrengthPct -
+        left.relativeStrengthPct
+      );
+    }
+  );
+}
+
+async function loadOverview() {
+  const symbols = [
+    "SPY",
+    ...SECTORS.map(
+      (sector) =>
+        sector.symbol
+    ),
+  ];
+
+  const context =
+    await loadMarketContext(
+      symbols
+    );
+
+  const benchmark =
+    buildMetrics(
+      "SPY",
+      context.prices.get(
+        "SPY"
+      ) ?? 0,
+      context.latestMap.get(
+        "SPY"
+      ),
+      context.previousMap.get(
+        "SPY"
+      ),
+      context.fiveDayMap.get(
+        "SPY"
+      ),
+      context.dates
+        .dailyReference,
+      0
+    );
+
+  if (
+    !benchmark.dataAvailable
+  ) {
+    throw new Error(
+      "تعذر تحميل بيانات SPY المرجعية."
+    );
+  }
+
+  const sectors =
+    sortByStrength(
+      SECTORS.map(
+        (definition) => {
+          const metrics =
+            buildMetrics(
+              definition.symbol,
+              context.prices.get(
+                definition.symbol
+              ) ?? 0,
+              context.latestMap.get(
+                definition.symbol
+              ),
+              context.previousMap.get(
+                definition.symbol
+              ),
+              context.fiveDayMap.get(
+                definition.symbol
+              ),
+              context.dates
+                .dailyReference,
+              benchmark
+                .fiveDayChangePct
+            );
+
+          return {
+            ...metrics,
+            name:
+              definition.name,
+            icon:
+              definition.icon,
+            companies:
+              definition.companies,
+            rank: 0,
+            rotationScore:
+              metrics.dataAvailable
+                ? calculateRotationScore(
+                    metrics
+                  )
+                : -999,
+          };
+        }
+      )
+    ).map(
+      (
+        sector,
+        index
+      ) => ({
+        ...sector,
+        rank:
+          index + 1,
+      })
+    );
+
+  const availableSectors =
+    sectors.filter(
+      (sector) =>
+        sector.dataAvailable
+    );
+
+  const risingCount =
+    availableSectors.filter(
+      (sector) =>
+        sector.trend ===
+        "UP"
+    ).length;
+
+  const fallingCount =
+    availableSectors.filter(
+      (sector) =>
+        sector.trend ===
+        "DOWN"
+    ).length;
+
+  const flatCount =
+    availableSectors.length -
+    risingCount -
+    fallingCount;
+
+  const breadthDifference =
+    risingCount -
+    fallingCount;
+
+  const breadthLabel =
+    breadthDifference >= 5
+      ? "اتساع السوق إيجابي قوي"
+      : breadthDifference >= 2
+        ? "اتساع السوق إيجابي"
+        : breadthDifference <= -5
+          ? "اتساع السوق سلبي قوي"
+          : breadthDifference <= -2
+            ? "اتساع السوق سلبي"
+            : "اتساع السوق متوازن";
+
+  const rotationSorted =
+    [...availableSectors].sort(
+      (
+        left,
+        right
+      ) =>
+        right.rotationScore -
+        left.rotationScore
+    );
+
+  const rotationTo =
+    rotationSorted[0] ??
+    null;
+
+  const rotationFrom =
+    rotationSorted[
+      rotationSorted.length -
+        1
+    ] ?? null;
+
+  const rotationSpread =
+    rotationTo &&
+    rotationFrom
+      ? round(
+          rotationTo.rotationScore -
+            rotationFrom.rotationScore,
+          2
+        )
+      : 0;
+
+  return {
+    ok: true,
+    updatedAt:
+      new Date().toISOString(),
+    benchmark,
+    summary: {
+      requestedCount:
+        SECTORS.length,
+      availableCount:
+        availableSectors.length,
+      risingCount,
+      fallingCount,
+      flatCount,
+      breadthLabel,
+      strongest:
+        availableSectors[0] ??
+        null,
+      weakest:
+        availableSectors[
+          availableSectors.length -
+            1
+        ] ?? null,
+    },
+    rotation: {
+      label:
+        rotationSpread >= 2.5
+          ? "دوران قطاعي واضح"
+          : rotationSpread >= 1
+            ? "دوران قطاعي متوسط"
+            : "دوران قطاعي محدود",
+      from:
+        rotationFrom,
+      to:
+        rotationTo,
+      confidence:
+        rotationSpread >= 5
+          ? "مرتفعة"
+          : rotationSpread >= 2.5
+            ? "متوسطة"
+            : "ضعيفة",
+      spread:
+        rotationSpread,
+      explanation:
+        rotationTo &&
+        rotationFrom &&
+        rotationTo.symbol !==
+          rotationFrom.symbol
+          ? `تُظهر المقارنة النسبية أن الأموال تميل إلى الخروج من ${rotationFrom.name} (${rotationFrom.symbol}) والتوجه نحو ${rotationTo.name} (${rotationTo.symbol}). يعتمد التقدير على تغير اليوم، أداء خمس جلسات، التفوق على SPY، ونشاط الحجم.`
+          : "لا تتوفر بيانات كافية لتحديد حركة الأموال بين القطاعات.",
+    },
+    sectors,
+    failed:
+      sectors
+        .filter(
+          (sector) =>
+            !sector.dataAvailable
+        )
+        .map(
+          (sector) => ({
+            symbol:
+              sector.symbol,
+            error:
+              sector.dataError ||
+              "بيانات غير متاحة",
+          })
+        ),
+  };
+}
+
+async function getOverview() {
+  return getOrSetCache(
+    "sector-overview:v8-price-only-finnhub",
+    {
+      ttlMs:
+        5 * 60_000,
+      staleMs:
+        30 * 60_000,
+    },
+    loadOverview
+  );
+}
+
+async function loadDetail(
+  symbol: string
+) {
+  const definition =
+    SECTORS.find(
+      (sector) =>
+        sector.symbol ===
+        symbol
+    );
+
+  if (!definition) {
+    throw new Error(
+      "رمز القطاع غير مدعوم."
+    );
+  }
+
+  const overview =
+    await getOverview();
+
+  const sector =
+    overview.sectors.find(
+      (
+        item: SectorItem
+      ) =>
+        item.symbol ===
+        symbol
+    );
+
+  if (!sector) {
+    throw new Error(
+      "تعذر تحميل القطاع."
+    );
+  }
+
+  const companySymbols =
+    definition.companies.map(
+      (company) =>
+        company.symbol
+    );
+
+  const context =
+    await loadMarketContext(
+      companySymbols
+    );
+
+  const companies =
+    sortByStrength(
+      definition.companies.map(
+        (company) => {
+          const metrics =
+            buildMetrics(
+              company.symbol,
+              context.prices.get(
+                company.symbol
+              ) ?? 0,
+              context.latestMap.get(
+                company.symbol
+              ),
+              context.previousMap.get(
+                company.symbol
+              ),
+              context.fiveDayMap.get(
+                company.symbol
+              ),
+              context.dates
+                .dailyReference,
+              overview.benchmark
+                .fiveDayChangePct
+            );
+
+          return {
+            ...company,
+            ...metrics,
+            rank: 0,
+          };
+        }
+      )
+    ).map(
+      (
+        company,
+        index
+      ) => ({
+        ...company,
+        rank:
+          index + 1,
+      })
+    );
+
+  const availableCompanies =
+    companies.filter(
+      (company) =>
+        company.dataAvailable
+    );
+
+  const risingCount =
+    availableCompanies.filter(
+      (company) =>
+        company.trend ===
+        "UP"
+    ).length;
+
+  const fallingCount =
+    availableCompanies.filter(
+      (company) =>
+        company.trend ===
+        "DOWN"
+    ).length;
+
+  const averageDailyChangePct =
+    availableCompanies.length >
+    0
+      ? round(
+          availableCompanies.reduce(
+            (
+              sum,
+              company
+            ) =>
+              sum +
+              company.dailyChangePct,
+            0
+          ) /
+            availableCompanies.length
+        )
+      : 0;
+
+  const averageFiveDayChangePct =
+    availableCompanies.length >
+    0
+      ? round(
+          availableCompanies.reduce(
+            (
+              sum,
+              company
+            ) =>
+              sum +
+              company.fiveDayChangePct,
+            0
+          ) /
+            availableCompanies.length
+        )
+      : 0;
+
+  return {
+    ok: true,
+    updatedAt:
+      new Date().toISOString(),
+    sector,
+    benchmark:
+      overview.benchmark,
+    companies,
+    leaders:
+      availableCompanies.slice(
+        0,
+        3
+      ),
+    laggards:
+      [...availableCompanies]
+        .reverse()
+        .slice(0, 3),
+    summary: {
+      requestedCompanies:
+        definition.companies.length,
+      availableCompanies:
+        availableCompanies.length,
+      risingCount,
+      fallingCount,
+      strongestCompany:
+        availableCompanies[0] ??
+        null,
+      weakestCompany:
+        availableCompanies[
+          availableCompanies.length -
+            1
+        ] ?? null,
+      averageDailyChangePct,
+      averageFiveDayChangePct,
+    },
+    failed:
+      companies
+        .filter(
+          (company) =>
+            !company.dataAvailable
+        )
+        .map(
+          (company) => ({
+            symbol:
+              company.symbol,
+            error:
+              company.dataError ||
+              "بيانات غير متاحة",
+          })
+        ),
+  };
+}
+
+export async function GET(
+  request: Request
+) {
+  try {
+    const url =
+      new URL(
+        request.url
+      );
+
+    const symbol =
+      String(
+        url.searchParams.get(
+          "symbol"
+        ) ?? ""
+      )
+        .trim()
+        .toUpperCase()
+        .replace(
+          /[^A-Z.-]/g,
+          ""
+        );
+
+    const data = symbol
+      ? await getOrSetCache(
+          `sector-detail:v8-price-only-finnhub:${symbol}`,
+          {
+            ttlMs:
+              5 * 60_000,
+            staleMs:
+              30 * 60_000,
+          },
+          () =>
+            loadDetail(
+              symbol
+            )
+        )
+      : await getOverview();
+
+    return Response.json(
+      data,
+      {
+        status: 200,
+        headers: {
+          "Content-Type":
+            "application/json; charset=utf-8",
+          "Cache-Control":
+            "private, no-store, max-age=0",
+        },
+      }
+    );
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "خطأ غير معروف";
+
+    return Response.json(
+      {
+        ok: false,
+        error:
+          message ===
+          "رمز القطاع غير مدعوم."
+            ? message
+            : "تعذر تحميل بيانات القطاعات.",
+        details:
+          message,
+      },
+      {
+        status:
+          message ===
+          "رمز القطاع غير مدعوم."
+            ? 404
+            : 500,
+      }
+    );
+  }
+}
+
+
+==========================================================================================
+FILE: src/components/sector-radar.tsx
+==========================================================================================
+
+"use client";
+
+import {
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+import {
+  useRouter,
+} from "next/navigation";
+
+type SectorCompany = {
+  symbol: string;
+  name: string;
+};
+
+type SectorItem = {
+  symbol: string;
+  name: string;
+  icon: string;
+  price: number;
+  dailyChangePct: number;
+  fiveDayChangePct: number;
+  relativeStrengthPct: number;
+  volumeRatio: number;
+  strengthScore: number;
+  status: string;
+  trend: "UP" | "DOWN" | "FLAT";
+  flowState: string;
+  dataAvailable: boolean;
+  dataError: string | null;
+  rank: number;
+  companies: SectorCompany[];
+};
+
+type SectorResponse = {
+  ok: boolean;
+  updatedAt: string;
+  summary: {
+    requestedCount: number;
+    availableCount: number;
+    risingCount: number;
+    fallingCount: number;
+    flatCount: number;
+    breadthLabel: string;
+    strongest: SectorItem | null;
+    weakest: SectorItem | null;
+  };
+  rotation: {
+    label: string;
+    from: SectorItem | null;
+    to: SectorItem | null;
+    confidence: string;
+    spread: number;
+    explanation: string;
+  };
+  sectors: SectorItem[];
+};
+
+const SECTOR_STORAGE_KEY = "st-sector-overview-v5";
+
+function changeClass(value: number) {
+  if (value > 0) {
+    return "text-emerald-400";
+  }
+
+  if (value < 0) {
+    return "text-rose-400";
+  }
+
+  return "text-slate-400";
+}
+
+function scoreClass(
+  score: number,
+  available = true
+) {
+  if (!available) {
+    return "text-slate-500";
+  }
+
+  if (score >= 80) {
+    return "text-emerald-300";
+  }
+
+  if (score >= 65) {
+    return "text-cyan-300";
+  }
+
+  if (score < 30) {
+    return "text-rose-300";
+  }
+
+  return "text-amber-300";
+}
+
+function cardClass(
+  score: number,
+  available: boolean
+) {
+  if (!available) {
+    return "border-slate-700/60 hover:border-slate-600";
+  }
+
+  if (score >= 80) {
+    return "border-emerald-400/25 hover:border-emerald-400/45";
+  }
+
+  if (score >= 65) {
+    return "border-cyan-400/20 hover:border-cyan-400/40";
+  }
+
+  if (score < 30) {
+    return "border-rose-400/25 hover:border-rose-400/45";
+  }
+
+  return "border-white/[0.08] hover:border-white/20";
+}
+
+function flowClass(value: string) {
+  if (
+    value.includes("دخول")
+  ) {
+    return "text-emerald-300";
+  }
+
+  if (
+    value.includes("خروج")
+  ) {
+    return "text-rose-300";
+  }
+
+  return "text-slate-400";
+}
+
+function signed(value: number) {
+  return `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
+}
+
+function formatUpdatedAt(
+  value?: string
+) {
+  if (!value) return "—";
+
+  try {
+    return new Intl.DateTimeFormat(
+      "ar-SA",
+      {
+        timeZone:
+          "Asia/Riyadh",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+      }
+    ).format(new Date(value));
+  } catch {
+    return "—";
+  }
+}
+
+export default function SectorRadar() {
+  const router =
+    useRouter();
+
+  const [data, setData] =
+    useState<SectorResponse | null>(
+      null
+    );
+
+  const [loading, setLoading] =
+    useState(true);
+
+  const [error, setError] =
+    useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    let running = false;
+
+    try {
+      const cached =
+        window.localStorage.getItem(
+          SECTOR_STORAGE_KEY
+        );
+
+      if (cached) {
+        const parsed =
+          JSON.parse(
+            cached
+          ) as SectorResponse;
+
+        if (
+          parsed?.ok &&
+          Array.isArray(
+            parsed.sectors
+          )
+        ) {
+          setData(parsed);
+          setLoading(false);
+        }
+      }
+    } catch (cacheError) {
+      console.warn(
+        "Failed to restore sector cache:",
+        cacheError
+      );
+    }
+
+    async function load() {
+      if (running) return;
+
+      running = true;
+
+      try {
+        const response =
+          await fetch(
+            "/api/sectors",
+            {
+              cache: "no-store",
+            }
+          );
+
+        const payload =
+          await response.json();
+
+        if (
+          !response.ok ||
+          !payload.ok
+        ) {
+          throw new Error(
+            payload.error ||
+              "تعذر تحميل القطاعات"
+          );
+        }
+
+        if (!cancelled) {
+          setData(payload);
+          setError("");
+
+          try {
+            window.localStorage.setItem(
+              SECTOR_STORAGE_KEY,
+              JSON.stringify(
+                payload
+              )
+            );
+          } catch (cacheError) {
+            console.warn(
+              "Failed to save sector cache:",
+              cacheError
+            );
+          }
+        }
+      } catch (loadError) {
+        if (!cancelled) {
+          setError(
+            loadError instanceof Error
+              ? loadError.message
+              : "تعذر تحميل القطاعات"
+          );
+        }
+      } finally {
+        running = false;
+
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void load();
+
+    const timer =
+      window.setInterval(() => {
+        void load();
+      }, 60_000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(
+        timer
+      );
+    };
+  }, []);
+
+  const sectors =
+    useMemo(
+      () =>
+        data?.sectors ?? [],
+      [data]
+    );
+
+  return (
+    <section className="mb-12">
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-[0.16em] text-violet-400">
+            خريطة حركة الأموال
+          </p>
+
+          <h2 className="mt-2 text-2xl font-black sm:text-3xl">
+            خريطة القطاعات
+          </h2>
+
+          <p className="mt-2 max-w-3xl text-sm leading-7 text-slate-500">
+            جميع القطاعات الـ12 مرتبة حسب تغير اليوم، أداء خمس جلسات،
+            القوة أمام SPY، ونشاط الحجم.
+          </p>
+        </div>
+
+        <div className="text-xs text-slate-500">
+          <p>
+            آخر تحديث:{" "}
+            {formatUpdatedAt(
+              data?.updatedAt
+            )}
+          </p>
+
+          {data ? (
+            <p className="mt-1 font-bold text-cyan-300">
+              تم عرض{" "}
+              {
+                data.summary
+                  .requestedCount
+              } من{" "}
+              {
+                data.summary
+                  .requestedCount
+              } قطاع
+            </p>
+          ) : null}
+        </div>
+      </div>
+
+      {loading && !data ? (
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          {Array.from({
+            length: 12,
+          }).map((_, index) => (
+            <div
+              key={index}
+              className="h-72 animate-pulse rounded-3xl border border-white/[0.06] bg-slate-950/60"
+            />
+          ))}
+        </div>
+      ) : null}
+
+      {error && !data ? (
+        <div className="rounded-3xl border border-rose-400/20 bg-rose-400/[0.06] p-6 text-rose-300">
+          <p className="font-black">
+            تعذر تحميل خريطة القطاعات
+          </p>
+
+          <p className="mt-2 text-sm text-rose-300/70">
+            {error}
+          </p>
+        </div>
+      ) : null}
+
+      {data ? (
+        <>
+          <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="rounded-2xl border border-emerald-400/15 bg-emerald-400/[0.04] p-4">
+              <p className="text-xs text-slate-500">
+                أقوى قطاع
+              </p>
+
+              <p className="mt-2 font-black text-emerald-300">
+                {data.summary.strongest
+                  ? `${data.summary.strongest.icon} ${data.summary.strongest.name}`
+                  : "—"}
+              </p>
+
+              <p className="mt-1 text-xs text-slate-500">
+                {data.summary.strongest
+                  ? `${data.summary.strongest.symbol} • ${signed(
+                      data.summary.strongest.dailyChangePct
+                    )}`
+                  : "—"}
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-rose-400/15 bg-rose-400/[0.04] p-4">
+              <p className="text-xs text-slate-500">
+                أضعف قطاع
+              </p>
+
+              <p className="mt-2 font-black text-rose-300">
+                {data.summary.weakest
+                  ? `${data.summary.weakest.icon} ${data.summary.weakest.name}`
+                  : "—"}
+              </p>
+
+              <p className="mt-1 text-xs text-slate-500">
+                {data.summary.weakest
+                  ? `${data.summary.weakest.symbol} • ${signed(
+                      data.summary.weakest.dailyChangePct
+                    )}`
+                  : "—"}
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-cyan-400/15 bg-cyan-400/[0.04] p-4">
+              <p className="text-xs text-slate-500">
+                اتساع القطاعات
+              </p>
+
+              <p className="mt-2 font-black text-cyan-300">
+                {
+                  data.summary
+                    .breadthLabel
+                }
+              </p>
+
+              <p className="mt-1 text-xs text-slate-500">
+                صاعدة{" "}
+                {
+                  data.summary
+                    .risingCount
+                }{" "}
+                • هابطة{" "}
+                {
+                  data.summary
+                    .fallingCount
+                }{" "}
+                • مستقرة{" "}
+                {
+                  data.summary
+                    .flatCount
+                }
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-violet-400/15 bg-violet-400/[0.04] p-4">
+              <p className="text-xs text-slate-500">
+                حالة الدوران
+              </p>
+
+              <p className="mt-2 font-black text-violet-300">
+                {
+                  data.rotation
+                    .label
+                }
+              </p>
+
+              <p className="mt-1 text-xs text-slate-500">
+                الثقة:{" "}
+                {
+                  data.rotation
+                    .confidence
+                }
+              </p>
+            </div>
+          </div>
+
+          <div className="mb-5 rounded-3xl border border-violet-400/25 bg-gradient-to-l from-violet-400/[0.1] to-cyan-400/[0.04] p-5">
+            <p className="text-xs font-black text-violet-300">
+              حركة الأموال بين القطاعات
+            </p>
+
+            {data.rotation.from &&
+            data.rotation.to ? (
+              <>
+                <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto_1fr] sm:items-center">
+                  <div className="rounded-2xl border border-rose-400/20 bg-rose-400/[0.06] p-4 text-center">
+                    <p className="text-xs text-slate-500">
+                      خروج نسبي من
+                    </p>
+
+                    <p className="mt-2 text-lg font-black text-rose-300">
+                      {
+                        data.rotation
+                          .from.icon
+                      }{" "}
+                      {
+                        data.rotation
+                          .from.name
+                      }
+                    </p>
+
+                    <p className="mt-1 text-xs text-slate-500">
+                      {
+                        data.rotation
+                          .from.symbol
+                      }
+                    </p>
+                  </div>
+
+                  <span className="text-center text-3xl text-violet-300">
+                    ←
+                  </span>
+
+                  <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/[0.06] p-4 text-center">
+                    <p className="text-xs text-slate-500">
+                      دخول نسبي إلى
+                    </p>
+
+                    <p className="mt-2 text-lg font-black text-emerald-300">
+                      {
+                        data.rotation
+                          .to.icon
+                      }{" "}
+                      {
+                        data.rotation
+                          .to.name
+                      }
+                    </p>
+
+                    <p className="mt-1 text-xs text-slate-500">
+                      {
+                        data.rotation
+                          .to.symbol
+                      }
+                    </p>
+                  </div>
+                </div>
+
+                <p className="mt-4 text-sm leading-7 text-slate-300">
+                  {
+                    data.rotation
+                      .explanation
+                  }
+                </p>
+              </>
+            ) : (
+              <p className="mt-3 text-sm text-slate-400">
+                لا تتوفر بيانات كافية حاليًا.
+              </p>
+            )}
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {sectors.map(
+              (sector) => (
+                <button
+                  type="button"
+                  key={sector.symbol}
+                  onClick={() =>
+                    router.push(
+                      `/sectors/${encodeURIComponent(
+                        sector.symbol
+                      )}`
+                    )
+                  }
+                  className={`group rounded-3xl border bg-slate-950/65 p-5 text-right shadow-xl shadow-black/10 backdrop-blur-xl transition duration-300 hover:-translate-y-1 ${cardClass(
+                    sector.strengthScore,
+                    sector.dataAvailable
+                  )}`}
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-2xl">
+                          {
+                            sector.icon
+                          }
+                        </span>
+
+                        <h3 className="text-xl font-black">
+                          {
+                            sector.name
+                          }
+                        </h3>
+
+                        <span className="rounded-lg border border-white/[0.08] bg-white/[0.035] px-2.5 py-1 text-xs font-black text-slate-300">
+                          {
+                            sector.symbol
+                          }
+                        </span>
+                      </div>
+
+                      <p className="mt-3 text-xs text-slate-500">
+                        المركز{" "}
+                        {sector.rank} من{" "}
+                        {sectors.length}
+                      </p>
+                    </div>
+
+                    <div className="text-left">
+                      <p
+                        className={`text-3xl font-black ${scoreClass(
+                          sector.strengthScore,
+                          sector.dataAvailable
+                        )}`}
+                      >
+                        {sector.dataAvailable
+                          ? sector.strengthScore
+                          : "—"}
+                      </p>
+
+                      <p className="text-[10px] text-slate-600">
+                        درجة القوة
+                      </p>
+                    </div>
+                  </div>
+
+                  {sector.dataAvailable ? (
+                    <>
+                      <div className="my-4 h-px bg-white/[0.06]" />
+
+                      <div className="grid grid-cols-2 gap-3 text-sm">
+                        <div>
+                          <p className="text-xs text-slate-500">
+                            آخر سعر
+                          </p>
+
+                          <p className="mt-1 font-black">
+                            $
+                            {sector.price.toFixed(
+                              2
+                            )}
+                          </p>
+                        </div>
+
+                        <div>
+                          <p className="text-xs text-slate-500">
+                            تغير اليوم
+                          </p>
+
+                          <p
+                            className={`mt-1 font-black ${changeClass(
+                              sector.dailyChangePct
+                            )}`}
+                          >
+                            {sector.trend ===
+                            "UP"
+                              ? "▲ "
+                              : sector.trend ===
+                                  "DOWN"
+                                ? "▼ "
+                                : "● "}
+                            {signed(
+                              sector.dailyChangePct
+                            )}
+                          </p>
+                        </div>
+
+                        <div>
+                          <p className="text-xs text-slate-500">
+                            أداء 5 جلسات
+                          </p>
+
+                          <p
+                            className={`mt-1 font-black ${changeClass(
+                              sector.fiveDayChangePct
+                            )}`}
+                          >
+                            {signed(
+                              sector.fiveDayChangePct
+                            )}
+                          </p>
+                        </div>
+
+                        <div>
+                          <p className="text-xs text-slate-500">
+                            مقابل SPY
+                          </p>
+
+                          <p
+                            className={`mt-1 font-black ${changeClass(
+                              sector.relativeStrengthPct
+                            )}`}
+                          >
+                            {signed(
+                              sector.relativeStrengthPct
+                            )}
+                          </p>
+                        </div>
+
+                        <div>
+                          <p className="text-xs text-slate-500">
+                            الحجم مقابل الجلسة السابقة
+                          </p>
+
+                          <p className="mt-1 font-black text-slate-300">
+                            {sector.volumeRatio.toFixed(
+                              2
+                            )}
+                            ×
+                          </p>
+                        </div>
+
+                        <div>
+                          <p className="text-xs text-slate-500">
+                            حركة السيولة
+                          </p>
+
+                          <p
+                            className={`mt-1 font-black ${flowClass(
+                              sector.flowState
+                            )}`}
+                          >
+                            {
+                              sector.flowState
+                            }
+                          </p>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="mt-5 rounded-2xl border border-amber-400/15 bg-amber-400/[0.04] p-4">
+                      <p className="text-sm font-black text-amber-300">
+                        بيانات السوق غير متاحة مؤقتًا
+                      </p>
+
+                      <p className="mt-2 text-xs leading-6 text-slate-500">
+                        ستبقى بطاقة القطاع ظاهرة، وسيحاول النظام تحديث بياناتها تلقائيًا.
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="mt-4 rounded-2xl border border-white/[0.05] bg-white/[0.025] p-3">
+                    <p className="text-[10px] text-slate-500">
+                      أهم الشركات
+                    </p>
+
+                    <p className="mt-2 text-xs leading-6 text-slate-300">
+                      {sector.companies
+                        .map(
+                          (company) =>
+                            `${company.name} (${company.symbol})`
+                        )
+                        .join(" • ")}
+                    </p>
+                  </div>
+
+                  <div className="mt-4 text-xs font-black text-cyan-300 transition group-hover:-translate-x-1">
+                    فتح تفاصيل القطاع ←
+                  </div>
+                </button>
+              )
+            )}
+          </div>
+        </>
+      ) : null}
+    </section>
+  );
+}
+
+
+==========================================================================================
+FILE: src/app/sectors/[symbol]/page.tsx
+==========================================================================================
+
+"use client";
+
+import Link from "next/link";
+import {
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+import {
+  useParams,
+} from "next/navigation";
+
+type CompanyItem = {
+  symbol: string;
+  name: string;
+  price: number;
+  dailyChangePct: number;
+  fiveDayChangePct: number;
+  relativeStrengthPct: number;
+  volumeRatio: number;
+  strengthScore: number;
+  status: string;
+  trend: "UP" | "DOWN" | "FLAT";
+  flowState: string;
+  dataAvailable: boolean;
+  dataError: string | null;
+  rank: number;
+};
+
+type SectorItem = {
+  symbol: string;
+  name: string;
+  icon: string;
+  price: number;
+  dailyChangePct: number;
+  fiveDayChangePct: number;
+  relativeStrengthPct: number;
+  volumeRatio: number;
+  strengthScore: number;
+  status: string;
+  flowState: string;
+  dataAvailable: boolean;
+  rank: number;
+};
+
+type DetailResponse = {
+  ok: boolean;
+  updatedAt: string;
+  sector: SectorItem;
+  companies: CompanyItem[];
+  summary: {
+    requestedCompanies: number;
+    availableCompanies: number;
+    risingCount: number;
+    fallingCount: number;
+    strongestCompany: CompanyItem | null;
+    weakestCompany: CompanyItem | null;
+    averageDailyChangePct: number;
+    averageFiveDayChangePct: number;
+  };
+};
+
+function sectorDetailStorageKey(
+  symbol: string
+) {
+  return `st-sector-detail-v5:${symbol}`;
+}
+
+function signed(value: number) {
+  return `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
+}
+
+function changeClass(value: number) {
+  if (value > 0) {
+    return "text-emerald-400";
+  }
+
+  if (value < 0) {
+    return "text-rose-400";
+  }
+
+  return "text-slate-400";
+}
+
+function scoreClass(
+  score: number,
+  available = true
+) {
+  if (!available) {
+    return "text-slate-500";
+  }
+
+  if (score >= 80) {
+    return "text-emerald-300";
+  }
+
+  if (score >= 65) {
+    return "text-cyan-300";
+  }
+
+  if (score < 30) {
+    return "text-rose-300";
+  }
+
+  return "text-amber-300";
+}
+
+function flowClass(value: string) {
+  if (value.includes("دخول")) {
+    return "text-emerald-300";
+  }
+
+  if (value.includes("خروج")) {
+    return "text-rose-300";
+  }
+
+  return "text-slate-400";
+}
+
+export default function SectorDetailsPage() {
+  const params =
+    useParams<{
+      symbol: string;
+    }>();
+
+  const symbol =
+    useMemo(
+      () =>
+        String(
+          params?.symbol ?? ""
+        )
+          .trim()
+          .toUpperCase(),
+      [params]
+    );
+
+  const [data, setData] =
+    useState<DetailResponse | null>(
+      null
+    );
+
+  const [loading, setLoading] =
+    useState(true);
+
+  const [error, setError] =
+    useState("");
+
+  useEffect(() => {
+    if (!symbol) return;
+
+    let cancelled = false;
+    let running = false;
+
+    try {
+      const cached =
+        window.localStorage.getItem(
+          sectorDetailStorageKey(
+            symbol
+          )
+        );
+
+      if (cached) {
+        const parsed =
+          JSON.parse(
+            cached
+          ) as DetailResponse;
+
+        if (
+          parsed?.ok &&
+          parsed.sector?.symbol ===
+            symbol
+        ) {
+          setData(parsed);
+          setLoading(false);
+        }
+      }
+    } catch (cacheError) {
+      console.warn(
+        "Failed to restore sector detail cache:",
+        cacheError
+      );
+    }
+
+    async function load() {
+      if (running) return;
+
+      running = true;
+
+      try {
+        const response =
+          await fetch(
+            `/api/sectors?symbol=${encodeURIComponent(
+              symbol
+            )}`,
+            {
+              cache: "no-store",
+            }
+          );
+
+        const payload =
+          await response.json();
+
+        if (
+          !response.ok ||
+          !payload.ok
+        ) {
+          throw new Error(
+            payload.error ||
+              "تعذر تحميل القطاع"
+          );
+        }
+
+        if (!cancelled) {
+          setData(payload);
+          setError("");
+
+          try {
+            window.localStorage.setItem(
+              sectorDetailStorageKey(
+                symbol
+              ),
+              JSON.stringify(
+                payload
+              )
+            );
+          } catch (cacheError) {
+            console.warn(
+              "Failed to save sector detail cache:",
+              cacheError
+            );
+          }
+        }
+      } catch (loadError) {
+        if (!cancelled) {
+          setError(
+            loadError instanceof Error
+              ? loadError.message
+              : "تعذر تحميل القطاع"
+          );
+        }
+      } finally {
+        running = false;
+
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void load();
+
+    const timer =
+      window.setInterval(() => {
+        void load();
+      }, 60_000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(
+        timer
+      );
+    };
+  }, [symbol]);
+
+  return (
+    <main
+      dir="rtl"
+      className="min-h-screen bg-[#030914] px-4 py-6 text-white sm:px-7 sm:py-10"
+    >
+      <div className="mx-auto max-w-7xl">
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+          <Link
+            href="/dashboard"
+            className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-black transition hover:bg-white/10"
+          >
+            ← العودة إلى المنصة
+          </Link>
+
+          <Link
+            href={`/gamma-liquidity?symbol=${encodeURIComponent(
+              symbol
+            )}`}
+            className="rounded-xl border border-violet-400/25 bg-violet-400/10 px-4 py-3 text-sm font-black text-violet-300 transition hover:bg-violet-400/15"
+          >
+            تحليل قاما وسيولة القطاع
+          </Link>
+        </div>
+
+        {loading && !data ? (
+          <div className="h-96 animate-pulse rounded-3xl border border-white/[0.07] bg-slate-950/60" />
+        ) : null}
+
+        {error && !data ? (
+          <div className="rounded-3xl border border-rose-400/20 bg-rose-400/[0.06] p-8 text-center text-rose-300">
+            <p className="text-xl font-black">
+              تعذر تحميل تفاصيل القطاع
+            </p>
+
+            <p className="mt-3 text-sm">
+              {error}
+            </p>
+          </div>
+        ) : null}
+
+        {data ? (
+          <>
+            <header className="mb-6 rounded-3xl border border-white/[0.08] bg-gradient-to-l from-violet-500/10 via-slate-950/80 to-cyan-500/10 p-6 shadow-2xl shadow-black/20 sm:p-8">
+              <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className="text-4xl">
+                      {
+                        data.sector
+                          .icon
+                      }
+                    </span>
+
+                    <div>
+                      <p className="text-xs font-black text-violet-300">
+                        تحليل القطاع
+                      </p>
+
+                      <h1 className="mt-1 text-3xl font-black sm:text-5xl">
+                        {
+                          data.sector
+                            .name
+                        }
+                      </h1>
+                    </div>
+
+                    <span className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 font-black">
+                      {
+                        data.sector
+                          .symbol
+                      }
+                    </span>
+                  </div>
+
+                  <p className="mt-5 max-w-3xl text-sm leading-7 text-slate-400">
+                    جميع أهم شركات القطاع ظاهرة أدناه، مع السعر، تغير اليوم،
+                    أداء خمس جلسات، القوة أمام SPY، ونشاط الحجم.
+                  </p>
+                </div>
+
+                <div className="rounded-3xl border border-cyan-400/20 bg-cyan-400/[0.055] px-7 py-5 text-center">
+                  <p className="text-xs text-slate-500">
+                    درجة قوة القطاع
+                  </p>
+
+                  <p
+                    className={`mt-2 text-5xl font-black ${scoreClass(
+                      data.sector
+                        .strengthScore,
+                      data.sector
+                        .dataAvailable
+                    )}`}
+                  >
+                    {data.sector
+                      .dataAvailable
+                      ? data.sector
+                          .strengthScore
+                      : "—"}
+                  </p>
+
+                  <p className="mt-1 text-sm font-black text-slate-300">
+                    {
+                      data.sector
+                        .status
+                    }
+                  </p>
+
+                  <p
+                    className={`mt-2 text-xs font-black ${flowClass(
+                      data.sector
+                        .flowState
+                    )}`}
+                  >
+                    {
+                      data.sector
+                        .flowState
+                    }
+                  </p>
+                </div>
+              </div>
+            </header>
+
+            {data.sector
+              .dataAvailable ? (
+              <section className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-6">
+                {[
+                  [
+                    "آخر سعر",
+                    `$${data.sector.price.toFixed(
+                      2
+                    )}`,
+                    "text-white",
+                  ],
+                  [
+                    "تغير اليوم",
+                    signed(
+                      data.sector
+                        .dailyChangePct
+                    ),
+                    changeClass(
+                      data.sector
+                        .dailyChangePct
+                    ),
+                  ],
+                  [
+                    "أداء 5 جلسات",
+                    signed(
+                      data.sector
+                        .fiveDayChangePct
+                    ),
+                    changeClass(
+                      data.sector
+                        .fiveDayChangePct
+                    ),
+                  ],
+                  [
+                    "القوة أمام SPY",
+                    signed(
+                      data.sector
+                        .relativeStrengthPct
+                    ),
+                    changeClass(
+                      data.sector
+                        .relativeStrengthPct
+                    ),
+                  ],
+                  [
+                    "الحجم مقابل الجلسة السابقة",
+                    `${data.sector.volumeRatio.toFixed(
+                      2
+                    )}×`,
+                    "text-white",
+                  ],
+                  [
+                    "ترتيب القطاع",
+                    `المركز ${data.sector.rank}`,
+                    "text-violet-300",
+                  ],
+                ].map(
+                  ([
+                    label,
+                    value,
+                    className,
+                  ]) => (
+                    <div
+                      key={label}
+                      className="rounded-2xl border border-white/10 bg-slate-950/65 p-4"
+                    >
+                      <p className="text-xs text-slate-500">
+                        {label}
+                      </p>
+
+                      <p
+                        className={`mt-2 text-xl font-black ${className}`}
+                      >
+                        {value}
+                      </p>
+                    </div>
+                  )
+                )}
+              </section>
+            ) : null}
+
+            <section className="mb-7 grid gap-4 lg:grid-cols-2">
+              <div className="rounded-3xl border border-emerald-400/15 bg-emerald-400/[0.04] p-5">
+                <p className="text-xs font-black text-emerald-300">
+                  أقوى شركة داخل القطاع
+                </p>
+
+                <p className="mt-3 text-2xl font-black">
+                  {data.summary
+                    .strongestCompany
+                    ?.name ??
+                    "غير متاح"}
+                </p>
+
+                <p className="mt-1 text-sm text-slate-500">
+                  {data.summary
+                    .strongestCompany
+                    ?.symbol ?? "—"}
+                </p>
+              </div>
+
+              <div className="rounded-3xl border border-rose-400/15 bg-rose-400/[0.04] p-5">
+                <p className="text-xs font-black text-rose-300">
+                  أضعف شركة داخل القطاع
+                </p>
+
+                <p className="mt-3 text-2xl font-black">
+                  {data.summary
+                    .weakestCompany
+                    ?.name ??
+                    "غير متاح"}
+                </p>
+
+                <p className="mt-1 text-sm text-slate-500">
+                  {data.summary
+                    .weakestCompany
+                    ?.symbol ?? "—"}
+                </p>
+              </div>
+            </section>
+
+            <div className="mb-5">
+              <p className="text-xs font-black text-cyan-300">
+                أهم الشركات
+              </p>
+
+              <h2 className="mt-2 text-2xl font-black">
+                ترتيب شركات القطاع حسب القوة
+              </h2>
+
+              <p className="mt-2 text-sm text-slate-500">
+                تم عرض{" "}
+                {
+                  data.summary
+                    .requestedCompanies
+                } من{" "}
+                {
+                  data.summary
+                    .requestedCompanies
+                } شركة • بيانات متاحة{" "}
+                {
+                  data.summary
+                    .availableCompanies
+                }{" "}
+                • صاعدة{" "}
+                {
+                  data.summary
+                    .risingCount
+                }{" "}
+                • هابطة{" "}
+                {
+                  data.summary
+                    .fallingCount
+                }
+              </p>
+            </div>
+
+            <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              {data.companies.map(
+                (company) => (
+                  <article
+                    key={
+                      company.symbol
+                    }
+                    className="rounded-3xl border border-white/[0.08] bg-slate-950/65 p-5 shadow-xl shadow-black/10"
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <p className="text-2xl font-black">
+                          {
+                            company.symbol
+                          }
+                        </p>
+
+                        <p className="mt-1 text-sm text-slate-400">
+                          {
+                            company.name
+                          }
+                        </p>
+
+                        <p className="mt-2 text-xs text-slate-600">
+                          المركز{" "}
+                          {
+                            company.rank
+                          }
+                        </p>
+                      </div>
+
+                      <p
+                        className={`text-3xl font-black ${scoreClass(
+                          company.strengthScore,
+                          company.dataAvailable
+                        )}`}
+                      >
+                        {company.dataAvailable
+                          ? company.strengthScore
+                          : "—"}
+                      </p>
+                    </div>
+
+                    {company.dataAvailable ? (
+                      <>
+                        <div className="my-4 h-px bg-white/[0.06]" />
+
+                        <div className="grid grid-cols-2 gap-3 text-sm">
+                          <div>
+                            <p className="text-xs text-slate-500">
+                              السعر
+                            </p>
+
+                            <p className="mt-1 font-black">
+                              $
+                              {company.price.toFixed(
+                                2
+                              )}
+                            </p>
+                          </div>
+
+                          <div>
+                            <p className="text-xs text-slate-500">
+                              اليوم
+                            </p>
+
+                            <p
+                              className={`mt-1 font-black ${changeClass(
+                                company.dailyChangePct
+                              )}`}
+                            >
+                              {signed(
+                                company.dailyChangePct
+                              )}
+                            </p>
+                          </div>
+
+                          <div>
+                            <p className="text-xs text-slate-500">
+                              5 جلسات
+                            </p>
+
+                            <p
+                              className={`mt-1 font-black ${changeClass(
+                                company.fiveDayChangePct
+                              )}`}
+                            >
+                              {signed(
+                                company.fiveDayChangePct
+                              )}
+                            </p>
+                          </div>
+
+                          <div>
+                            <p className="text-xs text-slate-500">
+                              مقابل SPY
+                            </p>
+
+                            <p
+                              className={`mt-1 font-black ${changeClass(
+                                company.relativeStrengthPct
+                              )}`}
+                            >
+                              {signed(
+                                company.relativeStrengthPct
+                              )}
+                            </p>
+                          </div>
+
+                          <div>
+                            <p className="text-xs text-slate-500">
+                              الحجم
+                            </p>
+
+                            <p className="mt-1 font-black">
+                              {company.volumeRatio.toFixed(
+                                2
+                              )}
+                              ×
+                            </p>
+                          </div>
+
+                          <div>
+                            <p className="text-xs text-slate-500">
+                              حركة السيولة
+                            </p>
+
+                            <p
+                              className={`mt-1 font-black ${flowClass(
+                                company.flowState
+                              )}`}
+                            >
+                              {
+                                company.flowState
+                              }
+                            </p>
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="mt-5 rounded-2xl border border-amber-400/15 bg-amber-400/[0.04] p-4">
+                        <p className="text-sm font-black text-amber-300">
+                          البيانات غير متاحة مؤقتًا
+                        </p>
+
+                        <p className="mt-2 text-xs text-slate-500">
+                          ستبقى الشركة ظاهرة وسيعيد النظام المحاولة تلقائيًا.
+                        </p>
+                      </div>
+                    )}
+
+                    <div className="mt-5 grid grid-cols-2 gap-2">
+                      <Link
+                        href={`/stocks/${encodeURIComponent(
+                          company.symbol
+                        )}`}
+                        className="rounded-xl bg-cyan-400 px-3 py-3 text-center text-xs font-black text-slate-950 transition hover:bg-cyan-300"
+                      >
+                        تحليل السهم
+                      </Link>
+
+                      <Link
+                        href={`/gamma-liquidity?symbol=${encodeURIComponent(
+                          company.symbol
+                        )}`}
+                        className="rounded-xl border border-violet-400/25 bg-violet-400/10 px-3 py-3 text-center text-xs font-black text-violet-300 transition hover:bg-violet-400/15"
+                      >
+                        القاما والسيولة
+                      </Link>
+                    </div>
+                  </article>
+                )
+              )}
+            </section>
+
+            <section className="mt-7 rounded-2xl border border-amber-400/20 bg-amber-400/[0.04] p-5">
+              <p className="font-black text-amber-300">
+                ملاحظة منهجية
+              </p>
+
+              <p className="mt-3 text-sm leading-7 text-slate-400">
+                حركة الأموال والقوة النسبية تقديرات مبنية على السعر والزخم
+                والحجم، وليست قياسًا مباشرًا لصافي تدفقات الصناديق ولا تمثل
+                توصية شراء أو بيع.
+              </p>
+            </section>
+          </>
+        ) : null}
+      </div>
+    </main>
+  );
+}
+
+
+==========================================================================================
+FILE: src/lib/market-cache.ts
+==========================================================================================
+
+type CacheEntry<T> = {
+  data: T;
+  expiresAt: number;
+  staleUntil: number;
+};
+
+type CacheOptions = {
+  ttlMs: number;
+  staleMs?: number;
+};
+
+const cache = new Map<string, CacheEntry<unknown>>();
+const pending = new Map<string, Promise<unknown>>();
+
+export async function getOrSetCache<T>(
+  key: string,
+  options: CacheOptions,
+  loader: () => Promise<T>
+): Promise<T> {
+  const now = Date.now();
+
+  const cached = cache.get(key) as
+    | CacheEntry<T>
+    | undefined;
+
+  if (cached && cached.expiresAt > now) {
+    return cached.data;
+  }
+
+  const existingRequest = pending.get(key) as
+    | Promise<T>
+    | undefined;
+
+  if (existingRequest) {
+    return existingRequest;
+  }
+
+  const request = loader()
+    .then((data) => {
+      const staleMs = Math.max(
+        options.staleMs ?? options.ttlMs * 5,
+        options.ttlMs
+      );
+
+      const currentTime = Date.now();
+
+      cache.set(key, {
+        data,
+        expiresAt: currentTime + options.ttlMs,
+        staleUntil: currentTime + staleMs,
+      });
+
+      return data;
+    })
+    .catch((error) => {
+      const staleEntry = cache.get(key) as
+        | CacheEntry<T>
+        | undefined;
+
+      if (
+        staleEntry &&
+        staleEntry.staleUntil > Date.now()
+      ) {
+        console.warn(
+          `Cache loader failed for ${key}; returning stale data.`,
+          error
+        );
+
+        return staleEntry.data;
+      }
+
+      throw error;
+    })
+    .finally(() => {
+      pending.delete(key);
+    });
+
+  pending.set(key, request);
+
+  return request;
+}
+
+export function getCachedValue<T>(
+  key: string
+): T | null {
+  const cached = cache.get(key) as
+    | CacheEntry<T>
+    | undefined;
+
+  return cached?.data ?? null;
+}
+
+export function deleteCachedValue(key: string) {
+  cache.delete(key);
+  pending.delete(key);
+}
+
+export function clearMarketCache() {
+  cache.clear();
+  pending.clear();
+}
+
+export function getMarketCacheStats() {
+  return {
+    entries: cache.size,
+    pendingRequests: pending.size,
+  };
+}
+
+==========================================================================================
+FILE: src/lib/supabase/server.ts
+==========================================================================================
+
+import { createServerClient } from "@supabase/ssr";
+import { cookies } from "next/headers";
+
+export async function createClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!url || !key) {
+    throw new Error("متغيرات Supabase العامة غير موجودة");
+  }
+
+  const cookieStore = await cookies();
+
+  return createServerClient(url, key, {
+    cookies: {
+      getAll() {
+        return cookieStore.getAll();
+      },
+      setAll(cookiesToSet) {
+        try {
+          cookiesToSet.forEach(({ name, value, options }) => {
+            cookieStore.set(name, value, options);
+          });
+        } catch {
+          // تحديث الكوكيز سيتم لاحقًا من Proxy
+        }
+      },
+    },
+  });
+}
+
+
+==========================================================================================
+FILE: src/lib/supabase/admin.ts
+==========================================================================================
+
+import { createClient } from "@supabase/supabase-js";
+
+export function createAdminClient() {
+  const url =
+    process.env.SUPABASE_URL ||
+    process.env.NEXT_PUBLIC_SUPABASE_URL;
+
+  const secret =
+    process.env.SUPABASE_SECRET_KEY ||
+    process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!url || !secret) {
+    throw new Error(
+      "متغيرات Supabase الإدارية غير موجودة في السيرفر"
+    );
+  }
+
+  return createClient(url, secret, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+  });
+}
+
+
+==========================================================================================
+FILE: package.json
+==========================================================================================
+
+{
+  "name": "web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint"
+  },
+  "dependencies": {
+    "@supabase/ssr": "^0.12.0",
+    "@supabase/supabase-js": "^2.110.3",
+    "next": "16.2.10",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20.19.43",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.10",
+    "tailwindcss": "^4",
+    "typescript": "^5.9.3"
+  }
+}
+
+
+==========================================================================================
+FILE: vercel.json
+==========================================================================================
+
+FILE NOT FOUND
+
+
+================ CRON AND SUPABASE FILES ================
+src/app/api/admin/subscriptions/route.ts
+src/app/api/admin/users/route.ts
+src/app/api/analysis/[symbol]/route.ts
+src/app/api/gamma-liquidity/[symbol]/route.ts
+src/app/api/market-overview/route.ts
+src/app/api/market-session/route.ts
+src/app/api/options-analyzer/route.ts
+src/app/api/sectors/route.ts
+src/app/api/whale-trades/route.ts
+src/app/api/whale-trades/scan/route.ts
+src/lib/supabase/admin.ts
+src/lib/supabase/client.ts
+src/lib/supabase/proxy.ts
+src/lib/supabase/server.ts

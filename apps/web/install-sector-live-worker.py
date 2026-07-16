@@ -1,0 +1,50 @@
+#!/usr/bin/env python3
+from datetime import datetime
+from pathlib import Path
+import base64, zlib, re, shutil, sys
+
+ROOT = Path.cwd()
+ROUTE = ROOT / "src/app/api/sectors/route.ts"
+RADAR = ROOT / "src/components/sector-radar.tsx"
+DETAIL = ROOT / "src/app/sectors/[symbol]/page.tsx"
+WORKER = ROOT / "sector-worker"
+
+for path in (ROUTE, RADAR, DETAIL):
+    if not path.exists():
+        print(f"خطأ: الملف غير موجود: {path}")
+        print("شغّل الملف من داخل apps/web")
+        sys.exit(1)
+
+stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+backup = Path("/tmp") / f"sector-live-worker-backup-{stamp}"
+for path in (ROUTE, RADAR, DETAIL):
+    target = backup / path.relative_to(ROOT)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(path, target)
+
+WORKER.mkdir(parents=True, exist_ok=True)
+(WORKER / "main.py").write_bytes(zlib.decompress(base64.b64decode('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')))
+(WORKER / "main.py").chmod(0o755)
+(WORKER / "railway.json").write_bytes(zlib.decompress(base64.b64decode('eNptzL0KwjAUBeC9TxGCo7S6dgudxBZKFcTx2l5oJH8kEQ0l727SgpPbOfCdsxSE0J0bZ5RAa0Jn742rq8oCF28I5ajlL2+qfDqt6D7vHi8uprRatoQ2Pwzs1PasOdO4mgmN0CGj1FJ3HqxvtJSg8pSa4GetiASuShPW36Qsrq7Xgo/hGgxmytobu1/+kg4+A3rL0SV4PCQRi1h8AfkFREI=')))
+(WORKER / "README.txt").write_bytes(zlib.decompress(base64.b64decode('eNp9Udtq20AUfN+vOD8guSUUit7URgXThBqJBPJkVolwRB1JSHaMH+NYJnW/ogSixFfUpBT3S87+TWfXMbQp9EHa3XNm5szs8oYrVaox8YyXvFZTnhMqYzXin1wxujwTwqIPcZKc90NCZ8yPqNcGBo4GT4nXQK60jj6X6gYCGxvEQ1kU8WVEzeQsvozP+rJLbqeTRx3Zi4qt3AzUGpNXpG6eRReqfD6oEdYHrRT0MxnKIiJV8oq/q4nePIFdq2sjtBu7k1lsV1sIvuW5mmDMN0JVB3ggNVFT4PFpAQcDXuaGTtA6IXWNWG+QEL2K79RIm8FgsAzqX5om7L0yDOiPtvbVFZo/0NndiPF4C9BEfaHXe/Zb4jlqsKUJAsE2fM93sGqQLwaW6spczVpHKXmpX0F95coR2bB3niZURKe9NLcGaf45yhsXMk7sbEiWFaZpr+jlMrMuYhhJOmbUE/8Cf6ylHnmGf/1/ISF8GXcHcugIH4K0H+cGNnRIZlnRGERh4y+iQISKkG1p3ntBrX7YjU9pPzWKYhsKPfjgWud06NANguax13ZbzfZH70S/x1HLfecGXvvIP/jzGHj+cfO91/Y/HXgaaovfLuuFqA==')))
+
+route = ROUTE.read_text(encoding="utf-8")
+route = route.replace("sector-overview:v10-supabase", "sector-overview:v11-live-worker")
+route = route.replace("sector-detail:v10-supabase:", "sector-detail:v11-live-worker:")
+ROUTE.write_text(route, encoding="utf-8")
+
+radar = RADAR.read_text(encoding="utf-8")
+radar = re.sub(r"st-sector-overview-v\d+", "st-sector-overview-v11", radar)
+RADAR.write_text(radar, encoding="utf-8")
+
+detail = DETAIL.read_text(encoding="utf-8")
+detail = re.sub(r"st-sector-detail-v\d+:", "st-sector-detail-v11:", detail)
+DETAIL.write_text(detail, encoding="utf-8")
+
+print("تم تركيب عامل التحديث المباشر.")
+print("- تم تغيير الكاش لإظهار بيانات الشركات الجديدة")
+print("- القطاعات تتحدث كل 5 دقائق أثناء الجلسة")
+print("- الشركات تتحدث كل 30 دقيقة أثناء الجلسة")
+print("- Finnhub يبقى للسعر الحالي فقط")
+print(f"النسخة الاحتياطية: {backup}")
+print("الخطوة التالية: python sector-worker/main.py --bootstrap-missing")

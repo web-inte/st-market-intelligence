@@ -2,6 +2,10 @@ import {
   getOrSetCache,
 } from "../../../lib/market-cache";
 
+import {
+  createAdminClient,
+} from "../../../lib/supabase/admin";
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -17,19 +21,16 @@ type SectorDefinition = {
   companies: CompanyDefinition[];
 };
 
-type MassiveBar = {
-  c?: number;
-  v?: number;
-  t?: number;
-};
+type Trend =
+  | "UP"
+  | "DOWN"
+  | "FLAT";
 
-type MassiveResponse = {
-  results?: MassiveBar[];
-  error?: string;
-  message?: string;
+type CachedBar = {
+  c: number;
+  v: number;
+  t: number;
 };
-
-type Trend = "UP" | "DOWN" | "FLAT";
 
 type MarketMetrics = {
   symbol: string;
@@ -44,20 +45,36 @@ type MarketMetrics = {
   flowState: string;
   dataAvailable: boolean;
   dataError: string | null;
+  cachedAt: string | null;
 };
 
-type SectorItem = MarketMetrics & {
-  name: string;
-  icon: string;
-  rank: number;
-  rotationScore: number;
-  companies: CompanyDefinition[];
-};
+type SectorItem =
+  MarketMetrics & {
+    name: string;
+    icon: string;
+    rank: number;
+    rotationScore: number;
+    companies: CompanyDefinition[];
+  };
 
-type CompanyItem = MarketMetrics &
+type CompanyItem =
+  MarketMetrics &
   CompanyDefinition & {
     rank: number;
   };
+
+type FinnhubQuote = {
+  c?: number;
+};
+
+type CachedBarsRow = {
+  symbol: string;
+  bars: unknown;
+  updated_at: string;
+};
+
+const FINNHUB_ORIGIN =
+  "https://finnhub.io/api/v1";
 
 const SECTORS: SectorDefinition[] = [
   {
@@ -195,156 +212,109 @@ const SECTORS: SectorDefinition[] = [
   },
 ];
 
-function num(value: unknown, fallback = 0) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
+function num(
+  value: unknown,
+  fallback = 0
+) {
+  const parsed =
+    Number(value);
+
+  return Number.isFinite(parsed)
+    ? parsed
+    : fallback;
 }
 
-function round(value: number, digits = 2) {
-  const factor = 10 ** digits;
-  return Math.round(value * factor) / factor;
+function round(
+  value: number,
+  digits = 2
+) {
+  const factor =
+    10 ** digits;
+
+  return (
+    Math.round(
+      value * factor
+    ) / factor
+  );
 }
 
-function clamp(value: number, minimum: number, maximum: number) {
-  return Math.min(Math.max(value, minimum), maximum);
+function clamp(
+  value: number,
+  minimum: number,
+  maximum: number
+) {
+  return Math.min(
+    Math.max(
+      value,
+      minimum
+    ),
+    maximum
+  );
 }
 
-function dateKey(date: Date) {
-  return date.toISOString().slice(0, 10);
-}
-
-function percentChange(current: number, previous: number) {
+function percentChange(
+  current: number,
+  previous: number
+) {
   return previous > 0
-    ? ((current - previous) / previous) * 100
+    ? ((current - previous) /
+        previous) *
+        100
     : 0;
 }
 
-function statusLabel(score: number, available: boolean) {
-  if (!available) return "بيانات غير متاحة";
-  if (score >= 80) return "قوي جدًا";
-  if (score >= 65) return "إيجابي";
-  if (score >= 45) return "محايد";
-  if (score >= 30) return "ضعيف";
+function statusLabel(
+  score: number,
+  available: boolean
+) {
+  if (!available) {
+    return "بيانات غير متاحة";
+  }
+
+  if (score >= 80) {
+    return "قوي جدًا";
+  }
+
+  if (score >= 65) {
+    return "إيجابي";
+  }
+
+  if (score >= 45) {
+    return "محايد";
+  }
+
+  if (score >= 30) {
+    return "ضعيف";
+  }
+
   return "ضعيف جدًا";
 }
 
-function flowState(score: number, available: boolean) {
-  if (!available) return "غير متاح";
-  if (score >= 1.5) return "دخول سيولة نسبي قوي";
-  if (score >= 0.45) return "دخول سيولة نسبي";
-  if (score <= -1.5) return "خروج سيولة نسبي قوي";
-  if (score <= -0.45) return "خروج سيولة نسبي";
-  return "تدفق متوازن";
-}
-
-async function sleep(milliseconds: number) {
-  await new Promise((resolve) =>
-    setTimeout(resolve, milliseconds)
-  );
-}
-
-async function fetchBarsDirect(
-  symbol: string,
-  apiKey: string
-): Promise<MassiveBar[]> {
-  const to = new Date();
-  const from = new Date(to);
-  from.setUTCDate(from.getUTCDate() - 55);
-
-  const url =
-    `https://api.massive.com/v2/aggs/ticker/${encodeURIComponent(
-      symbol
-    )}/range/1/day/${dateKey(from)}/${dateKey(to)}` +
-    `?adjusted=true&sort=asc&limit=120&apiKey=${encodeURIComponent(
-      apiKey
-    )}`;
-
-  let lastError = `تعذر تحميل ${symbol}`;
-
-  for (let attempt = 1; attempt <= 4; attempt += 1) {
-    const controller = new AbortController();
-    const timeout = setTimeout(
-      () => controller.abort(),
-      20_000
-    );
-
-    try {
-      const response = await fetch(url, {
-        cache: "no-store",
-        headers: {
-          Accept: "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        signal: controller.signal,
-      });
-
-      const payload =
-        (await response.json()) as MassiveResponse;
-
-      if (response.ok) {
-        const bars = (payload.results ?? [])
-          .filter(
-            (bar) =>
-              num(bar.c) > 0 &&
-              num(bar.t) > 0
-          )
-          .sort(
-            (left, right) =>
-              num(left.t) - num(right.t)
-          );
-
-        if (bars.length >= 2) {
-          return bars;
-        }
-
-        lastError =
-          `لا توجد جلسات كافية لتحليل ${symbol}`;
-      } else {
-        lastError =
-          payload.error ||
-          payload.message ||
-          `تعذر تحميل ${symbol} برمز HTTP ${response.status}`;
-
-        if (
-          response.status !== 429 &&
-          response.status < 500
-        ) {
-          break;
-        }
-      }
-    } catch (error) {
-      lastError =
-        error instanceof Error
-          ? error.message
-          : lastError;
-    } finally {
-      clearTimeout(timeout);
-    }
-
-    if (attempt < 4) {
-      await sleep(attempt * 900);
-    }
+function flowState(
+  score: number,
+  available: boolean
+) {
+  if (!available) {
+    return "غير متاح";
   }
 
-  throw new Error(lastError);
-}
+  if (score >= 1.5) {
+    return "دخول سيولة نسبي قوي";
+  }
 
-async function getBars(
-  symbol: string,
-  apiKey: string
-) {
-  return getOrSetCache<MassiveBar[]>(
-    `sector-bars:v4-individual:${symbol}`,
-    {
-      ttlMs: 2 * 60_000,
-      staleMs: 30 * 60_000,
-    },
-    () =>
-      fetchBarsDirect(
-        symbol,
-        apiKey
-      )
-  );
+  if (score >= 0.45) {
+    return "دخول سيولة نسبي";
+  }
+
+  if (score <= -1.5) {
+    return "خروج سيولة نسبي قوي";
+  }
+
+  if (score <= -0.45) {
+    return "خروج سيولة نسبي";
+  }
+
+  return "تدفق متوازن";
 }
 
 function calculateRotationScore(
@@ -357,11 +327,15 @@ function calculateRotationScore(
   >
 ) {
   return round(
-    metrics.relativeStrengthPct * 0.55 +
-      metrics.fiveDayChangePct * 0.28 +
-      metrics.dailyChangePct * 0.17 +
+    metrics.relativeStrengthPct *
+      0.55 +
+      metrics.fiveDayChangePct *
+        0.28 +
+      metrics.dailyChangePct *
+        0.17 +
       clamp(
-        (metrics.volumeRatio - 1) * 1.4,
+        (metrics.volumeRatio - 1) *
+          1.4,
         -1.2,
         1.4
       ),
@@ -369,9 +343,64 @@ function calculateRotationScore(
   );
 }
 
+function normalizeBars(
+  value: unknown
+): CachedBar[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => {
+      if (
+        !item ||
+        typeof item !== "object"
+      ) {
+        return null;
+      }
+
+      const row =
+        item as Record<
+          string,
+          unknown
+        >;
+
+      const close =
+        num(row.c);
+
+      const timestamp =
+        num(row.t);
+
+      if (
+        close <= 0 ||
+        timestamp <= 0
+      ) {
+        return null;
+      }
+
+      return {
+        c: close,
+        v: num(row.v),
+        t: timestamp,
+      };
+    })
+    .filter(
+      (
+        item
+      ): item is CachedBar =>
+        item !== null
+    )
+    .sort(
+      (left, right) =>
+        left.t -
+        right.t
+    );
+}
+
 function unavailableMetrics(
   symbol: string,
-  error: string
+  error: string,
+  cachedAt: string | null
 ): MarketMetrics {
   return {
     symbol,
@@ -381,23 +410,66 @@ function unavailableMetrics(
     relativeStrengthPct: 0,
     volumeRatio: 0,
     strengthScore: 0,
-    status: statusLabel(0, false),
+    status:
+      statusLabel(
+        0,
+        false
+      ),
     trend: "FLAT",
-    flowState: "غير متاح",
+    flowState:
+      "غير متاح",
     dataAvailable: false,
     dataError: error,
+    cachedAt,
   };
+}
+
+function isLatestBarToday(
+  timestamp: number
+) {
+  const barDate =
+    new Intl.DateTimeFormat(
+      "en-CA",
+      {
+        timeZone:
+          "America/New_York",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }
+    ).format(
+      new Date(timestamp)
+    );
+
+  const today =
+    new Intl.DateTimeFormat(
+      "en-CA",
+      {
+        timeZone:
+          "America/New_York",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }
+    ).format(
+      new Date()
+    );
+
+  return barDate === today;
 }
 
 function buildMetrics(
   symbol: string,
-  bars: MassiveBar[],
+  bars: CachedBar[],
+  currentPrice: number,
+  cachedAt: string | null,
   benchmarkFiveDayChangePct = 0
 ): MarketMetrics {
-  if (bars.length < 2) {
+  if (bars.length < 6) {
     return unavailableMetrics(
       symbol,
-      "لا توجد جلسات كافية."
+      "لا توجد جلسات محفوظة كافية.",
+      cachedAt
     );
   }
 
@@ -408,125 +480,386 @@ function buildMetrics(
     bars[bars.length - 2];
 
   const fiveDayReference =
-    bars[
-      Math.max(
-        0,
-        bars.length - 6
-      )
-    ];
+    bars[bars.length - 6];
 
   const price =
-    num(latest.c);
+    currentPrice > 0
+      ? currentPrice
+      : latest.c;
 
-  if (price <= 0) {
-    return unavailableMetrics(
-      symbol,
-      "السعر الحالي غير متاح."
+  const dailyReference =
+    isLatestBarToday(
+      latest.t
+    )
+      ? previous.c
+      : latest.c;
+
+  const dailyChangePct =
+    round(
+      percentChange(
+        price,
+        dailyReference
+      )
     );
-  }
 
-  const dailyChangePct = round(
-    percentChange(
-      price,
-      num(previous.c)
-    )
-  );
-
-  const fiveDayChangePct = round(
-    percentChange(
-      price,
-      num(fiveDayReference.c)
-    )
-  );
-
-  const priorVolumes = bars
-    .slice(
-      Math.max(
-        0,
-        bars.length - 21
-      ),
-      bars.length - 1
-    )
-    .map((bar) =>
-      num(bar.v)
-    )
-    .filter(
-      (volume) =>
-        volume > 0
+  const fiveDayChangePct =
+    round(
+      percentChange(
+        price,
+        fiveDayReference.c
+      )
     );
+
+  const previousVolumes =
+    bars
+      .slice(
+        Math.max(
+          0,
+          bars.length - 21
+        ),
+        bars.length - 1
+      )
+      .map(
+        (bar) =>
+          bar.v
+      )
+      .filter(
+        (volume) =>
+          volume > 0
+      );
 
   const averageVolume =
-    priorVolumes.length > 0
-      ? priorVolumes.reduce(
-          (sum, volume) =>
+    previousVolumes.length > 0
+      ? previousVolumes.reduce(
+          (
+            sum,
+            volume
+          ) =>
             sum + volume,
           0
         ) /
-        priorVolumes.length
+        previousVolumes.length
       : 0;
 
   const volumeRatio =
     averageVolume > 0
       ? round(
-          num(latest.v) /
+          latest.v /
             averageVolume
         )
       : 0;
 
-  const relativeStrengthPct = round(
-    fiveDayChangePct -
-      benchmarkFiveDayChangePct
-  );
+  const relativeStrengthPct =
+    round(
+      fiveDayChangePct -
+        benchmarkFiveDayChangePct
+    );
 
-  const volumeImpact = clamp(
-    (volumeRatio - 1) * 9,
-    -8,
-    10
-  );
+  const volumeImpact =
+    clamp(
+      (volumeRatio - 1) *
+        9,
+      -8,
+      10
+    );
 
-  const strengthScore = clamp(
-    Math.round(
-      50 +
-        dailyChangePct * 8 +
-        fiveDayChangePct * 4 +
-        relativeStrengthPct * 6 +
-        volumeImpact
-    ),
-    0,
-    100
-  );
+  const strengthScore =
+    clamp(
+      Math.round(
+        50 +
+          dailyChangePct *
+            8 +
+          fiveDayChangePct *
+            4 +
+          relativeStrengthPct *
+            6 +
+          volumeImpact
+      ),
+      0,
+      100
+    );
 
-  const baseMetrics = {
+  const metrics = {
     symbol,
-    price: round(price),
+    price:
+      round(
+        price
+      ),
     dailyChangePct,
     fiveDayChangePct,
     relativeStrengthPct,
     volumeRatio,
     strengthScore,
-    status: statusLabel(
-      strengthScore,
-      true
-    ),
+    status:
+      statusLabel(
+        strengthScore,
+        true
+      ),
     trend:
-      dailyChangePct > 0.05
+      dailyChangePct >
+      0.05
         ? ("UP" as const)
-        : dailyChangePct < -0.05
+        : dailyChangePct <
+            -0.05
           ? ("DOWN" as const)
           : ("FLAT" as const),
     dataAvailable: true,
     dataError: null,
+    cachedAt,
   };
 
   return {
-    ...baseMetrics,
-    flowState: flowState(
-      calculateRotationScore(
-        baseMetrics
+    ...metrics,
+    flowState:
+      flowState(
+        calculateRotationScore(
+          metrics
+        ),
+        true
       ),
-      true
-    ),
   };
+}
+
+async function readBarsCache(
+  symbols: string[]
+) {
+  const supabase =
+    createAdminClient();
+
+  const uniqueSymbols =
+    Array.from(
+      new Set(
+        symbols.map(
+          (symbol) =>
+            symbol
+              .trim()
+              .toUpperCase()
+        )
+      )
+    );
+
+  const {
+    data,
+    error,
+  } =
+    await supabase
+      .from(
+        "market_sector_bars_cache"
+      )
+      .select(
+        "symbol,bars,updated_at"
+      )
+      .in(
+        "symbol",
+        uniqueSymbols
+      );
+
+  if (error) {
+    throw new Error(
+      `تعذر قراءة كاش القطاعات: ${error.message}`
+    );
+  }
+
+  const map =
+    new Map<
+      string,
+      {
+        bars: CachedBar[];
+        updatedAt: string;
+      }
+    >();
+
+  for (
+    const row of
+      (data ?? []) as CachedBarsRow[]
+  ) {
+    map.set(
+      row.symbol.toUpperCase(),
+      {
+        bars:
+          normalizeBars(
+            row.bars
+          ),
+        updatedAt:
+          row.updated_at,
+      }
+    );
+  }
+
+  return map;
+}
+
+async function fetchFinnhubPrice(
+  symbol: string
+) {
+  const apiKey =
+    process.env.FINNHUB_API_KEY;
+
+  if (!apiKey) {
+    return 0;
+  }
+
+  const url =
+    `${FINNHUB_ORIGIN}/quote` +
+    `?symbol=${encodeURIComponent(
+      symbol
+    )}` +
+    `&token=${encodeURIComponent(
+      apiKey
+    )}`;
+
+  const controller =
+    new AbortController();
+
+  const timeout =
+    setTimeout(
+      () =>
+        controller.abort(),
+      6_000
+    );
+
+  try {
+    const response =
+      await fetch(
+        url,
+        {
+          cache: "no-store",
+          signal:
+            controller.signal,
+        }
+      );
+
+    if (!response.ok) {
+      return 0;
+    }
+
+    const quote =
+      (await response.json()) as
+        FinnhubQuote;
+
+    const price =
+      num(quote.c);
+
+    return price > 0
+      ? price
+      : 0;
+  } catch {
+    return 0;
+  } finally {
+    clearTimeout(
+      timeout
+    );
+  }
+}
+
+function getFinnhubPrice(
+  symbol: string
+) {
+  return getOrSetCache<number>(
+    `sector-price:v10:${symbol}`,
+    {
+      ttlMs: 60_000,
+      staleMs:
+        5 * 60_000,
+    },
+    () =>
+      fetchFinnhubPrice(
+        symbol
+      )
+  );
+}
+
+async function mapLimit<
+  T,
+  R
+>(
+  items: T[],
+  concurrency: number,
+  worker: (
+    item: T
+  ) => Promise<R>
+) {
+  const results =
+    new Array<R>(
+      items.length
+    );
+
+  let nextIndex = 0;
+
+  async function run() {
+    while (true) {
+      const index =
+        nextIndex;
+
+      nextIndex += 1;
+
+      if (
+        index >=
+        items.length
+      ) {
+        return;
+      }
+
+      results[index] =
+        await worker(
+          items[index]
+        );
+    }
+  }
+
+  await Promise.all(
+    Array.from(
+      {
+        length:
+          Math.min(
+            concurrency,
+            Math.max(
+              items.length,
+              1
+            )
+          ),
+      },
+      () => run()
+    )
+  );
+
+  return results;
+}
+
+async function getPrices(
+  symbols: string[]
+) {
+  const uniqueSymbols =
+    Array.from(
+      new Set(
+        symbols.map(
+          (symbol) =>
+            symbol
+              .trim()
+              .toUpperCase()
+        )
+      )
+    );
+
+  const pairs =
+    await mapLimit(
+      uniqueSymbols,
+      6,
+      async (
+        symbol
+      ) =>
+        [
+          symbol,
+          await getFinnhubPrice(
+            symbol
+          ),
+        ] as const
+    );
+
+  return new Map<
+    string,
+    number
+  >(pairs);
 }
 
 function sortByStrength<
@@ -535,9 +868,14 @@ function sortByStrength<
     strengthScore: number;
     relativeStrengthPct: number;
   }
->(items: T[]) {
+>(
+  items: T[]
+) {
   return [...items].sort(
-    (left, right) => {
+    (
+      left,
+      right
+    ) => {
       if (
         left.dataAvailable !==
         right.dataAvailable
@@ -566,110 +904,99 @@ function sortByStrength<
 }
 
 async function loadOverview() {
-  const apiKey =
-    process.env.MASSIVE_API_KEY;
+  const symbols = [
+    "SPY",
+    ...SECTORS.map(
+      (sector) =>
+        sector.symbol
+    ),
+  ];
 
-  if (!apiKey) {
-    throw new Error(
-      "MASSIVE_API_KEY غير موجود."
-    );
-  }
+  const [
+    barsMap,
+    prices,
+  ] =
+    await Promise.all([
+      readBarsCache(
+        symbols
+      ),
+      getPrices(
+        symbols
+      ),
+    ]);
 
-  const spyBars =
-    await getBars(
-      "SPY",
-      apiKey
-    );
+  const spyCache =
+    barsMap.get("SPY");
 
   const benchmark =
     buildMetrics(
       "SPY",
-      spyBars,
+      spyCache?.bars ??
+        [],
+      prices.get("SPY") ??
+        0,
+      spyCache?.updatedAt ??
+        null,
       0
     );
 
-  if (!benchmark.dataAvailable) {
-    throw new Error(
-      "تعذر تحميل بيانات SPY المرجعية."
-    );
-  }
-
-  const rawSectors: SectorItem[] = [];
-
-  for (
-    let index = 0;
-    index < SECTORS.length;
-    index += 1
+  if (
+    !benchmark.dataAvailable
   ) {
-    const definition =
-      SECTORS[index];
-
-    try {
-      const bars =
-        await getBars(
-          definition.symbol,
-          apiKey
-        );
-
-      const metrics =
-        buildMetrics(
-          definition.symbol,
-          bars,
-          benchmark.fiveDayChangePct
-        );
-
-      rawSectors.push({
-        ...metrics,
-        name: definition.name,
-        icon: definition.icon,
-        companies:
-          definition.companies,
-        rank: 0,
-        rotationScore:
-          metrics.dataAvailable
-            ? calculateRotationScore(
-                metrics
-              )
-            : -999,
-      });
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "تعذر تحميل القطاع.";
-
-      const metrics =
-        unavailableMetrics(
-          definition.symbol,
-          message
-        );
-
-      rawSectors.push({
-        ...metrics,
-        name: definition.name,
-        icon: definition.icon,
-        companies:
-          definition.companies,
-        rank: 0,
-        rotationScore: -999,
-      });
-    }
-
-    if (
-      index <
-      SECTORS.length - 1
-    ) {
-      await sleep(350);
-    }
+    throw new Error(
+      "كاش SPY غير جاهز. شغّل seed-sector-cache.py أولًا."
+    );
   }
 
   const sectors =
     sortByStrength(
-      rawSectors
+      SECTORS.map(
+        (definition) => {
+          const cached =
+            barsMap.get(
+              definition.symbol
+            );
+
+          const metrics =
+            buildMetrics(
+              definition.symbol,
+              cached?.bars ??
+                [],
+              prices.get(
+                definition.symbol
+              ) ?? 0,
+              cached?.updatedAt ??
+                null,
+              benchmark
+                .fiveDayChangePct
+            );
+
+          return {
+            ...metrics,
+            name:
+              definition.name,
+            icon:
+              definition.icon,
+            companies:
+              definition.companies,
+            rank: 0,
+            rotationScore:
+              metrics.dataAvailable
+                ? calculateRotationScore(
+                    metrics
+                  )
+                : -999,
+          };
+        }
+      )
     ).map(
-      (sector, index) => ({
+      (
+        sector,
+        index
+      ) => ({
         ...sector,
-        rank: index + 1,
+        rank:
+          index + 1,
       })
     );
 
@@ -682,13 +1009,15 @@ async function loadOverview() {
   const risingCount =
     availableSectors.filter(
       (sector) =>
-        sector.trend === "UP"
+        sector.trend ===
+        "UP"
     ).length;
 
   const fallingCount =
     availableSectors.filter(
       (sector) =>
-        sector.trend === "DOWN"
+        sector.trend ===
+        "DOWN"
     ).length;
 
   const flatCount =
@@ -713,17 +1042,22 @@ async function loadOverview() {
 
   const rotationSorted =
     [...availableSectors].sort(
-      (left, right) =>
+      (
+        left,
+        right
+      ) =>
         right.rotationScore -
         left.rotationScore
     );
 
   const rotationTo =
-    rotationSorted[0] ?? null;
+    rotationSorted[0] ??
+    null;
 
   const rotationFrom =
     rotationSorted[
-      rotationSorted.length - 1
+      rotationSorted.length -
+        1
     ] ?? null;
 
   const rotationSpread =
@@ -735,13 +1069,6 @@ async function loadOverview() {
           2
         )
       : 0;
-
-  const confidence =
-    rotationSpread >= 5
-      ? "مرتفعة"
-      : rotationSpread >= 2.5
-        ? "متوسطة"
-        : "ضعيفة";
 
   return {
     ok: true,
@@ -773,10 +1100,18 @@ async function loadOverview() {
           : rotationSpread >= 1
             ? "دوران قطاعي متوسط"
             : "دوران قطاعي محدود",
-      from: rotationFrom,
-      to: rotationTo,
-      confidence,
-      spread: rotationSpread,
+      from:
+        rotationFrom,
+      to:
+        rotationTo,
+      confidence:
+        rotationSpread >= 5
+          ? "مرتفعة"
+          : rotationSpread >= 2.5
+            ? "متوسطة"
+            : "ضعيفة",
+      spread:
+        rotationSpread,
       explanation:
         rotationTo &&
         rotationFrom &&
@@ -786,22 +1121,35 @@ async function loadOverview() {
           : "لا تتوفر بيانات كافية لتحديد حركة الأموال بين القطاعات.",
     },
     sectors,
-    failed: sectors
-      .filter(
-        (sector) =>
-          !sector.dataAvailable
-      )
-      .map((sector) => ({
-        symbol: sector.symbol,
-        error:
-          sector.dataError ||
-          "بيانات غير متاحة",
-      })),
-    meta: {
-      disclaimer:
-        "حركة الأموال تقدير نسبي مبني على السعر والزخم والحجم، وليست قياسًا مباشرًا لصافي تدفقات الصناديق.",
-    },
+    failed:
+      sectors
+        .filter(
+          (sector) =>
+            !sector.dataAvailable
+        )
+        .map(
+          (sector) => ({
+            symbol:
+              sector.symbol,
+            error:
+              sector.dataError ||
+              "بيانات غير متاحة",
+          })
+        ),
   };
+}
+
+async function getOverview() {
+  return getOrSetCache(
+    "sector-overview:v11-live-worker",
+    {
+      ttlMs:
+        60_000,
+      staleMs:
+        10 * 60_000,
+    },
+    loadOverview
+  );
 }
 
 async function loadDetail(
@@ -810,7 +1158,8 @@ async function loadDetail(
   const definition =
     SECTORS.find(
       (sector) =>
-        sector.symbol === symbol
+        sector.symbol ===
+        symbol
     );
 
   if (!definition) {
@@ -820,20 +1169,15 @@ async function loadDetail(
   }
 
   const overview =
-    await getOrSetCache(
-      "sector-overview:v4-individual",
-      {
-        ttlMs: 2 * 60_000,
-        staleMs:
-          30 * 60_000,
-      },
-      loadOverview
-    );
+    await getOverview();
 
   const sector =
     overview.sectors.find(
-      (item: SectorItem) =>
-        item.symbol === symbol
+      (
+        item: SectorItem
+      ) =>
+        item.symbol ===
+        symbol
     );
 
   if (!sector) {
@@ -842,83 +1186,68 @@ async function loadDetail(
     );
   }
 
-  const apiKey =
-    process.env.MASSIVE_API_KEY;
-
-  if (!apiKey) {
-    throw new Error(
-      "MASSIVE_API_KEY غير موجود."
+  const companySymbols =
+    definition.companies.map(
+      (company) =>
+        company.symbol
     );
-  }
 
-  const companies: CompanyItem[] = [];
+  const [
+    barsMap,
+    prices,
+  ] =
+    await Promise.all([
+      readBarsCache(
+        companySymbols
+      ),
+      getPrices(
+        companySymbols
+      ),
+    ]);
 
-  for (
-    let index = 0;
-    index <
-    definition.companies.length;
-    index += 1
-  ) {
-    const company =
-      definition.companies[index];
-
-    try {
-      const bars =
-        await getBars(
-          company.symbol,
-          apiKey
-        );
-
-      const metrics =
-        buildMetrics(
-          company.symbol,
-          bars,
-          overview.benchmark
-            .fiveDayChangePct
-        );
-
-      companies.push({
-        ...company,
-        ...metrics,
-        rank: 0,
-      });
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "تعذر تحميل الشركة.";
-
-      companies.push({
-        ...company,
-        ...unavailableMetrics(
-          company.symbol,
-          message
-        ),
-        rank: 0,
-      });
-    }
-
-    if (
-      index <
-      definition.companies.length -
-        1
-    ) {
-      await sleep(350);
-    }
-  }
-
-  const sortedCompanies =
+  const companies =
     sortByStrength(
-      companies
+      definition.companies.map(
+        (company) => {
+          const cached =
+            barsMap.get(
+              company.symbol
+            );
+
+          const metrics =
+            buildMetrics(
+              company.symbol,
+              cached?.bars ??
+                [],
+              prices.get(
+                company.symbol
+              ) ?? 0,
+              cached?.updatedAt ??
+                null,
+              overview.benchmark
+                .fiveDayChangePct
+            );
+
+          return {
+            ...company,
+            ...metrics,
+            rank: 0,
+          };
+        }
+      )
     ).map(
-      (company, index) => ({
+      (
+        company,
+        index
+      ) => ({
         ...company,
-        rank: index + 1,
+        rank:
+          index + 1,
       })
     );
 
   const availableCompanies =
-    sortedCompanies.filter(
+    companies.filter(
       (company) =>
         company.dataAvailable
     );
@@ -926,20 +1255,26 @@ async function loadDetail(
   const risingCount =
     availableCompanies.filter(
       (company) =>
-        company.trend === "UP"
+        company.trend ===
+        "UP"
     ).length;
 
   const fallingCount =
     availableCompanies.filter(
       (company) =>
-        company.trend === "DOWN"
+        company.trend ===
+        "DOWN"
     ).length;
 
   const averageDailyChangePct =
-    availableCompanies.length > 0
+    availableCompanies.length >
+    0
       ? round(
           availableCompanies.reduce(
-            (sum, company) =>
+            (
+              sum,
+              company
+            ) =>
               sum +
               company.dailyChangePct,
             0
@@ -949,10 +1284,14 @@ async function loadDetail(
       : 0;
 
   const averageFiveDayChangePct =
-    availableCompanies.length > 0
+    availableCompanies.length >
+    0
       ? round(
           availableCompanies.reduce(
-            (sum, company) =>
+            (
+              sum,
+              company
+            ) =>
               sum +
               company.fiveDayChangePct,
             0
@@ -968,8 +1307,7 @@ async function loadDetail(
     sector,
     benchmark:
       overview.benchmark,
-    companies:
-      sortedCompanies,
+    companies,
     leaders:
       availableCompanies.slice(
         0,
@@ -998,17 +1336,20 @@ async function loadDetail(
       averageFiveDayChangePct,
     },
     failed:
-      sortedCompanies
+      companies
         .filter(
           (company) =>
             !company.dataAvailable
         )
-        .map((company) => ({
-          symbol: company.symbol,
-          error:
-            company.dataError ||
-            "بيانات غير متاحة",
-        })),
+        .map(
+          (company) => ({
+            symbol:
+              company.symbol,
+            error:
+              company.dataError ||
+              "بيانات غير متاحة",
+          })
+        ),
   };
 }
 
@@ -1017,47 +1358,51 @@ export async function GET(
 ) {
   try {
     const url =
-      new URL(request.url);
+      new URL(
+        request.url
+      );
 
-    const symbol = String(
-      url.searchParams.get(
-        "symbol"
-      ) ?? ""
-    )
-      .trim()
-      .toUpperCase()
-      .replace(/[^A-Z.-]/g, "");
+    const symbol =
+      String(
+        url.searchParams.get(
+          "symbol"
+        ) ?? ""
+      )
+        .trim()
+        .toUpperCase()
+        .replace(
+          /[^A-Z.-]/g,
+          ""
+        );
 
     const data = symbol
       ? await getOrSetCache(
-          `sector-detail:v4-individual:${symbol}`,
+          `sector-detail:v11-live-worker:${symbol}`,
           {
-            ttlMs: 2 * 60_000,
+            ttlMs:
+              60_000,
             staleMs:
-              30 * 60_000,
+              10 * 60_000,
           },
           () =>
-            loadDetail(symbol)
+            loadDetail(
+              symbol
+            )
         )
-      : await getOrSetCache(
-          "sector-overview:v4-individual",
-          {
-            ttlMs: 2 * 60_000,
-            staleMs:
-              30 * 60_000,
-          },
-          loadOverview
-        );
+      : await getOverview();
 
-    return Response.json(data, {
-      status: 200,
-      headers: {
-        "Content-Type":
-          "application/json; charset=utf-8",
-        "Cache-Control":
-          "private, no-store, max-age=0",
-      },
-    });
+    return Response.json(
+      data,
+      {
+        status: 200,
+        headers: {
+          "Content-Type":
+            "application/json; charset=utf-8",
+          "Cache-Control":
+            "private, no-store, max-age=0",
+        },
+      }
+    );
   } catch (error) {
     const message =
       error instanceof Error
@@ -1072,7 +1417,8 @@ export async function GET(
           "رمز القطاع غير مدعوم."
             ? message
             : "تعذر تحميل بيانات القطاعات.",
-        details: message,
+        details:
+          message,
       },
       {
         status:

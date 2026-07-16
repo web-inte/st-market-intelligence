@@ -57,6 +57,8 @@ type SectorResponse = {
   sectors: SectorItem[];
 };
 
+const SECTOR_STORAGE_KEY = "st-sector-overview-v11";
+
 function changeClass(value: number) {
   if (value > 0) {
     return "text-emerald-400";
@@ -175,6 +177,35 @@ export default function SectorRadar() {
     let cancelled = false;
     let running = false;
 
+    try {
+      const cached =
+        window.localStorage.getItem(
+          SECTOR_STORAGE_KEY
+        );
+
+      if (cached) {
+        const parsed =
+          JSON.parse(
+            cached
+          ) as SectorResponse;
+
+        if (
+          parsed?.ok &&
+          Array.isArray(
+            parsed.sectors
+          )
+        ) {
+          setData(parsed);
+          setLoading(false);
+        }
+      }
+    } catch (cacheError) {
+      console.warn(
+        "Failed to restore sector cache:",
+        cacheError
+      );
+    }
+
     async function load() {
       if (running) return;
 
@@ -205,6 +236,20 @@ export default function SectorRadar() {
         if (!cancelled) {
           setData(payload);
           setError("");
+
+          try {
+            window.localStorage.setItem(
+              SECTOR_STORAGE_KEY,
+              JSON.stringify(
+                payload
+              )
+            );
+          } catch (cacheError) {
+            console.warn(
+              "Failed to save sector cache:",
+              cacheError
+            );
+          }
         }
       } catch (loadError) {
         if (!cancelled) {
@@ -287,7 +332,7 @@ export default function SectorRadar() {
         </div>
       </div>
 
-      {loading ? (
+      {loading && !data ? (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {Array.from({
             length: 12,
