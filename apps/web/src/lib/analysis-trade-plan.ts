@@ -7,7 +7,7 @@ import type {
   Side,
 } from "./analysis-engine";
 
-type ActiveSide = Exclude<Side, "NEUTRAL">;
+type ActiveSide = "CALL" | "PUT";
 
 type SetupRow = {
   id: string;
@@ -791,20 +791,24 @@ function selectContractForSide(
   analysis: AnalysisResponse,
   side: ActiveSide
 ): SelectedContract | null {
-  const contract =
+  const candidates =
     side === "CALL"
-      ? analysis.options.bestCall
-      : analysis.options.bestPut;
+      ? analysis.options.recommendedCalls
+      : analysis.options.recommendedPuts;
 
-  if (
-    !contract ||
-    !contract.ticker ||
-    numberValue(contract.midpoint) <= 0
-  ) {
-    return null;
-  }
+  const affordableContract =
+    candidates.find((contract) => {
+      const ask =
+        numberValue(contract.ask);
 
-  return contract;
+      return (
+        Boolean(contract.ticker) &&
+        ask > 0 &&
+        ask <= 2.70
+      );
+    });
+
+  return affordableContract ?? null;
 }
 
 function isRealOptionTicker(
@@ -938,6 +942,30 @@ export async function syncAnalysisTradePlan(
 
   const contractTicker =
     preferredContract.ticker;
+    const contractAsk =
+  numberValue(
+    preferredContract.ask
+  );
+
+const contractMidpoint =
+  numberValue(
+    preferredContract.midpoint
+  );
+
+const contractLastPrice =
+  numberValue(
+    preferredContract.lastTradePrice
+  );
+
+const contractEntryPrice =
+  round(
+    contractAsk > 0
+      ? contractAsk
+      : contractMidpoint > 0
+        ? contractMidpoint
+        : contractLastPrice,
+    2
+  );
 
   const {
     data: activeRows,
@@ -1184,6 +1212,28 @@ best_price_at:
 current_profit_pct: 0,
 highest_target_hit: 0,
 contract_status: "ACTIVE",
+contract_entry_price:
+  contractEntryPrice,
+
+contract_current_price:
+  contractEntryPrice,
+
+contract_best_price:
+  contractEntryPrice,
+
+contract_best_price_at:
+  nowIso,
+
+contract_bid:
+  numberValue(preferredContract.bid),
+
+contract_ask:
+  numberValue(preferredContract.ask),
+
+contract_profit_dollars: 0,
+contract_profit_pct: 0,
+contract_quote_at: nowIso,
+last_profit_step: 0,
     })
     .select("*")
     .single();
