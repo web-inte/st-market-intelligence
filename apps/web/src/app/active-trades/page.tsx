@@ -810,6 +810,64 @@ export default function ActiveTradesPage() {
                             : "لم يتحقق"}
                         </p>
                       </div>
+
+                      <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-3">
+                        <p className="text-xs text-slate-500">
+                          ربح / خسارة العقد
+                        </p>
+
+                        <p
+                          dir="ltr"
+                          className={[
+                            "mt-1 text-lg font-black",
+                            Number(
+                              trade.contractProfitDollars
+                            ) >= 0
+                              ? "text-emerald-300"
+                              : "text-rose-300",
+                          ].join(" ")}
+                        >
+                          {Number.isFinite(
+                            Number(
+                              trade.contractProfitDollars
+                            )
+                          )
+                            ? `${Number(
+                                trade.contractProfitDollars
+                              ) >= 0
+                                ? "+"
+                                : ""}$${Number(
+                                trade.contractProfitDollars
+                              ).toFixed(2)}`
+                            : "—"}
+                        </p>
+
+                        <p
+                          dir="ltr"
+                          className={[
+                            "mt-1 text-xs font-bold",
+                            Number(
+                              trade.contractProfitPct
+                            ) >= 0
+                              ? "text-emerald-400"
+                              : "text-rose-400",
+                          ].join(" ")}
+                        >
+                          {Number.isFinite(
+                            Number(
+                              trade.contractProfitPct
+                            )
+                          )
+                            ? `${Number(
+                                trade.contractProfitPct
+                              ) >= 0
+                                ? "+"
+                                : ""}${Number(
+                                trade.contractProfitPct
+                              ).toFixed(2)}%`
+                            : ""}
+                        </p>
+                      </div>
                     </div>
 
                     <div className="mt-4">
