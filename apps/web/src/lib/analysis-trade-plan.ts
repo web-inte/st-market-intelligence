@@ -876,18 +876,6 @@ export async function syncAnalysisTradePlan(
         SETUP_LIFETIME_MS
     ).toISOString();
 
-  await supabase
-    .from("stock_trade_setups")
-    .update({
-      status: "expired",
-      invalidated_at: nowIso,
-      invalidation_reason:
-        "انتهت مدة الفرصة",
-    })
-    .eq("symbol", symbol)
-    .eq("status", "active")
-    .lte("expires_at", nowIso);
-
   const directionalSide:
     ActiveSide | null =
     side === "CALL" ||
@@ -907,26 +895,25 @@ export async function syncAnalysisTradePlan(
     directionalSide !== null &&
     score >= 70 &&
     selectedContract !== null;
-
   if (!qualifies) {
-    let invalidationReason =
-      "انخفض تقييم الفرصة عن 70";
+    let warningReason =
+      "انخفض تقييم الفرصة عن الحد المطلوب";
 
     if (side === "NEUTRAL") {
-      invalidationReason =
-        "أصبح اتجاه الفرصة محايدًا";
+      warningReason =
+        "تحول اتجاه التحليل إلى محايد";
     } else if (!selectedContract) {
-      invalidationReason =
-        "لا يوجد عقد أوبشن مؤهل للفرصة";
+      warningReason =
+        "لا توجد بيانات عقد مؤهل حاليًا أو أن السوق مغلق";
     }
 
     await supabase
       .from("stock_trade_setups")
       .update({
-        status: "invalidated",
+        status: "active",
         invalidated_at: nowIso,
         invalidation_reason:
-          invalidationReason,
+          `ضعفت نسبة نجاح الصفقة بسبب: ${warningReason}`,
       })
       .eq("symbol", symbol)
       .eq("status", "active");
@@ -994,42 +981,9 @@ const contractEntryPrice =
     نتخلص من الخطط القديمة التي كانت تحفظ اسمًا
     شكليًا مثل AAPL:CALL بدل رمز عقد Massive الحقيقي.
   */
-  const invalidRows =
-    rows.filter(
-      (row) =>
-        row.side !== activeSide ||
-        !isAnalysisPlan(row) ||
-        !isRealOptionTicker(
-          row.contract_ticker
-        )
-    );
-
-  if (invalidRows.length > 0) {
-    await supabase
-      .from("stock_trade_setups")
-      .update({
-        status: "invalidated",
-        invalidated_at: nowIso,
-        invalidation_reason:
-          "تغير الاتجاه أو ترقية الخطة إلى عقد أوبشن حقيقي",
-      })
-      .in(
-        "id",
-        invalidRows.map(
-          (row) => row.id
-        )
-      );
-  }
-
-  /*
-    نحافظ على العقد الذي اختير عند أول ظهور للفرصة
-    طوال عمر الخطة، بدل تغيير العقد وإعادة الدخول
-    كلما تغير ترتيب العقود في التحديثات اللحظية.
-  */
   const existing =
     rows.find(
       (row) =>
-        row.side === activeSide &&
         isAnalysisPlan(row) &&
         isRealOptionTicker(
           row.contract_ticker

@@ -52,6 +52,9 @@ closeReason: string | null;
 
   contractStatus: string;
   statusLabel: string;
+
+  warningMessage: string | null;
+  warningAt: string | null;
 };
 
 type ActiveTradesResponse = {
@@ -320,6 +323,10 @@ export default function ActiveTradesPage() {
               الصفقات النشطة
             </h1>
 
+          <p className="mt-3 max-w-3xl text-sm font-bold leading-6 text-amber-300">
+            ⚠️ هذه البيانات ليست توصيات بيع أو شراء، وإنما لأغراض تعليمية فقط.
+          </p>
+
             <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-400">
               متابعة وقت التفعيل،
               والعقد، ومستويات
@@ -347,7 +354,7 @@ export default function ActiveTradesPage() {
               href="/dashboard"
               className="rounded-xl border border-slate-700 bg-slate-900 px-4 py-2.5 text-sm font-bold text-slate-200 transition hover:border-slate-500"
             >
-              العودة للرئيسية
+              العودة إلى المنصة
             </Link>
           </div>
         </div>

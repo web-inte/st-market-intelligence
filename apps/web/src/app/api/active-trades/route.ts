@@ -103,6 +103,9 @@ close_reason?:
     | null;
 
   status: string;
+
+  invalidation_reason?: string | null;
+  invalidated_at?: string | null;
 };
 
 function numberValue(
@@ -540,6 +543,14 @@ closedAt:
 
 closeReason:
   row.close_reason,
+
+    warningMessage:
+      String(row.contract_status || "") === "STOPPED"
+        ? null
+        : row.invalidation_reason || null,
+
+    warningAt:
+      row.invalidated_at || null,
 
     highestTargetHit,
 
@@ -1015,19 +1026,28 @@ if (
           SetupRow[]
       )
         .map(mapTrade)
-        .filter(
-  (trade) =>
-    trade.contractStatus ===
-      "ACTIVE" ||
-    trade.contractStatus ===
-      "TARGET_1" ||
-    trade.contractStatus ===
-      "TARGET_2" ||
-    trade.contractStatus ===
-      "TARGET_3" ||
-    trade.contractStatus ===
-      "STOPPED"
-);
+        .filter((trade) => {
+      if (trade.contractStatus === "STOPPED") {
+        const closedTime =
+          Date.parse(trade.closedAt || "");
+
+        if (!Number.isFinite(closedTime)) {
+          return true;
+        }
+
+        return (
+          Date.now() - closedTime <=
+          24 * 60 * 60 * 1000
+        );
+      }
+
+      return (
+        trade.contractStatus === "ACTIVE" ||
+        trade.contractStatus === "TARGET_1" ||
+        trade.contractStatus === "TARGET_2" ||
+        trade.contractStatus === "TARGET_3"
+      );
+    });
 
     return NextResponse.json(
       {
