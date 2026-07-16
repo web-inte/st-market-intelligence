@@ -757,6 +757,48 @@ export default function ActiveTradesPage() {
                         </p>
                       </div>
 
+                      <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-3">
+                        <p className="text-xs text-slate-500">
+                          سعر دخول العقد
+                        </p>
+
+                        <p
+                          dir="ltr"
+                          className="mt-1 text-lg font-black text-white"
+                        >
+                          {Number.isFinite(
+                            Number(
+                              trade.contractEntryPrice
+                            )
+                          )
+                            ? `$${Number(
+                                trade.contractEntryPrice
+                              ).toFixed(2)}`
+                            : "—"}
+                        </p>
+                      </div>
+
+                      <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-3">
+                        <p className="text-xs text-slate-500">
+                          سعر العقد الحالي
+                        </p>
+
+                        <p
+                          dir="ltr"
+                          className="mt-1 text-lg font-black text-cyan-300"
+                        >
+                          {Number.isFinite(
+                            Number(
+                              trade.contractCurrentPrice
+                            )
+                          )
+                            ? `$${Number(
+                                trade.contractCurrentPrice
+                              ).toFixed(2)}`
+                            : "—"}
+                        </p>
+                      </div>
+
                       
 
                       <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-3">
@@ -772,7 +814,7 @@ export default function ActiveTradesPage() {
 
                       <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-3">
                         <p className="text-xs text-slate-500">
-                          السعر الحالي
+                          سعر السهم الحالي
                         </p>
                         <p className="mt-1 font-black">
                           {numberText(
