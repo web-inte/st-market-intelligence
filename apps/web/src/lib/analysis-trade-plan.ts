@@ -27,6 +27,10 @@ type SetupRow = {
 type GammaLevel =
   AnalysisResponse["options"]["gammaStructure"]["magnet"];
 
+type SelectedContract = NonNullable<
+  AnalysisResponse["options"]["bestCall"]
+>;
+
 const SETUP_LIFETIME_MS =
   3 * 60 * 60 * 1000;
 
@@ -72,9 +76,9 @@ function createAdminClient() {
 
   const secret =
     process.env
-      .SUPABASE_SECRET_KEY ||
+      .SUPABASE_SERVICE_ROLE_KEY ||
     process.env
-      .SUPABASE_SERVICE_ROLE_KEY;
+      .SUPABASE_SECRET_KEY;
 
   if (!url || !secret) {
     throw new Error(
@@ -177,10 +181,40 @@ function buildTargets(
   analysis: AnalysisResponse,
   side: ActiveSide,
   entryPrice: number,
+  stopPrice: number,
   score: number
 ): AnalysisTradePlanTarget[] {
   const gamma =
     analysis.options.gammaStructure;
+
+  const stopDistancePct =
+    entryPrice > 0 && stopPrice > 0
+      ? Math.abs(
+          ((entryPrice - stopPrice) /
+            entryPrice) *
+            100
+        )
+      : fallbackStopMove(score);
+
+  /*
+    لا نقبل هدفًا قريبًا لا يبرر المخاطرة.
+    الهدف الأول يجب أن يعطي على الأقل 1.35R،
+    مع حد أدنى عملي 0.75% على السهم.
+  */
+  const minimumTargetMovePct =
+    Math.max(
+      0.75,
+      stopDistancePct * 1.35
+    );
+
+  const maximumTargetMovePct =
+    Math.min(
+      5,
+      Math.max(
+        3,
+        stopDistancePct * 3.5
+      )
+    );
 
   const gammaCandidates =
     side === "CALL"
@@ -268,8 +302,10 @@ function buildTargets(
 
         return (
           correctDirection &&
-          item.movePct >= 0.15 &&
-          item.movePct <= 4
+          item.movePct >=
+            minimumTargetMovePct &&
+          item.movePct <=
+            maximumTargetMovePct
         );
       })
       .sort(
@@ -333,8 +369,25 @@ function buildTargets(
         }
       );
 
-  const fallbackPercentages =
+  const baseFallbackPercentages =
     fallbackMovePercentages(score);
+
+  const fallbackPercentages = [
+    Math.max(
+      baseFallbackPercentages[0],
+      stopDistancePct * 1.5
+    ),
+    Math.max(
+      baseFallbackPercentages[1],
+      stopDistancePct * 2.2
+    ),
+    Math.max(
+      baseFallbackPercentages[2],
+      stopDistancePct * 3
+    ),
+  ].map((value) =>
+    Math.min(value, 5)
+  );
 
   for (
     let index = 0;
@@ -449,8 +502,8 @@ function buildStopPrice(
 
         return (
           correctDirection &&
-          distancePct >= 0.15 &&
-          distancePct <= 4
+          distancePct >= 0.45 &&
+          distancePct <= 2.8
         );
       })
       .sort((first, second) =>
@@ -466,9 +519,24 @@ function buildStopPrice(
     directionalCandidates[0];
 
   if (wall) {
-    return side === "CALL"
-      ? round(wall * 0.9985, 2)
-      : round(wall * 1.0015, 2);
+    const bufferedStop =
+      side === "CALL"
+        ? wall * 0.9985
+        : wall * 1.0015;
+
+    const bufferedDistancePct =
+      Math.abs(
+        ((bufferedStop - entryPrice) /
+          entryPrice) *
+          100
+      );
+
+    if (
+      bufferedDistancePct >= 0.55 &&
+      bufferedDistancePct <= 3
+    ) {
+      return round(bufferedStop, 2);
+    }
   }
 
   const stopMove =
@@ -717,6 +785,36 @@ function mapPlan(
   };
 }
 
+function selectContractForSide(
+  analysis: AnalysisResponse,
+  side: ActiveSide
+): SelectedContract | null {
+  const contract =
+    side === "CALL"
+      ? analysis.options.bestCall
+      : analysis.options.bestPut;
+
+  if (
+    !contract ||
+    !contract.ticker ||
+    numberValue(contract.midpoint) <= 0
+  ) {
+    return null;
+  }
+
+  return contract;
+}
+
+function isRealOptionTicker(
+  ticker: string
+) {
+  return (
+    typeof ticker === "string" &&
+    ticker.startsWith("O:") &&
+    ticker.length > 8
+  );
+}
+
 function isAnalysisPlan(
   row: SetupRow
 ) {
@@ -784,21 +882,45 @@ export async function syncAnalysisTradePlan(
     .eq("status", "active")
     .lte("expires_at", nowIso);
 
+  const directionalSide:
+    ActiveSide | null =
+    side === "CALL" ||
+    side === "PUT"
+      ? side
+      : null;
+
+  const selectedContract =
+    directionalSide
+      ? selectContractForSide(
+          analysis,
+          directionalSide
+        )
+      : null;
+
   const qualifies =
-    (side === "CALL" ||
-      side === "PUT") &&
-    score >= 70;
+    directionalSide !== null &&
+    score >= 70 &&
+    selectedContract !== null;
 
   if (!qualifies) {
+    let invalidationReason =
+      "انخفض تقييم الفرصة عن 70";
+
+    if (side === "NEUTRAL") {
+      invalidationReason =
+        "أصبح اتجاه الفرصة محايدًا";
+    } else if (!selectedContract) {
+      invalidationReason =
+        "لا يوجد عقد أوبشن مؤهل للفرصة";
+    }
+
     await supabase
       .from("stock_trade_setups")
       .update({
         status: "invalidated",
         invalidated_at: nowIso,
         invalidation_reason:
-          side === "NEUTRAL"
-            ? "أصبح اتجاه الفرصة محايدًا"
-            : "انخفض تقييم الفرصة عن 70",
+          invalidationReason,
       })
       .eq("symbol", symbol)
       .eq("status", "active");
@@ -807,10 +929,13 @@ export async function syncAnalysisTradePlan(
   }
 
   const activeSide =
-    side as ActiveSide;
+    directionalSide as ActiveSide;
+
+  const preferredContract =
+    selectedContract as SelectedContract;
 
   const contractTicker =
-    `${symbol}:${activeSide}`;
+    preferredContract.ticker;
 
   const {
     data: activeRows,
@@ -835,13 +960,18 @@ export async function syncAnalysisTradePlan(
     (activeRows || []) as
       SetupRow[];
 
+  /*
+    نتخلص من الخطط القديمة التي كانت تحفظ اسمًا
+    شكليًا مثل AAPL:CALL بدل رمز عقد Massive الحقيقي.
+  */
   const invalidRows =
     rows.filter(
       (row) =>
         row.side !== activeSide ||
-        row.contract_ticker !==
-          contractTicker ||
-        !isAnalysisPlan(row)
+        !isAnalysisPlan(row) ||
+        !isRealOptionTicker(
+          row.contract_ticker
+        )
     );
 
   if (invalidRows.length > 0) {
@@ -851,7 +981,7 @@ export async function syncAnalysisTradePlan(
         status: "invalidated",
         invalidated_at: nowIso,
         invalidation_reason:
-          "تغير الاتجاه أو ترقية منطق الخطة",
+          "تغير الاتجاه أو ترقية الخطة إلى عقد أوبشن حقيقي",
       })
       .in(
         "id",
@@ -861,13 +991,19 @@ export async function syncAnalysisTradePlan(
       );
   }
 
+  /*
+    نحافظ على العقد الذي اختير عند أول ظهور للفرصة
+    طوال عمر الخطة، بدل تغيير العقد وإعادة الدخول
+    كلما تغير ترتيب العقود في التحديثات اللحظية.
+  */
   const existing =
     rows.find(
       (row) =>
         row.side === activeSide &&
-        row.contract_ticker ===
-          contractTicker &&
-        isAnalysisPlan(row)
+        isAnalysisPlan(row) &&
+        isRealOptionTicker(
+          row.contract_ticker
+        )
     );
 
   if (existing) {
@@ -903,19 +1039,20 @@ export async function syncAnalysisTradePlan(
     );
   }
 
-  const targets =
-    buildTargets(
+  const stopPrice =
+    buildStopPrice(
       analysis,
       activeSide,
       currentPrice,
       score
     );
 
-  const stopPrice =
-    buildStopPrice(
+  const targets =
+    buildTargets(
       analysis,
       activeSide,
       currentPrice,
+      stopPrice,
       score
     );
 
@@ -941,14 +1078,57 @@ export async function syncAnalysisTradePlan(
         capturedAt:
           analysis.capturedAt ||
           nowIso,
-        entryPrice:
+
+        /* سعر السهم هو مرجع الأهداف والوقف. */
+        stockEntryPrice:
           currentPrice,
+        stopPrice,
+        selectedTargets:
+          targets,
+
+        /* العقد الحقيقي المختار وقت ظهور الفرصة. */
+        selectedContract: {
+          ticker:
+            preferredContract.ticker,
+          type:
+            preferredContract.type,
+          expiration:
+            preferredContract.expiration,
+          strike:
+            preferredContract.strike,
+          bid:
+            preferredContract.bid,
+          ask:
+            preferredContract.ask,
+          midpoint:
+            preferredContract.midpoint,
+          spreadPct:
+            preferredContract.spreadPct,
+          volume:
+            preferredContract.volume,
+          openInterest:
+            preferredContract.openInterest,
+          volumeOiRatio:
+            preferredContract.volumeOiRatio,
+          delta:
+            preferredContract.delta,
+          gamma:
+            preferredContract.gamma,
+          theta:
+            preferredContract.theta,
+          vega:
+            preferredContract.vega,
+          iv:
+            preferredContract.iv,
+          lastTradePrice:
+            preferredContract.lastTradePrice,
+          lastTradeSize:
+            preferredContract.lastTradeSize,
+        },
+
         gammaStructure:
           analysis.options
             .gammaStructure,
-        selectedTargets:
-          targets,
-        stopPrice,
       },
       status: "active",
       first_seen_at: nowIso,
