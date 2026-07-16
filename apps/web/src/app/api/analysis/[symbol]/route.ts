@@ -369,6 +369,31 @@ const MASSIVE_API_ORIGIN = "https://api.massive.com";
 const DEFAULT_MAX_PAGES = 4;
 
 /*
+  نطاق جلب السلسلة لبناء القاما واختيار العقود.
+  نطلب CALL وPUT منفصلين حتى لا تستهلك جهة واحدة
+  صفحات السلسلة وتخفي العقود الأقوى في الجهة الأخرى.
+*/
+const CHAIN_MIN_DTE = 1;
+const CHAIN_MAX_DTE = 45;
+const CHAIN_STRIKE_RANGE_PCT = 20;
+
+/*
+  بوابة العقد النهائي.
+  هذه الشروط متعمدة لتقليل عدد الفرص ورفع قابلية التنفيذ.
+*/
+const CONTRACT_MIN_DTE = 7;
+const CONTRACT_MAX_DTE = 35;
+const CONTRACT_MIN_VOLUME = 100;
+const CONTRACT_MIN_OPEN_INTEREST = 100;
+const CONTRACT_MIN_DELTA = 0.3;
+const CONTRACT_MAX_DELTA = 0.65;
+const CONTRACT_MAX_SPREAD_PCT = 15;
+const CONTRACT_MAX_STRIKE_DISTANCE_PCT = 8;
+const CONTRACT_MIN_MIDPOINT = 0.35;
+const CONTRACT_MAX_MIDPOINT = 15;
+const CONTRACT_MIN_QUALITY_SCORE = 70;
+
+/*
   النتيجة الحديثة تبقى 60 ثانية.
   إذا تعطل المزود مؤقتًا يمكن استخدام آخر نتيجة
   سليمة لمدة 5 دقائق.
@@ -478,16 +503,69 @@ async function fetchMassivePage(
   }
 }
 
-async function fetchMassiveOptionPages(
+function formatUtcDate(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function addUtcDays(date: Date, days: number) {
+  const result = new Date(date);
+  result.setUTCDate(result.getUTCDate() + days);
+  return result;
+}
+
+async function fetchMassiveOptionSidePages(
   symbol: string,
+  contractType: "call" | "put",
+  stockPrice: number,
   massiveKey: string
 ): Promise<MassivePagesResult> {
   const maxPages = getConfiguredMaxPages();
+  const now = new Date();
+
+  const minimumExpiration = formatUtcDate(
+    addUtcDays(now, CHAIN_MIN_DTE)
+  );
+
+  const maximumExpiration = formatUtcDate(
+    addUtcDays(now, CHAIN_MAX_DTE)
+  );
+
+  const strikeRange = CHAIN_STRIKE_RANGE_PCT / 100;
+  const minimumStrike = Math.max(
+    0.01,
+    stockPrice * (1 - strikeRange)
+  );
+  const maximumStrike =
+    stockPrice * (1 + strikeRange);
+
+  const searchParams = new URLSearchParams({
+    limit: "250",
+    contract_type: contractType,
+    order: "asc",
+    sort: "expiration_date",
+    apiKey: massiveKey,
+  });
+
+  searchParams.set(
+    "expiration_date.gte",
+    minimumExpiration
+  );
+  searchParams.set(
+    "expiration_date.lte",
+    maximumExpiration
+  );
+  searchParams.set(
+    "strike_price.gte",
+    minimumStrike.toFixed(2)
+  );
+  searchParams.set(
+    "strike_price.lte",
+    maximumStrike.toFixed(2)
+  );
 
   let currentUrl =
     `${MASSIVE_API_ORIGIN}/v3/snapshot/options/` +
-    `${encodeURIComponent(symbol)}` +
-    `?limit=250&apiKey=${encodeURIComponent(massiveKey)}`;
+    `${encodeURIComponent(symbol)}?${searchParams.toString()}`;
 
   const allContracts: MassiveContract[] = [];
   const visitedUrls = new Set<string>();
@@ -535,6 +613,50 @@ async function fetchMassiveOptionPages(
     pagesFetched,
     hasMorePages: Boolean(nextUrl),
     massiveStatus,
+  };
+}
+
+async function fetchMassiveOptionPages(
+  symbol: string,
+  stockPrice: number,
+  massiveKey: string
+): Promise<MassivePagesResult> {
+  const [callsResult, putsResult] =
+    await Promise.all([
+      fetchMassiveOptionSidePages(
+        symbol,
+        "call",
+        stockPrice,
+        massiveKey
+      ),
+      fetchMassiveOptionSidePages(
+        symbol,
+        "put",
+        stockPrice,
+        massiveKey
+      ),
+    ]);
+
+  const statuses = new Set([
+    callsResult.massiveStatus,
+    putsResult.massiveStatus,
+  ]);
+
+  return {
+    contracts: [
+      ...callsResult.contracts,
+      ...putsResult.contracts,
+    ],
+    pagesFetched:
+      callsResult.pagesFetched +
+      putsResult.pagesFetched,
+    hasMorePages:
+      callsResult.hasMorePages ||
+      putsResult.hasMorePages,
+    massiveStatus:
+      statuses.size === 1
+        ? callsResult.massiveStatus
+        : Array.from(statuses).join(" / "),
   };
 }
 
@@ -680,62 +802,155 @@ function daysUntilExpiration(expiration: string) {
   );
 }
 
+function getStrikeDistancePct(
+  contract: NormalizedContract,
+  stockPrice: number
+) {
+  if (stockPrice <= 0) return 100;
+
+  return (
+    (Math.abs(contract.strike - stockPrice) /
+      stockPrice) *
+    100
+  );
+}
+
 function calculateContractRankingScore(
   contract: NormalizedContract,
   stockPrice: number
 ) {
   const absoluteDelta = Math.abs(contract.delta);
+  const spreadPct = contract.spreadPct ?? 100;
+  const dte = daysUntilExpiration(
+    contract.expiration
+  );
+  const strikeDistancePct =
+    getStrikeDistancePct(contract, stockPrice);
 
-  const spreadScore =
-    contract.spreadPct === null
-      ? 0
-      : Math.max(0, 30 - contract.spreadPct);
+  /* جودة التنفيذ: 25 نقطة */
+  let spreadScore = 0;
 
+  if (spreadPct <= 4) spreadScore = 20;
+  else if (spreadPct <= 6) spreadScore = 18;
+  else if (spreadPct <= 8) spreadScore = 15;
+  else if (spreadPct <= 10) spreadScore = 12;
+  else if (spreadPct <= 12) spreadScore = 8;
+  else if (spreadPct <= 15) spreadScore = 4;
+
+  let lastTradeConsistencyScore = 0;
+
+  if (contract.lastTradePrice > 0) {
+    const lastTradeDistancePct =
+      (Math.abs(
+        contract.lastTradePrice - contract.midpoint
+      ) /
+        contract.midpoint) *
+      100;
+
+    if (lastTradeDistancePct <= 5) {
+      lastTradeConsistencyScore = 5;
+    } else if (lastTradeDistancePct <= 12) {
+      lastTradeConsistencyScore = 4;
+    } else if (lastTradeDistancePct <= 20) {
+      lastTradeConsistencyScore = 2;
+    }
+  }
+
+  /* السيولة: 35 نقطة */
   const volumeScore = Math.min(
-    35,
-    Math.log10(contract.volume + 1) * 8
+    15,
+    Math.log10(contract.volume + 1) * 5
   );
 
   const openInterestScore = Math.min(
-    25,
-    Math.log10(contract.openInterest + 1) * 6
+    10,
+    Math.log10(contract.openInterest + 1) * 3
   );
 
-  const deltaScore =
-    absoluteDelta >= 0.3 && absoluteDelta <= 0.6
-      ? 20
-      : absoluteDelta >= 0.2 &&
-          absoluteDelta <= 0.7
-        ? 10
-        : 0;
+  const volumeOiRatio =
+    contract.volumeOiRatio ?? 0;
 
-  const strikeDistancePct =
-    stockPrice > 0
-      ? (Math.abs(contract.strike - stockPrice) /
-          stockPrice) *
+  let volumeOiScore = 0;
+
+  if (volumeOiRatio >= 1) volumeOiScore = 5;
+  else if (volumeOiRatio >= 0.5) volumeOiScore = 4;
+  else if (volumeOiRatio >= 0.25) volumeOiScore = 3;
+  else if (volumeOiRatio >= 0.1) volumeOiScore = 1;
+
+  const tradeSizeScore = Math.min(
+    5,
+    Math.log10(contract.lastTradeSize + 1) * 2.5
+  );
+
+  /* اليونانيات وكفاءة الاحتفاظ: 25 نقطة */
+  const deltaDistance = Math.abs(
+    absoluteDelta - 0.45
+  );
+
+  const deltaScore = Math.max(
+    0,
+    15 - deltaDistance * 75
+  );
+
+  const thetaDecayPct =
+    contract.midpoint > 0
+      ? (Math.abs(contract.theta) /
+          contract.midpoint) *
         100
       : 100;
 
-  const proximityScore = Math.max(
-    0,
-    15 - strikeDistancePct
-  );
+  let thetaScore = 0;
 
-  const volumeOiScore =
-    contract.volumeOiRatio === null
-      ? 0
-      : Math.min(
-          15,
-          contract.volumeOiRatio * 5
-        );
+  if (thetaDecayPct <= 1) thetaScore = 5;
+  else if (thetaDecayPct <= 2.5) thetaScore = 4;
+  else if (thetaDecayPct <= 4) thetaScore = 2;
 
-  return (
+  let ivScore = 0;
+
+  if (contract.iv >= 0.15 && contract.iv <= 0.8) {
+    ivScore = 5;
+  } else if (
+    contract.iv >= 0.1 &&
+    contract.iv <= 1.2
+  ) {
+    ivScore = 3;
+  } else if (
+    contract.iv > 0 &&
+    contract.iv <= 1.5
+  ) {
+    ivScore = 1;
+  }
+
+  /* قرب السترايك والمدة: 15 نقطة */
+  let proximityScore = 0;
+
+  if (strikeDistancePct <= 1) proximityScore = 10;
+  else if (strikeDistancePct <= 3) proximityScore = 8;
+  else if (strikeDistancePct <= 5) proximityScore = 5;
+  else if (strikeDistancePct <= 8) proximityScore = 2;
+
+  let dteScore = 0;
+
+  if (dte >= 10 && dte <= 21) dteScore = 5;
+  else if (dte >= 7 && dte <= 30) dteScore = 4;
+  else if (dte >= 31 && dte <= 35) dteScore = 2;
+
+  const rawScore =
     spreadScore +
+    lastTradeConsistencyScore +
     volumeScore +
     openInterestScore +
+    volumeOiScore +
+    tradeSizeScore +
     deltaScore +
+    thetaScore +
+    ivScore +
     proximityScore +
-    volumeOiScore
+    dteScore;
+
+  return Math.max(
+    0,
+    Math.min(100, round(rawScore, 2))
   );
 }
 
@@ -746,40 +961,60 @@ function getEligibleContracts(
   return contracts
     .filter((contract) => {
       const absoluteDelta = Math.abs(contract.delta);
-
       const dte = daysUntilExpiration(
         contract.expiration
       );
-
       const strikeDistancePct =
-        stockPrice > 0
-          ? (Math.abs(contract.strike - stockPrice) /
-              stockPrice) *
-            100
-          : 100;
+        getStrikeDistancePct(contract, stockPrice);
+
+      const validMarket =
+        contract.bid > 0 &&
+        contract.ask > 0 &&
+        contract.ask >= contract.bid &&
+        contract.midpoint >= CONTRACT_MIN_MIDPOINT &&
+        contract.midpoint <= CONTRACT_MAX_MIDPOINT;
+
+      const validLiquidity =
+        contract.volume >= CONTRACT_MIN_VOLUME &&
+        contract.openInterest >=
+          CONTRACT_MIN_OPEN_INTEREST;
+
+      const validGreeks =
+        absoluteDelta >= CONTRACT_MIN_DELTA &&
+        absoluteDelta <= CONTRACT_MAX_DELTA &&
+        contract.iv > 0;
+
+      const validExecution =
+        contract.spreadPct !== null &&
+        contract.spreadPct >= 0 &&
+        contract.spreadPct <=
+          CONTRACT_MAX_SPREAD_PCT;
+
+      const validStructure =
+        dte >= CONTRACT_MIN_DTE &&
+        dte <= CONTRACT_MAX_DTE &&
+        strikeDistancePct <=
+          CONTRACT_MAX_STRIKE_DISTANCE_PCT;
+
+      if (
+        !validMarket ||
+        !validLiquidity ||
+        !validGreeks ||
+        !validExecution ||
+        !validStructure
+      ) {
+        return false;
+      }
 
       return (
-        dte >= 1 &&
-        dte <= 45 &&
-
-        contract.midpoint > 0 &&
-        contract.bid >= 0 &&
-        contract.ask > 0 &&
-
-        contract.volume >= 25 &&
-        contract.openInterest >= 25 &&
-
-        absoluteDelta >= 0.2 &&
-        absoluteDelta <= 0.7 &&
-
-        contract.spreadPct !== null &&
-        contract.spreadPct <= 25 &&
-
-        strikeDistancePct <= 15
+        calculateContractRankingScore(
+          contract,
+          stockPrice
+        ) >= CONTRACT_MIN_QUALITY_SCORE
       );
     })
     .sort((a, b) => {
-      return (
+      const scoreDifference =
         calculateContractRankingScore(
           b,
           stockPrice
@@ -787,10 +1022,28 @@ function getEligibleContracts(
         calculateContractRankingScore(
           a,
           stockPrice
-        )
-      );
+        );
+
+      if (scoreDifference !== 0) {
+        return scoreDifference;
+      }
+
+      const spreadDifference =
+        (a.spreadPct ?? 100) -
+        (b.spreadPct ?? 100);
+
+      if (spreadDifference !== 0) {
+        return spreadDifference;
+      }
+
+      if (b.volume !== a.volume) {
+        return b.volume - a.volume;
+      }
+
+      return b.openInterest - a.openInterest;
     });
 }
+
 async function loadAnalysis(
   cleanSymbol: string,
   finnhubKey: string,
@@ -825,6 +1078,7 @@ async function loadAnalysis(
   const massiveResult =
     await fetchMassiveOptionPages(
       cleanSymbol,
+      stockPrice,
       massiveKey
     );
 
@@ -1023,8 +1277,8 @@ recommendedPuts,
         !massiveResult.hasMorePages,
 
       note: massiveResult.hasMorePages
-        ? `تم تحليل ${contracts.length} عقدًا من ${massiveResult.pagesFetched} صفحات، وما زالت توجد صفحات إضافية.`
-        : `تم الوصول إلى نهاية السلسلة بعد ${massiveResult.pagesFetched} صفحات وتحليل ${contracts.length} عقدًا.`,
+        ? `تم تحليل ${contracts.length} عقدًا من ${massiveResult.pagesFetched} صفحات مفلترة، وتأهل ${eligibleContracts.length} عقدًا قويًا، وما زالت توجد صفحات إضافية.`
+        : `تم تحليل ${contracts.length} عقدًا من ${massiveResult.pagesFetched} صفحات مفلترة، وتأهل ${eligibleContracts.length} عقدًا قويًا.`,
     },
 
     capturedAt: new Date().toISOString(),
@@ -1079,7 +1333,7 @@ export async function GET(
       getConfiguredMaxPages();
 
     const cacheKey =
-      `market-analysis:v1:${cleanSymbol}:` +
+      `market-analysis:v2:${cleanSymbol}:` +
       `pages:${maxPages}`;
 
     const analysis =
