@@ -457,8 +457,8 @@ export default function ActiveTradesPage() {
                       </th>
                       
                       <th className="px-4 py-4">
-                        الوقف
-                      </th>
+  دخول العقد
+</th>
                       <th className="px-4 py-4">
                         الأهداف
                       </th>
@@ -469,8 +469,8 @@ export default function ActiveTradesPage() {
 
 
 <th className="px-4 py-4">
-  دخول العقد
-</th>
+                        الوقف
+                      </th>
 
 <th className="px-4 py-4">
   سعر العقد الحالي
@@ -554,11 +554,13 @@ export default function ActiveTradesPage() {
 
                           
 
-                          <td className="px-4 py-5 font-bold text-rose-300">
-                            {numberText(
-                              trade.stopPrice
-                            )}
-                          </td>
+                          <td className="px-4 py-5">
+                  <p className="font-bold text-white">
+                    {numberText(
+                      trade.contractEntryPrice
+                    )}
+                  </p>
+                </td>
 
                           <td className="px-4 py-5">
                             <TargetList
@@ -593,13 +595,11 @@ export default function ActiveTradesPage() {
 
                 
 
-                <td className="px-4 py-5">
-                  <p className="font-bold text-white">
-                    {numberText(
-                      trade.contractEntryPrice
-                    )}
-                  </p>
-                </td>
+                <td className="px-4 py-5 font-bold text-rose-300">
+                            {numberText(
+                              trade.stopPrice
+                            )}
+                          </td>
 
                 <td className="px-4 py-5">
                   <p className="font-bold text-white">
