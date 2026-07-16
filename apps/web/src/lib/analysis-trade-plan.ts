@@ -17,6 +17,8 @@ type SetupRow = {
   entry_price: number | string;
   entry_score: number | null;
   stop_price: number | string | null;
+  best_price?: number | string | null;
+  best_price_at?: string | null;
   gamma_targets: unknown;
   gamma_snapshot?: unknown;
   first_seen_at: string;
@@ -1006,16 +1008,45 @@ export async function syncAnalysisTradePlan(
         )
     );
 
-  if (existing) {
+     if (existing) {
+
+const previousBestPrice =
+  numberValue(
+    existing.best_price,
+    currentPrice
+  );
+
+const nextBestPrice =
+  existing.side === "CALL"
+    ? Math.max(
+        previousBestPrice,
+        currentPrice
+      )
+    : Math.min(
+        previousBestPrice,
+        currentPrice
+      );
+
     const {
       data: updated,
       error: updateError,
     } = await supabase
       .from("stock_trade_setups")
       .update({
-        last_seen_at: nowIso,
-        expires_at: expiresAt,
-      })
+  last_seen_at: nowIso,
+  expires_at: expiresAt,
+
+  current_price:
+    currentPrice,
+
+  best_price:
+    nextBestPrice,
+
+  best_price_at:
+    nextBestPrice !== previousBestPrice
+      ? nowIso
+      : existing.best_price_at,
+})
       .eq("id", existing.id)
       .select("*")
       .single();
@@ -1130,10 +1161,29 @@ export async function syncAnalysisTradePlan(
           analysis.options
             .gammaStructure,
       },
-      status: "active",
-      first_seen_at: nowIso,
-      last_seen_at: nowIso,
-      expires_at: expiresAt,
+     status: "active",
+first_seen_at: nowIso,
+last_seen_at: nowIso,
+expires_at: expiresAt,
+
+activated_at: nowIso,
+contract_strike:
+  preferredContract.strike,
+contract_expiration:
+  preferredContract.expiration,
+
+current_price:
+  currentPrice,
+
+best_price:
+  currentPrice,
+
+best_price_at:
+  nowIso,
+
+current_profit_pct: 0,
+highest_target_hit: 0,
+contract_status: "ACTIVE",
     })
     .select("*")
     .single();
