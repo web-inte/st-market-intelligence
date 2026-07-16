@@ -6,6 +6,8 @@ import { type FormEvent, useEffect, useMemo, useState } from "react";
 
 import { useRouter } from "next/navigation";
 
+import SectorRadar from "../../components/sector-radar";
+
 import {
   createOpportunity,
   type AnalysisResponse,
@@ -1059,6 +1061,8 @@ ${url}`);
             </div>
           </div>
         </section>
+
+        <SectorRadar />
 
         <div className="mb-5 flex items-end justify-between gap-4">
           <div>
