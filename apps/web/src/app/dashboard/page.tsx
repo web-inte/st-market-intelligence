@@ -974,7 +974,7 @@ ${url}`);
             </div>
 
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-emerald-400/20 bg-emerald-400/10 text-2xl text-emerald-300 transition group-hover:scale-110">
-              ↗
+              ←
             </div>
           </button>
 
