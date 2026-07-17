@@ -670,6 +670,13 @@ export default async function WhaleTradesPage({
               </Link>
 
               <Link
+                href="/whale-active-trades"
+                className="rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-sm font-black text-emerald-300 transition hover:bg-emerald-400/15"
+              >
+                متابعة صفقات الحيتان
+              </Link>
+
+              <Link
                 href={refreshHref}
                 className="rounded-xl bg-cyan-400 px-5 py-3 text-sm font-black text-slate-950 transition hover:bg-cyan-300"
               >

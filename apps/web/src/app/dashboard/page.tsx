@@ -1079,6 +1079,30 @@ ${url}`);
               ←
             </div>
           </button>
+
+          <button
+            type="button"
+            onClick={() => router.push("/spx-whales")}
+            className="group flex items-center justify-between gap-4 rounded-3xl border border-fuchsia-400/20 bg-gradient-to-br from-fuchsia-500/10 via-slate-950/80 to-violet-500/10 p-5 text-right shadow-2xl shadow-fuchsia-950/20 backdrop-blur-xl transition duration-300 hover:-translate-y-1 hover:border-fuchsia-400/40 sm:p-6"
+          >
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.15em] text-fuchsia-400">
+                مضاربة المؤشر اليومية
+              </p>
+
+              <h2 className="mt-2 text-xl font-black text-white">
+                SPX اليومي
+              </h2>
+
+              <p className="mt-2 text-sm leading-6 text-slate-400">
+                تحليل عقود SPX اليومية والقاما والسيولة والتدفق واختيار أفضل عقد 0DTE.
+              </p>
+            </div>
+
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-fuchsia-400/20 bg-fuchsia-400/10 text-xl text-fuchsia-300 transition group-hover:-translate-x-1">
+              ←
+            </div>
+          </button>
         </section>
 
         <section className="mb-10 grid gap-4 lg:grid-cols-[1.4fr_1fr]">
