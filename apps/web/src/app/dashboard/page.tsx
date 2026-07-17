@@ -1320,57 +1320,6 @@ ${url}`);
             </div>
           </div>
 
-          <div className="group relative overflow-hidden rounded-3xl border border-white/[0.08] bg-slate-950/60 p-6 shadow-2xl shadow-black/20 backdrop-blur-xl sm:p-7">
-            <div className="relative">
-              <p className="text-sm font-medium text-slate-400">
-                الفرصة الأعلى تقييمًا
-              </p>
-
-              {loading ? (
-                <div className="mt-5 animate-pulse">
-                  <div className="h-9 w-28 rounded-lg bg-slate-800" />
-
-                  <div className="mt-3 h-5 w-44 rounded bg-slate-800/70" />
-                </div>
-              ) : bestOpportunity ? (
-                <div className="mt-5 flex items-end justify-between gap-4">
-                  <div>
-                    <p className="text-4xl font-black tracking-tight">
-                      {bestOpportunity.symbol}
-                    </p>
-
-                    <p className="mt-2 text-sm text-slate-500">
-                      {bestOpportunity.status}
-                    </p>
-
-                    <div
-                      className={`mt-4 inline-flex rounded-lg border px-3 py-1.5 text-xs font-bold ${sideBackground(
-                        bestOpportunity.side,
-                      )} ${sideColor(bestOpportunity.side)}`}
-                    >
-                      {bestOpportunity.side}
-                    </div>
-                  </div>
-
-                  <div className="text-left">
-                    <p
-                      className={`text-5xl font-black ${scoreColor(
-                        bestOpportunity.score,
-                      )}`}
-                    >
-                      {bestOpportunity.score}
-                    </p>
-
-                    <p className="mt-1 text-xs text-slate-600">تقييم الفرصة</p>
-                  </div>
-                </div>
-              ) : (
-                <p className="mt-5 text-sm text-slate-500">
-                  لا توجد فرصة متاحة حاليًا.
-                </p>
-              )}
-            </div>
-          </div>
         </section>
 
         <SectorRadar />
