@@ -329,7 +329,7 @@ function selectGammaStop(
   side: SetupSide,
   entryPrice: number
 ) {
-  const nearestThree = rows
+  const candidates = rows
     .filter((row) => {
       const isOppositeLevel =
         side === "CALL"
@@ -357,82 +357,43 @@ function selectGammaStop(
         isOppositeLevel &&
         distancePct >= 0.15 &&
         distancePct <= 4 &&
-        oppositeForce > 0
+        oppositeForce > 0 &&
+        (
+          row.strength >= 20 ||
+          row.level !== "NORMAL"
+        )
       );
     })
-    .map((row) => {
-      const distancePct =
+    .map((row) => ({
+      row,
+      distancePct:
         Math.abs(
           (row.strike - entryPrice) /
             entryPrice
-        ) * 100;
-
-      const gammaForce =
-        side === "CALL"
-          ? Math.abs(row.putGex)
-          : Math.abs(row.callGex);
-
-      const openInterestForce =
-        side === "CALL"
-          ? row.putOi
-          : row.callOi;
-
-      return {
-        row,
-        distancePct,
-        gammaForce,
-        openInterestForce,
-      };
-    })
-    .filter(
-      (item, index, allItems) =>
-        allItems.findIndex(
-          (other) =>
-            Math.abs(
-              other.row.strike -
-                item.row.strike
-            ) < 0.01
-        ) === index
-    )
-    .sort(
-      (left, right) =>
-        left.distancePct -
-        right.distancePct
-    )
-    .slice(0, 3);
-
-  if (nearestThree.length === 0) {
-    return null;
-  }
-
-  const strongest = [...nearestThree]
+        ) * 100,
+    }))
     .sort((left, right) => {
-      const gammaDifference =
-        right.gammaForce -
-        left.gammaForce;
+      const distanceDifference =
+        left.distancePct -
+        right.distancePct;
 
       if (
-        Math.abs(gammaDifference) >
-        0.000001
+        Math.abs(distanceDifference) > 0.05
       ) {
-        return gammaDifference;
-      }
-
-      const oiDifference =
-        right.openInterestForce -
-        left.openInterestForce;
-
-      if (oiDifference !== 0) {
-        return oiDifference;
+        return distanceDifference;
       }
 
       return (
-        left.distancePct -
-        right.distancePct
+        right.row.strength -
+        left.row.strength
       );
-    })[0];
+    });
 
-  const wall = strongest.row;
+  const wall = candidates[0]?.row;
+
+  if (!wall) {
+    return null;
+  }
 
   return side === "CALL"
     ? round(wall.strike * 0.9985, 2)
