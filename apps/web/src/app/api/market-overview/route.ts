@@ -35,9 +35,9 @@ function marketBias(score) {
 
 function marketStatus(score) {
   if (score >= 45) return "إيجابي قوي";
-  if (score >= 15) return "إيجابي بحذر";
+  if (score >= 15) return "إيجابي متوسط";
   if (score <= -45) return "سلبي قوي";
-  if (score <= -15) return "سلبي بحذر";
+  if (score <= -15) return "سلبي متوسط";
   return "محايد";
 }
 
