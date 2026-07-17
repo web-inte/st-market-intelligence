@@ -64,9 +64,11 @@ export async function updateSession(
   const isApi =
     pathname.startsWith("/api/");
 
-  // سلة ترسل الطلب من خارج جلسة المستخدم.
-  // هذا المسار عام، لكنه محمي بالتوكن داخل route.ts.
-  if (pathname === "/api/salla/webhook") {
+  // صفحات ومسارات عامة لا تتطلب اشتراكًا فعالًا.
+  if (
+    pathname === "/subscriptions" ||
+    pathname === "/api/salla/webhook"
+  ) {
     return response;
   }
 
