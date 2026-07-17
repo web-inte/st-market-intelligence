@@ -703,14 +703,9 @@ if (!massiveApiKey) {
       )
       .select("*")
       .in(
-        "status",
-        [
-          "active",
-          "stopped",
-          "ACTIVE",
-          "STOPPED",
-        ]
-      )
+  "status",
+  ["active", "stopped"]
+)
       .order(
         "activated_at",
         {
@@ -747,25 +742,19 @@ if (!massiveApiKey) {
           );
 
           const savedStatus =
-            String(
-              row.status || ""
-            ).toUpperCase();
+  String(row.status || "");
 
-          const savedContractStatus =
-            String(
-              row.contract_status || ""
-            ).toUpperCase();
+const savedContractStatus =
+  String(
+    row.contract_status || ""
+  );
 
-          if (
-            savedStatus === "STOPPED" ||
-            savedContractStatus === "STOPPED"
-          ) {
-            return {
-              ...rawRow,
-              status: "stopped",
-              contract_status: "STOPPED",
-            };
-          }
+if (
+  savedStatus === "stopped" ||
+  savedContractStatus === "STOPPED"
+) {
+  return rawRow;
+}
 
         if (
           !id ||

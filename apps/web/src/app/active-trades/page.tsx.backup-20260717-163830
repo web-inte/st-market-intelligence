@@ -92,29 +92,6 @@ function percentText(value: number) {
   return `${prefix}${value.toFixed(2)}%`;
 }
 
-
-function bestContractProfitDollars(
-  trade: ActiveTrade
-) {
-  const entry =
-    Number(trade.contractEntryPrice);
-
-  const best =
-    Number(trade.contractBestPrice);
-
-  if (
-    !Number.isFinite(entry) ||
-    !Number.isFinite(best) ||
-    entry <= 0
-  ) {
-    return 0;
-  }
-
-  return Math.round(
-    (best - entry) * 100 * 100
-  ) / 100;
-}
-
 function formatDate(value: string) {
   if (!value) {
     return "—";
@@ -675,35 +652,6 @@ export default function ActiveTradesPage() {
                       trade.contractProfitPct
                     )}
                   </p>
-
-                  <div className="mt-2 border-t border-slate-800 pt-2">
-                    <p className="text-[10px] font-bold text-slate-500">
-                      أعلى ربح وصل إليه
-                    </p>
-
-                    <p
-                      className={[
-                        "mt-1 text-xs font-black",
-                        performanceClass(
-                          bestContractProfitDollars(
-                            trade
-                          )
-                        ),
-                      ].join(" ")}
-                    >
-                      {bestContractProfitDollars(
-                        trade
-                      ) > 0
-                        ? "+"
-                        : ""}
-                      {numberText(
-                        bestContractProfitDollars(
-                          trade
-                        )
-                      )}{" "}
-                      $
-                    </p>
-                  </div>
                 </td>
 
                           <td className="px-4 py-5">
@@ -852,35 +800,6 @@ export default function ActiveTradesPage() {
                       </div>
 
                       
-
-                      <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/[0.06] p-3">
-                        <p className="text-xs text-slate-500">
-                          أعلى ربح وصل إليه
-                        </p>
-
-                        <p
-                          className={[
-                            "mt-1 font-black",
-                            performanceClass(
-                              bestContractProfitDollars(
-                                trade
-                              )
-                            ),
-                          ].join(" ")}
-                        >
-                          {bestContractProfitDollars(
-                            trade
-                          ) > 0
-                            ? "+"
-                            : ""}
-                          {numberText(
-                            bestContractProfitDollars(
-                              trade
-                            )
-                          )}{" "}
-                          $
-                        </p>
-                      </div>
 
                       <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-3">
                         <p className="text-xs text-slate-500">

@@ -16,17 +16,15 @@ import {
 } from "../../lib/analysis-engine";
 
 const WATCHLIST = [
-  "AMZN",
   "NVDA",
-  "AMD",
-  "AAPL",
-  "META",
-  "MSTR",
-  "MSFT",
-  "AVGO",
   "TSLA",
+  "AMD",
+  "META",
+  "AAPL",
+  "MSFT",
+  "AMZN",
+  "AVGO",
   "QQQ",
-  "SPY",
 ];
 const TELEGRAM_CHANNEL_URL = "https://t.me/STtradevip";
 
@@ -422,7 +420,6 @@ export default function Home() {
   const [symbol, setSymbol] = useState("");
 
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
-  const [tickerOpportunities, setTickerOpportunities] = useState<Opportunity[]>([]);
 
   const [marketOverview, setMarketOverview] =
     useState<MarketOverviewResponse | null>(null);
@@ -485,14 +482,12 @@ export default function Home() {
           return;
         }
 
-const allResults = results
+const validResults = results
   .filter(
     (result): result is PromiseFulfilledResult<Opportunity> =>
       result.status === "fulfilled",
   )
-  .map((result) => result.value);
-
-const validResults = allResults
+  .map((result) => result.value)
   .filter(
     (item) =>
       item.side !== "NEUTRAL" &&
@@ -509,7 +504,6 @@ const validResults = allResults
   )
   .slice(0, 5);
 
-        setTickerOpportunities(allResults);
         setOpportunities(validResults);
 
         setError("");
@@ -624,8 +618,8 @@ const validResults = allResults
   const bestOpportunity = opportunities[0];
 
   const tickerItems = useMemo(
-    () => [...tickerOpportunities, ...tickerOpportunities],
-    [tickerOpportunities],
+    () => [...opportunities, ...opportunities],
+    [opportunities],
   );
 
   const [marketSession, setMarketSession] =
