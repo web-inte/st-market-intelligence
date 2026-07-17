@@ -49,15 +49,27 @@ export default function AuthFloatingButton() {
   }
 
   return (
-    <Link
-      href={loggedIn ? "/account" : "/login"}
-      className="fixed left-4 top-4 z-[80] inline-flex min-h-12 items-center justify-center rounded-2xl border border-cyan-400/30 bg-slate-950/95 px-4 py-3 text-sm font-black text-cyan-300 shadow-xl shadow-black/30 backdrop-blur-xl transition hover:border-cyan-300"
+    <div
+      dir="rtl"
+      className="relative z-[80] mx-auto mt-4 flex w-fit items-center gap-2 px-4"
     >
-      {loaded
-        ? loggedIn
-          ? "حسابي"
-          : "تسجيل الدخول"
-        : "الحساب"}
-    </Link>
+      <Link
+        href={loggedIn ? "/account" : "/login"}
+        className="inline-flex min-h-12 items-center justify-center rounded-2xl border border-cyan-400/30 bg-slate-950/95 px-4 py-3 text-sm font-black text-cyan-300 shadow-xl shadow-black/30 backdrop-blur-xl transition hover:border-cyan-300 hover:bg-cyan-400/10"
+      >
+        {loaded
+          ? loggedIn
+            ? "حسابي"
+            : "تسجيل الدخول"
+          : "الحساب"}
+      </Link>
+
+      <Link
+        href="/subscriptions"
+        className="inline-flex min-h-12 items-center justify-center rounded-2xl border border-emerald-400/30 bg-slate-950/95 px-4 py-3 text-sm font-black text-emerald-300 shadow-xl shadow-black/30 backdrop-blur-xl transition hover:border-emerald-300 hover:bg-emerald-400/10"
+      >
+        الاشتراكات
+      </Link>
+    </div>
   );
 }

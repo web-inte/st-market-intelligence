@@ -895,13 +895,23 @@ ${url}`);
         </section>
 
         <header className="mx-auto mb-12 max-w-5xl text-center">
-          {/* ACCOUNT_BUTTON_BETWEEN_TICKER_AND_ANALYSIS */}
-          <div className="mb-3 mt-5 flex justify-center px-4">
+          {/* ACCOUNT_AND_SUBSCRIPTIONS_FIXED_BUTTONS */}
+          <div
+            dir="rtl"
+            className="mb-3 mt-5 flex justify-center gap-2 px-4"
+          >
             <Link
               href="/account"
-              className="inline-flex min-h-12 items-center justify-center rounded-2xl border border-cyan-400/30 bg-slate-950/90 px-8 py-3 text-base font-black text-cyan-300 shadow-lg shadow-cyan-500/10 transition hover:border-cyan-300 hover:bg-cyan-400/10"
+              className="inline-flex min-h-12 items-center justify-center rounded-2xl border border-cyan-400/30 bg-slate-950/95 px-4 py-3 text-sm font-black text-cyan-300 shadow-xl shadow-black/30 backdrop-blur-xl transition hover:border-cyan-300 hover:bg-cyan-400/10"
             >
               حسابي
+            </Link>
+
+            <Link
+              href="/subscriptions"
+              className="inline-flex min-h-12 items-center justify-center rounded-2xl border border-emerald-400/30 bg-slate-950/95 px-4 py-3 text-sm font-black text-emerald-300 shadow-xl shadow-black/30 backdrop-blur-xl transition hover:border-emerald-300 hover:bg-emerald-400/10"
+            >
+              الاشتراكات
             </Link>
           </div>
 
