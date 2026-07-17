@@ -19,6 +19,9 @@ const PLUS_ONLY_ROUTES = [
   "/api/whale-trades",
   "/api/active-trades",
   "/api/gamma-liquidity",
+  "/spx-whales",
+  "/api/spx-0dte",
+  "/api/spx-active-trade",
 ];
 
 function matchesRoute(
