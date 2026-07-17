@@ -12,6 +12,15 @@ const SUBSCRIPTION_BYPASS_ROUTES = [
   "/subscription-required",
 ];
 
+const PLUS_ONLY_ROUTES = [
+  "/whale-trades",
+  "/active-trades",
+  "/gamma-liquidity",
+  "/api/whale-trades",
+  "/api/active-trades",
+  "/api/gamma-liquidity",
+];
+
 function matchesRoute(
   pathname: string,
   routes: string[]
@@ -194,7 +203,7 @@ export async function updateSession(
     error: subscriptionError,
   } = await supabase
     .from("subscriptions")
-    .select("id")
+    .select("id,plans(code)")
     .eq("user_id", userId)
     .eq("status", "active")
     .lte("starts_at", nowIso)
@@ -270,6 +279,72 @@ export async function updateSession(
       response,
       NextResponse.redirect(
         subscriptionUrl
+      )
+    );
+  }
+
+  const rawPlan = (
+    subscription as {
+      plans?:
+        | { code?: string }
+        | { code?: string }[]
+        | null;
+    }
+  ).plans;
+
+  const plan = Array.isArray(rawPlan)
+    ? rawPlan[0]
+    : rawPlan;
+
+  const planCode = String(
+    plan?.code || ""
+  ).toLowerCase();
+
+  const requiresPlus = matchesRoute(
+    pathname,
+    PLUS_ONLY_ROUTES
+  );
+
+  if (
+    requiresPlus &&
+    planCode !== "plus"
+  ) {
+    if (isApi) {
+      return copyCookies(
+        response,
+        NextResponse.json(
+          {
+            error:
+              "هذه الميزة متاحة لمشتركي Plus فقط",
+            code: "PLUS_REQUIRED",
+          },
+          {
+            status: 403,
+          }
+        )
+      );
+    }
+
+    const upgradeUrl =
+      new URL(
+        "/subscriptions",
+        request.url
+      );
+
+    upgradeUrl.searchParams.set(
+      "upgrade",
+      "plus"
+    );
+
+    upgradeUrl.searchParams.set(
+      "next",
+      `${pathname}${request.nextUrl.search}`
+    );
+
+    return copyCookies(
+      response,
+      NextResponse.redirect(
+        upgradeUrl
       )
     );
   }

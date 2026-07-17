@@ -1,10 +1,20 @@
-import { NextRequest, NextResponse } from "next/server";
+import { timingSafeEqual } from "node:crypto";
+
+import {
+  NextRequest,
+  NextResponse,
+} from "next/server";
 
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
 
-const PRODUCT_PLAN_MAP: Record<string, "platform" | "plus"> = {
+type PlanCode = "platform" | "plus";
+
+const PRODUCT_PLAN_MAP: Record<
+  string,
+  PlanCode
+> = {
   "1066244002": "platform",
   "2122436443": "plus",
 };
@@ -15,29 +25,69 @@ function normalizeEmail(value: unknown) {
     .toLowerCase();
 }
 
-function asRecord(value: unknown): Record<string, any> {
-  return value && typeof value === "object"
+function asRecord(
+  value: unknown
+): Record<string, any> {
+  return value &&
+    typeof value === "object"
     ? (value as Record<string, any>)
     : {};
 }
 
-function extractToken(request: NextRequest) {
-  const authorization =
-    request.headers.get("authorization") || "";
+function tokensMatch(
+  received: string,
+  expected: string
+) {
+  const receivedBuffer =
+    Buffer.from(received);
 
-  const bearerToken = authorization
-    .replace(/^Bearer\s+/i, "")
-    .trim();
+  const expectedBuffer =
+    Buffer.from(expected);
 
-  return (
-    request.headers.get("x-salla-token") ||
-    request.headers.get("x-webhook-token") ||
-    bearerToken
+  if (
+    receivedBuffer.length !==
+    expectedBuffer.length
+  ) {
+    return false;
+  }
+
+  return timingSafeEqual(
+    receivedBuffer,
+    expectedBuffer
   );
 }
 
-function extractProductIds(data: Record<string, any>) {
-  const items = Array.isArray(data.items)
+function extractToken(
+  request: NextRequest
+) {
+  const authorization =
+    request.headers.get(
+      "authorization"
+    ) || "";
+
+  const bearerToken =
+    authorization
+      .replace(/^Bearer\s+/i, "")
+      .trim();
+
+  return String(
+    request.headers.get(
+      "x-webhook-token"
+    ) ||
+      request.headers.get(
+        "x-salla-token"
+      ) ||
+      bearerToken ||
+      ""
+  ).trim();
+}
+
+function extractProductIds(
+  data: Record<string, any>
+) {
+  const items = Array.isArray(
+    data.items
+  )
     ? data.items
     : Array.isArray(data.products)
       ? data.products
@@ -46,7 +96,9 @@ function extractProductIds(data: Record<string, any>) {
   return items
     .flatMap((item: unknown) => {
       const row = asRecord(item);
-      const product = asRecord(row.product);
+      const product = asRecord(
+        row.product
+      );
 
       return [
         row.product_id,
@@ -58,84 +110,89 @@ function extractProductIds(data: Record<string, any>) {
     .map(String);
 }
 
-function extractCustomerEmail(data: Record<string, any>) {
-  const customer = asRecord(data.customer);
-  const receiver = asRecord(data.receiver);
-  const shipping = asRecord(data.shipping);
-  const address = asRecord(shipping.address);
+function extractCustomerEmail(
+  data: Record<string, any>
+) {
+  const customer = asRecord(
+    data.customer
+  );
+
+  const receiver = asRecord(
+    data.receiver
+  );
 
   return normalizeEmail(
     customer.email ||
       receiver.email ||
-      address.email ||
       data.customer_email ||
       data.email
   );
 }
 
-function extractPaymentStatus(data: Record<string, any>) {
-  const payment = asRecord(data.payment);
-  const status = asRecord(data.status);
+function extractPaymentStatus(
+  data: Record<string, any>
+) {
+  const payment = asRecord(
+    data.payment
+  );
 
   return String(
     payment.status ||
       data.payment_status ||
-      status.slug ||
-      status.name ||
-      data.status ||
       ""
   )
     .trim()
     .toLowerCase();
 }
 
-function isPaidStatus(status: string) {
+function isPaidStatus(
+  status: string
+) {
   return [
     "paid",
     "completed",
     "complete",
-    "تم الدفع",
     "مدفوع",
     "مكتمل",
+    "تم الدفع",
   ].includes(status);
 }
 
-async function findUserByEmail(
-  admin: ReturnType<typeof createAdminClient>,
-  email: string
+function extractAmount(
+  data: Record<string, any>
 ) {
-  for (let page = 1; page <= 20; page += 1) {
-    const { data, error } =
-      await admin.auth.admin.listUsers({
-        page,
-        perPage: 1000,
-      });
+  const amounts = asRecord(
+    data.amounts
+  );
 
-    if (error) {
-      throw error;
-    }
+  const total = asRecord(
+    amounts.total
+  );
 
-    const found = data.users.find(
-      (user) =>
-        user.email?.toLowerCase() === email
-    );
+  const legacyTotal = asRecord(
+    data.total
+  );
 
-    if (found) {
-      return found;
-    }
+  const value =
+    total.amount ??
+    legacyTotal.amount ??
+    data.amount ??
+    null;
 
-    if (data.users.length < 1000) {
-      break;
-    }
-  }
+  const amount = Number(value);
 
-  return null;
+  return Number.isFinite(amount)
+    ? amount
+    : null;
 }
 
-export async function POST(request: NextRequest) {
+export async function POST(
+  request: NextRequest
+) {
   try {
     const expectedToken =
-      process.env.SALLA_WEBHOOK_TOKEN;
+      process.env
+        .SALLA_WEBHOOK_TOKEN;
 
     if (!expectedToken) {
       console.error(
@@ -143,7 +200,10 @@ export async function POST(request: NextRequest) {
       );
 
       return NextResponse.json(
-        { error: "Webhook is not configured" },
+        {
+          error:
+            "Webhook is not configured",
+        },
         { status: 500 }
       );
     }
@@ -153,39 +213,56 @@ export async function POST(request: NextRequest) {
 
     if (
       !receivedToken ||
-      receivedToken !== expectedToken
+      !tokensMatch(
+        receivedToken,
+        expectedToken
+      )
     ) {
       return NextResponse.json(
-        { error: "Unauthorized webhook" },
+        {
+          error:
+            "Unauthorized webhook",
+        },
         { status: 401 }
       );
     }
 
-    const payload = await request.json();
+    const payload =
+      await request.json();
+
     const event = String(
       payload?.event || ""
     ).trim();
 
     if (
-      event !== "order.payment.updated" &&
-      event !== "order.status.updated"
+      event !==
+        "order.payment.updated" &&
+      event !==
+        "order.status.updated"
     ) {
       return NextResponse.json({
         ok: true,
         ignored: true,
-        reason: "unsupported_event",
+        reason:
+          "unsupported_event",
       });
     }
 
-    const data = asRecord(payload?.data);
+    const data = asRecord(
+      payload?.data
+    );
+
     const paymentStatus =
       extractPaymentStatus(data);
 
-    if (!isPaidStatus(paymentStatus)) {
+    if (
+      !isPaidStatus(paymentStatus)
+    ) {
       return NextResponse.json({
         ok: true,
         ignored: true,
-        reason: "payment_not_confirmed",
+        reason:
+          "payment_not_confirmed",
         paymentStatus,
       });
     }
@@ -199,7 +276,10 @@ export async function POST(request: NextRequest) {
 
     if (!orderId) {
       return NextResponse.json(
-        { error: "Missing order id" },
+        {
+          error:
+            "Missing order id",
+        },
         { status: 400 }
       );
     }
@@ -209,14 +289,18 @@ export async function POST(request: NextRequest) {
 
     const matchedProductId =
       productIds.find(
-        (id) => PRODUCT_PLAN_MAP[id]
+        (productId) =>
+          PRODUCT_PLAN_MAP[
+            productId
+          ]
       );
 
     if (!matchedProductId) {
       return NextResponse.json({
         ok: true,
         ignored: true,
-        reason: "unknown_product",
+        reason:
+          "unknown_product",
         productIds,
       });
     }
@@ -239,166 +323,57 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const admin = createAdminClient();
+    const admin =
+      createAdminClient();
 
-    const { data: previousEvent } =
-      await admin
-        .from("salla_payment_events")
-        .select("id")
-        .eq("order_id", orderId)
-        .maybeSingle();
-
-    if (previousEvent) {
-      return NextResponse.json({
-        ok: true,
-        duplicate: true,
-      });
-    }
-
-    const targetUser =
-      await findUserByEmail(
-        admin,
-        customerEmail
-      );
-
-    if (!targetUser) {
-      return NextResponse.json(
-        {
-          error:
-            "لا يوجد حساب في المنصة بنفس بريد المشتري",
+    const {
+      data: rpcResult,
+      error: rpcError,
+    } = await admin.rpc(
+      "process_salla_paid_order",
+      {
+        p_order_id: orderId,
+        p_event_type: event,
+        p_product_id:
+          matchedProductId,
+        p_plan_code: planCode,
+        p_customer_email:
           customerEmail,
-        },
-        { status: 404 }
-      );
-    }
-
-    const { data: plan, error: planError } =
-      await admin
-        .from("plans")
-        .select("id,code,name")
-        .eq("code", planCode)
-        .single();
-
-    if (planError || !plan) {
-      throw new Error(
-        planError?.message ||
-          "لم يتم العثور على الباقة"
-      );
-    }
-
-    const now = new Date();
-    const nowIso = now.toISOString();
-
-    const { data: activeSubscription } =
-      await admin
-        .from("subscriptions")
-        .select(
-          "id,starts_at,ends_at,status"
-        )
-        .eq("user_id", targetUser.id)
-        .eq("status", "active")
-        .order("ends_at", {
-          ascending: false,
-        })
-        .limit(1)
-        .maybeSingle();
-
-    const currentEnd =
-      activeSubscription?.ends_at
-        ? new Date(
-            activeSubscription.ends_at
-          )
-        : null;
-
-    const baseDate =
-      currentEnd &&
-      currentEnd.getTime() >
-        now.getTime()
-        ? currentEnd
-        : now;
-
-    const newEndDate = new Date(
-      baseDate.getTime() +
-        30 * 86_400_000
+        p_amount:
+          extractAmount(data),
+        p_payload: payload,
+      }
     );
 
-    const newEndIso =
-      newEndDate.toISOString();
-
-    if (activeSubscription) {
-      const { error } = await admin
-        .from("subscriptions")
-        .update({
-          plan_id: plan.id,
-          status: "active",
-          starts_at:
-            currentEnd &&
-            currentEnd.getTime() >
-              now.getTime()
-              ? activeSubscription.starts_at
-              : nowIso,
-          ends_at: newEndIso,
-          source: "salla",
-        })
-        .eq(
-          "id",
-          activeSubscription.id
-        );
-
-      if (error) {
-        throw error;
-      }
-    } else {
-      const { error } = await admin
-        .from("subscriptions")
-        .insert({
-          user_id: targetUser.id,
-          plan_id: plan.id,
-          status: "active",
-          starts_at: nowIso,
-          ends_at: newEndIso,
-          source: "salla",
-        });
-
-      if (error) {
-        throw error;
-      }
+    if (rpcError) {
+      throw rpcError;
     }
 
-    const amount =
-      Number(
-        data?.amounts?.total?.amount ??
-          data?.total?.amount ??
-          data?.amount ??
-          0
-      ) || null;
+    const result =
+      asRecord(rpcResult);
 
-    const { error: eventError } =
-      await admin
-        .from("salla_payment_events")
-        .insert({
-          order_id: orderId,
-          event_type: event,
-          product_id:
-            matchedProductId,
-          plan_code: planCode,
-          customer_email:
-            customerEmail,
-          amount,
-          payload,
-        });
-
-    if (eventError) {
-      throw eventError;
+    if (
+      result.status ===
+      "needs_review"
+    ) {
+      return NextResponse.json(
+        result,
+        { status: 409 }
+      );
     }
 
-    return NextResponse.json({
-      ok: true,
-      orderId,
-      customerEmail,
-      planCode,
-      endsAt: newEndIso,
-    });
+    if (
+      result.status === "failed"
+    ) {
+      return NextResponse.json(
+        result,
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json(
+      result
+    );
   } catch (error) {
     console.error(
       "Salla webhook error:",
