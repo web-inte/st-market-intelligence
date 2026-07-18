@@ -891,10 +891,23 @@ export async function syncAnalysisTradePlan(
         )
       : null;
 
+  const gex =
+    Number(analysis.options.estimatedNetGex) || 0;
+
+  const gammaSupportsSide =
+    (directionalSide === "CALL" && gex > 0) ||
+    (directionalSide === "PUT" && gex < 0);
+
+  const momentumSupportsSide =
+    (directionalSide === "CALL" && currentPrice > 0 && analysis.quote.changePct > 0) ||
+    (directionalSide === "PUT" && currentPrice > 0 && analysis.quote.changePct < 0);
+
   const qualifies =
     directionalSide !== null &&
-    score >= 70 &&
-    selectedContract !== null;
+    score >= 80 &&
+    selectedContract !== null &&
+    gammaSupportsSide &&
+    momentumSupportsSide;
   if (!qualifies) {
     let warningReason =
       "انخفض تقييم الفرصة عن الحد المطلوب";
