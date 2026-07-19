@@ -603,6 +603,11 @@ export default function StockSmartChart({
   const currentPriceLineRef =
     useRef<IPriceLine | null>(null);
 
+  const gammaLabelsLayerRef =
+    useRef<HTMLDivElement | null>(
+      null
+    );
+
   const [candles, setCandles] =
     useState<Candle[]>([]);
 
@@ -898,6 +903,17 @@ export default function StockSmartChart({
     gammaData,
   ]);
 
+  const inlineGammaLevels =
+    useMemo(
+      () =>
+        levels.filter((level) =>
+          INLINE_GAMMA_LABEL_KEYS.has(
+            level.key
+          )
+        ),
+      [levels]
+    );
+
   useEffect(() => {
     let cancelled = false;
 
@@ -1156,10 +1172,115 @@ export default function StockSmartChart({
             level.lineStyle,
           axisLabelVisible:
             level.axisLabelVisible,
-          title: level.title,
+          title:
+            INLINE_GAMMA_LABEL_KEYS.has(
+              level.key
+            )
+              ? ""
+              : level.title,
         })
       );
   }, [levels]);
+
+  useEffect(() => {
+    const layer =
+      gammaLabelsLayerRef.current;
+
+    const series =
+      seriesRef.current;
+
+    if (!layer || !series) {
+      return;
+    }
+
+    let animationFrame = 0;
+    let active = true;
+
+    function syncGammaLabels() {
+      const currentLayer =
+        gammaLabelsLayerRef.current;
+
+      const currentSeries =
+        seriesRef.current;
+
+      if (
+        !currentLayer ||
+        !currentSeries
+      ) {
+        return;
+      }
+
+      inlineGammaLevels.forEach(
+        (level) => {
+          const label =
+            currentLayer.querySelector<HTMLElement>(
+              `[data-gamma-label="${level.key}"]`
+            );
+
+          if (!label) {
+            return;
+          }
+
+          const coordinate =
+            currentSeries.priceToCoordinate(
+              level.price
+            );
+
+          if (
+            coordinate === null ||
+            coordinate < 8 ||
+            coordinate >
+              currentLayer.clientHeight - 8
+          ) {
+            label.style.display =
+              "none";
+
+            return;
+          }
+
+          label.style.display =
+            "block";
+
+          const labelHeight =
+            label.offsetHeight || 12;
+
+          label.style.transform =
+            `translate3d(0, ${
+              Math.round(
+                coordinate -
+                  labelHeight / 2
+              )
+            }px, 0)`;
+        }
+      );
+    }
+
+    function animate() {
+      if (!active) {
+        return;
+      }
+
+      syncGammaLabels();
+
+      animationFrame =
+        window.requestAnimationFrame(
+          animate
+        );
+    }
+
+    animationFrame =
+      window.requestAnimationFrame(
+        animate
+      );
+
+    return () => {
+      active = false;
+
+      window.cancelAnimationFrame(
+        animationFrame
+      );
+    };
+  }, [inlineGammaLevels]);
 
   const directionLabel =
     side === "CALL"
@@ -1244,6 +1365,32 @@ export default function StockSmartChart({
             className="h-full w-full"
             dir="ltr"
           />
+
+          <div
+            ref={gammaLabelsLayerRef}
+            className="pointer-events-none absolute inset-0 z-20 overflow-hidden"
+            aria-hidden="true"
+          >
+            {inlineGammaLevels.map(
+              (level) => (
+                <span
+                  key={`inline-${level.key}-${level.price}`}
+                  data-gamma-label={
+                    level.key
+                  }
+                  dir="rtl"
+                  className="absolute right-[86px] top-0 hidden whitespace-nowrap text-[10px] font-black leading-none [will-change:transform] sm:right-[96px] sm:text-xs"
+                  style={{
+                    color: level.color,
+                    textShadow:
+                      "0 1px 3px #020617, 0 -1px 3px #020617",
+                  }}
+                >
+                  {level.title}
+                </span>
+              )
+            )}
+          </div>
 
         </div>
       </div>
