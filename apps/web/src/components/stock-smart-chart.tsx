@@ -57,6 +57,15 @@ type GammaLevel = {
   strength: number;
 };
 
+const INLINE_GAMMA_LABEL_KEYS =
+  new Set([
+    "gamma-support",
+    "gamma-resistance",
+    "gamma-flip",
+    "zero-gamma",
+    "magnet",
+  ]);
+
 function toRecord(
   value: unknown
 ): Record<string, unknown> | null {
@@ -594,6 +603,11 @@ export default function StockSmartChart({
   const currentPriceLineRef =
     useRef<IPriceLine | null>(null);
 
+  const gammaLabelsLayerRef =
+    useRef<HTMLDivElement | null>(
+      null
+    );
+
   const [candles, setCandles] =
     useState<Candle[]>([]);
 
@@ -889,6 +903,17 @@ export default function StockSmartChart({
     gammaData,
   ]);
 
+  const inlineGammaLevels =
+    useMemo(
+      () =>
+        levels.filter((level) =>
+          INLINE_GAMMA_LABEL_KEYS.has(
+            level.key
+          )
+        ),
+      [levels]
+    );
+
   useEffect(() => {
     let cancelled = false;
 
@@ -1146,11 +1171,103 @@ export default function StockSmartChart({
           lineStyle:
             level.lineStyle,
           axisLabelVisible:
-            level.axisLabelVisible,
+            INLINE_GAMMA_LABEL_KEYS.has(
+              level.key
+            )
+              ? false
+              : level.axisLabelVisible,
           title: level.title,
         })
       );
   }, [levels]);
+
+  useEffect(() => {
+    const layer =
+      gammaLabelsLayerRef.current;
+
+    const series =
+      seriesRef.current;
+
+    if (!layer || !series) {
+      return;
+    }
+
+    function syncGammaLabels() {
+      if (
+        !gammaLabelsLayerRef.current ||
+        !seriesRef.current
+      ) {
+        return;
+      }
+
+      const currentLayer =
+        gammaLabelsLayerRef.current;
+
+      const currentSeries =
+        seriesRef.current;
+
+      inlineGammaLevels.forEach(
+        (level) => {
+          const label =
+            currentLayer.querySelector<HTMLElement>(
+              `[data-gamma-label="${level.key}"]`
+            );
+
+          if (!label) {
+            return;
+          }
+
+          const coordinate =
+            currentSeries.priceToCoordinate(
+              level.price
+            );
+
+          if (
+            coordinate === null ||
+            coordinate < 8 ||
+            coordinate >
+              currentLayer.clientHeight - 8
+          ) {
+            label.style.display =
+              "none";
+
+            return;
+          }
+
+          label.style.display =
+            "block";
+
+          const labelHeight =
+            label.offsetHeight || 14;
+
+          label.style.transform =
+            `translate3d(0, ${
+              Math.round(
+                coordinate -
+                  labelHeight / 2
+              )
+            }px, 0)`;
+        }
+      );
+    }
+
+    syncGammaLabels();
+
+    /*
+     * تحديث خفيف حتى يبقى الاسم
+     * ملازمًا للخط أثناء التكبير
+     * والتحريك وتغيير مقياس السعر.
+     */
+    const timer =
+      window.setInterval(
+        syncGammaLabels,
+        80
+      );
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [inlineGammaLevels]);
 
   const directionLabel =
     side === "CALL"
@@ -1229,11 +1346,38 @@ export default function StockSmartChart({
           </div>
         ) : null}
 
-        <div
-          ref={containerRef}
-          className="h-[480px] w-full"
-          dir="ltr"
-        />
+        <div className="relative h-[480px] w-full">
+          <div
+            ref={containerRef}
+            className="h-full w-full"
+            dir="ltr"
+          />
+
+          <div
+            ref={gammaLabelsLayerRef}
+            className="pointer-events-none absolute inset-0 z-20 overflow-hidden"
+            aria-hidden="true"
+          >
+            {inlineGammaLevels.map(
+              (level) => (
+                <span
+                  key={`inline-${level.key}-${level.price}`}
+                  data-gamma-label={
+                    level.key
+                  }
+                  className="absolute left-3 top-0 hidden whitespace-nowrap text-[10px] font-black sm:left-5 sm:text-xs"
+                  style={{
+                    color: level.color,
+                    textShadow:
+                      "0 1px 3px #020617, 0 -1px 3px #020617",
+                  }}
+                >
+                  {level.title}
+                </span>
+              )
+            )}
+          </div>
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-2 border-t border-white/[0.06] p-4">
