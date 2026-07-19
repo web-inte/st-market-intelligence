@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import StockSmartChart from "../../../components/stock-smart-chart";
 import {
   analyzeMarketData,
   type AnalysisError,
@@ -522,6 +523,9 @@ export default async function StockAnalysisPage({
   const sideStyle =
     sideClasses(decision.side);
 
+  const chartOptions =
+    options as Record<string, any>;
+
   const storedPlan =
     analysis.tradePlan;
 
@@ -913,6 +917,67 @@ export default async function StockAnalysisPage({
           </p>
         </section>
 
+
+        <StockSmartChart
+          symbol={analysis.symbol}
+          currentPrice={Number(quote.price)}
+          entry={pricePlan.entry}
+          stop={pricePlan.stop}
+          targets={pricePlan.levels.map(
+            (level) => ({
+              index: level.index,
+              price: level.price,
+            })
+          )}
+          side={decision.side}
+          gammaData={{
+            gammaStructure:
+              chartOptions.gammaStructure ??
+              null,
+            walls:
+              chartOptions.walls ??
+              null,
+            gammaByStrike:
+              chartOptions.gammaByStrike ??
+              null,
+            gammaLevels:
+              chartOptions.gammaLevels ??
+              null,
+            levels:
+              chartOptions.levels ??
+              null,
+            callWall:
+              chartOptions.callWall ??
+              null,
+            putWall:
+              chartOptions.putWall ??
+              null,
+            nearestSupport:
+              chartOptions.nearestSupport ??
+              null,
+            nearestResistance:
+              chartOptions.nearestResistance ??
+              null,
+            support:
+              chartOptions.support ??
+              null,
+            resistance:
+              chartOptions.resistance ??
+              null,
+            magnet:
+              chartOptions.magnet ??
+              null,
+            gammaFlip:
+              chartOptions.gammaFlip ??
+              chartOptions.gammaFlipLevel ??
+              null,
+            zeroGamma:
+              chartOptions.zeroGamma ??
+              chartOptions.zeroGammaLevel ??
+              null,
+          }}
+        />
+
         <section className="mb-5 rounded-3xl border border-slate-800 bg-slate-900/80 p-6">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
@@ -1161,7 +1226,7 @@ export default async function StockAnalysisPage({
                 "غير متاح"}
             </p>
 
-            {selectedContract ? (
+            {decision.side !== "NEUTRAL" && selectedContract ? (
               <p className="mt-2 text-sm text-slate-500">
                 {selectedContract.type.toUpperCase()}{" "}
                 • Strike{" "}
