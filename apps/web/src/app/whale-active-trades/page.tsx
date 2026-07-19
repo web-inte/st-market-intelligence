@@ -103,6 +103,16 @@ type WhaleSetup = {
     | string
     | null;
 
+  best_profit_dollars:
+    | number
+    | string
+    | null;
+
+  best_profit_pct:
+    | number
+    | string
+    | null;
+
   contract_quote_at:
     | string
     | null;
@@ -699,6 +709,57 @@ export default function WhaleActiveTradesPage() {
                   trade.contract_profit_pct
                 );
 
+              const entryPriceValue =
+                numberValue(
+                  trade.entry_price
+                );
+
+              const bestPriceValue =
+                numberValue(
+                  trade.best_price
+                );
+
+              const calculatedBestProfitDollars =
+                entryPriceValue > 0 &&
+                bestPriceValue > 0
+                  ? Math.max(
+                      0,
+                      (bestPriceValue -
+                        entryPriceValue) *
+                        100
+                    )
+                  : 0;
+
+              const calculatedBestProfitPct =
+                entryPriceValue > 0
+                  ? Math.max(
+                      0,
+                      ((bestPriceValue -
+                        entryPriceValue) /
+                        entryPriceValue) *
+                        100
+                    )
+                  : 0;
+
+              const bestProfitDollars =
+                Math.max(
+                  numberValue(
+                    trade.best_profit_dollars
+                  ),
+                  calculatedBestProfitDollars
+                );
+
+              const bestProfitPct =
+                Math.max(
+                  numberValue(
+                    trade.best_profit_pct
+                  ),
+                  calculatedBestProfitPct
+                );
+
+              const bestPositive =
+                bestProfitDollars >= 0;
+
               const positive =
                 profitDollars >= 0;
 
@@ -778,6 +839,14 @@ export default function WhaleActiveTradesPage() {
                       </span>
                     </div>
                   </header>
+
+                  {trade.status ===
+                  "STOPPED" ? (
+                    <div className="mx-5 mt-5 rounded-2xl border border-rose-400/30 bg-rose-400/10 p-4 text-sm font-black text-rose-200">
+                      تنبيه: ضربت صفقة الحوت الوقف وانتهت متابعة العقد.
+                      أعلى سعر وأعلى ربح حققته الصفقة محفوظان ولا يتغيران.
+                    </div>
+                  ) : null}
 
                   <div className="p-5">
                     <h3 className="text-sm font-black text-cyan-300">
@@ -1110,6 +1179,49 @@ export default function WhaleActiveTradesPage() {
                               : ""}
                             {formatNumber(
                               profitPct
+                            )}
+                            %
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 grid grid-cols-2 gap-3">
+                        <div
+                          className={[
+                            "rounded-2xl border p-4",
+                            bestPositive
+                              ? "border-emerald-400/25 bg-emerald-400/10"
+                              : "border-rose-400/25 bg-rose-400/10",
+                          ].join(" ")}
+                        >
+                          <div className="text-xs font-bold text-slate-400">
+                            أعلى ربح تحقق
+                          </div>
+
+                          <div className="mt-1 text-xl font-black text-emerald-300">
+                            +$
+                            {formatNumber(
+                              bestProfitDollars
+                            )}
+                          </div>
+                        </div>
+
+                        <div
+                          className={[
+                            "rounded-2xl border p-4",
+                            bestPositive
+                              ? "border-emerald-400/25 bg-emerald-400/10"
+                              : "border-rose-400/25 bg-rose-400/10",
+                          ].join(" ")}
+                        >
+                          <div className="text-xs font-bold text-slate-400">
+                            أعلى نسبة ربح
+                          </div>
+
+                          <div className="mt-1 text-xl font-black text-emerald-300">
+                            +
+                            {formatNumber(
+                              bestProfitPct
                             )}
                             %
                           </div>

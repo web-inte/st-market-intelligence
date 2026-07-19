@@ -1087,15 +1087,15 @@ ${url}`);
           >
             <div>
               <p className="text-xs font-bold uppercase tracking-[0.15em] text-fuchsia-400">
-                مضاربة المؤشر اليومية
+                فرصة يومية مميزة
               </p>
 
               <h2 className="mt-2 text-xl font-black text-white">
-                SPX اليومي
+                فرصة SPX اليومية
               </h2>
 
               <p className="mt-2 text-sm leading-6 text-slate-400">
-                تحليل عقود SPX اليومية والقاما والسيولة والتدفق واختيار أفضل عقد 0DTE.
+                رصد لحظي لأقوى عقد SPX 0DTE اعتمادًا على القاما والسيولة والزخم.
               </p>
             </div>
 

@@ -118,6 +118,27 @@ function normalizeTicker(value: unknown) {
     : `O:${ticker}`;
 }
 
+function normalizeUnderlyingSymbol(
+  symbol: string,
+  contractTicker = ""
+) {
+  const normalizedSymbol =
+    symbol.trim().toUpperCase();
+
+  const normalizedTicker =
+    contractTicker.trim().toUpperCase();
+
+  if (
+    normalizedSymbol === "SPX" ||
+    normalizedSymbol === "SPXW" ||
+    normalizedTicker.startsWith("O:SPX")
+  ) {
+    return "I:SPX";
+  }
+
+  return normalizedSymbol;
+}
+
 function getExpiration(
   source: DataRecord
 ) {
@@ -140,9 +161,15 @@ async function fetchContractSnapshot(
   contractTicker: string,
   apiKey: string
 ): Promise<LiveContract> {
+  const underlyingSymbol =
+    normalizeUnderlyingSymbol(
+      symbol,
+      contractTicker
+    );
+
   const url =
     `https://api.massive.com/v3/snapshot/options/` +
-    `${encodeURIComponent(symbol)}/` +
+    `${encodeURIComponent(underlyingSymbol)}/` +
     `${encodeURIComponent(contractTicker)}` +
     `?apiKey=${encodeURIComponent(apiKey)}`;
 
@@ -265,9 +292,14 @@ async function findAlternativeContract(input: {
     );
   }
 
+  const underlyingSymbol =
+    normalizeUnderlyingSymbol(
+      input.symbol
+    );
+
   const url =
     `https://api.massive.com/v3/snapshot/options/` +
-    `${encodeURIComponent(input.symbol)}?` +
+    `${encodeURIComponent(underlyingSymbol)}?` +
     params.toString();
 
   const response = await fetch(url, {
@@ -557,6 +589,11 @@ export async function GET() {
                   row.is_alternative
                 );
 
+              let alternativeReason =
+                textValue(
+                  row.alternative_reason
+                ) || null;
+
               if (trackingTicker) {
                 selected =
                   await fetchContractSnapshot(
@@ -606,16 +643,21 @@ export async function GET() {
                     );
 
                   if (!alternative) {
-                    throw new Error(
-                      "لا يوجد عقد بديل مناسب بسعر 2.70$ أو أقل"
-                    );
+                    selected = original;
+                    trackingTicker =
+                      original.ticker;
+                    isAlternative = false;
+                    alternativeReason =
+                      "لا يوجد عقد بديل مناسب ضمن الحد السعري 2.70$";
+                  } else {
+                    selected =
+                      alternative;
+                    trackingTicker =
+                      alternative.ticker;
+                    isAlternative = true;
+                    alternativeReason =
+                      "تم اختيار عقد بديل لأن سعر العقد الأصلي أعلى من 2.70$";
                   }
-
-                  selected =
-                    alternative;
-                  trackingTicker =
-                    alternative.ticker;
-                  isAlternative = true;
                 }
               }
 
@@ -666,6 +708,23 @@ export async function GET() {
                     )
                   : 0;
 
+              const bestProfitDollars =
+                round(
+                  (bestPrice -
+                    entryPrice) *
+                    100
+                );
+
+              const bestProfitPct =
+                entryPrice > 0
+                  ? round(
+                      ((bestPrice -
+                        entryPrice) /
+                        entryPrice) *
+                        100
+                    )
+                  : 0;
+
               const {
                 data: updated,
                 error: updateError,
@@ -687,9 +746,7 @@ export async function GET() {
                     isAlternative,
 
                   alternative_reason:
-                    isAlternative
-                      ? "سعر عقد الحوت الأصلي أعلى من 2.70$"
-                      : null,
+                    alternativeReason,
 
                   entry_price:
                     entryPrice,
@@ -717,6 +774,12 @@ export async function GET() {
 
                   contract_profit_pct:
                     profitPct,
+
+                  best_profit_dollars:
+                    bestProfitDollars,
+
+                  best_profit_pct:
+                    bestProfitPct,
 
                   contract_quote_at:
                     selected.quoteAt,

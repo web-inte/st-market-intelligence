@@ -592,14 +592,11 @@ export default function SpxWhalesPage() {
               </p>
 
               <h1 className="mt-2 text-3xl font-black sm:text-5xl">
-                SPX اليومي
+                فرصة SPX اليومية
               </h1>
 
               <p className="mt-3 max-w-3xl text-sm font-semibold leading-7 text-slate-400">
-                عقد واحد فقط تحت المتابعة.
-                يتم تثبيت مستوى الإبطال من
-                بيانات القاما، وتسجيل أعلى
-                ربح تحقق حتى بعد ضرب الوقف.
+                رصد لحظي لأقوى عقد SPX يومي، مبني على القاما والسيولة والزخم. تتم متابعة فرصة واحدة فقط حتى تحقق أهدافها أو يُلغى السيناريو، مع حفظ أعلى ربح وصل إليه العقد.
               </p>
             </div>
 

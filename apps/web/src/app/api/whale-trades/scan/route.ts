@@ -90,6 +90,13 @@ type WhaleTradeRow = {
   ask: number;
   spread_pct: number | null;
 
+  trade_price: number;
+  execution_side: "BUY" | "SELL" | "UNKNOWN";
+  execution_confidence: number;
+  execution_position_pct: number | null;
+  market_bias: "BULLISH" | "BEARISH" | "NEUTRAL";
+  execution_reason: string;
+
   delta: number | null;
   gamma: number | null;
   theta: number | null;
@@ -204,6 +211,161 @@ function calculateSpreadPct(
     ((ask - bid) / midpoint) *
     100
   );
+}
+
+type ExecutionSide =
+  | "BUY"
+  | "SELL"
+  | "UNKNOWN";
+
+type MarketBias =
+  | "BULLISH"
+  | "BEARISH"
+  | "NEUTRAL";
+
+type ExecutionAnalysis = {
+  side: ExecutionSide;
+  confidence: number;
+  positionPct: number | null;
+  marketBias: MarketBias;
+  reason: string;
+};
+
+function detectExecutionSide(
+  contractType: "call" | "put",
+  tradePrice: number,
+  bid: number,
+  ask: number
+): ExecutionAnalysis {
+  if (
+    tradePrice <= 0 ||
+    bid <= 0 ||
+    ask <= 0 ||
+    ask <= bid
+  ) {
+    return {
+      side: "UNKNOWN",
+      confidence: 0,
+      positionPct: null,
+      marketBias: "NEUTRAL",
+      reason:
+        "تعذر تحديد اتجاه التنفيذ لعدم اكتمال Bid/Ask أو سعر التنفيذ",
+    };
+  }
+
+  const rawPosition =
+    ((tradePrice - bid) /
+      (ask - bid)) *
+    100;
+
+  /*
+    التنفيذ خارج السبريد بشكل كبير يعني غالبًا
+    أن توقيت آخر Trade لا يطابق توقيت آخر Quote.
+  */
+  if (
+    rawPosition < -10 ||
+    rawPosition > 110
+  ) {
+    return {
+      side: "UNKNOWN",
+      confidence: 0,
+      positionPct:
+        Math.round(rawPosition * 100) /
+        100,
+      marketBias: "NEUTRAL",
+      reason:
+        "سعر التنفيذ خارج نطاق Bid/Ask المتاح؛ لا يمكن تأكيد الشراء أو البيع",
+    };
+  }
+
+  const position =
+    clamp(rawPosition, 0, 100);
+
+  let side: ExecutionSide =
+    "UNKNOWN";
+
+  let confidence = 0;
+
+  let reason =
+    "التنفيذ قريب من منتصف السبريد؛ اتجاه التنفيذ غير محسوم";
+
+  if (position >= 80) {
+    side = "BUY";
+    confidence =
+      Math.round(position);
+    reason =
+      "التنفيذ قريب جدًا من Ask؛ شراء العقد مرجح بقوة";
+  } else if (position >= 65) {
+    side = "BUY";
+    confidence =
+      Math.round(position);
+    reason =
+      "التنفيذ أقرب إلى Ask؛ شراء العقد مرجح";
+  } else if (position <= 20) {
+    side = "SELL";
+    confidence =
+      Math.round(
+        100 - position
+      );
+    reason =
+      "التنفيذ قريب جدًا من Bid؛ بيع العقد مرجح بقوة";
+  } else if (position <= 35) {
+    side = "SELL";
+    confidence =
+      Math.round(
+        100 - position
+      );
+    reason =
+      "التنفيذ أقرب إلى Bid؛ بيع العقد مرجح";
+  } else {
+    confidence =
+      Math.round(
+        clamp(
+          100 -
+            Math.abs(
+              position - 50
+            ) *
+              2,
+          0,
+          100
+        )
+      );
+  }
+
+  let marketBias: MarketBias =
+    "NEUTRAL";
+
+  if (
+    side === "BUY" &&
+    contractType === "call"
+  ) {
+    marketBias = "BULLISH";
+  } else if (
+    side === "BUY" &&
+    contractType === "put"
+  ) {
+    marketBias = "BEARISH";
+  } else if (
+    side === "SELL" &&
+    contractType === "call"
+  ) {
+    marketBias = "BEARISH";
+  } else if (
+    side === "SELL" &&
+    contractType === "put"
+  ) {
+    marketBias = "BULLISH";
+  }
+
+  return {
+    side,
+    confidence,
+    positionPct:
+      Math.round(position * 100) /
+      100,
+    marketBias,
+    reason,
+  };
 }
 
 function getMoneyPosition(
@@ -621,6 +783,19 @@ if (
       ? (bid + ask) / 2
       : lastTradePrice;
 
+  const executionPrice =
+    lastTradePrice > 0
+      ? lastTradePrice
+      : midpoint;
+
+  const execution =
+    detectExecutionSide(
+      contractType,
+      executionPrice,
+      bid,
+      ask
+    );
+
   const lastTradeSize =
     safeNumber(
       contract.last_trade?.size
@@ -636,14 +811,14 @@ if (
     );
 
   if (
-    midpoint <= 0 ||
+    executionPrice <= 0 ||
     lastTradeSize <= 0
   ) {
     return null;
   }
 
   const premiumValue =
-    midpoint *
+    executionPrice *
     lastTradeSize *
     100;
 
@@ -742,7 +917,8 @@ if (
     expiration,
 
     stock_price: stockPrice,
-    contract_price: midpoint,
+    contract_price:
+      executionPrice,
 
     premium_value: premiumValue,
     volume,
@@ -752,6 +928,24 @@ if (
     bid,
     ask,
     spread_pct: spreadPct,
+
+    trade_price:
+      executionPrice,
+
+    execution_side:
+      execution.side,
+
+    execution_confidence:
+      execution.confidence,
+
+    execution_position_pct:
+      execution.positionPct,
+
+    market_bias:
+      execution.marketBias,
+
+    execution_reason:
+      execution.reason,
 
     delta,
     gamma,
@@ -767,7 +961,8 @@ if (
       directionStatus,
     gamma_status: gammaStatus,
 
-    reason,
+    reason:
+      `${reason} • ${execution.reason}`,
     last_seen_at:
       new Date().toISOString(),
     is_active: true,
