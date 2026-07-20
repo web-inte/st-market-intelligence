@@ -65,6 +65,29 @@ function round(value: number, digits = 2) {
   );
 }
 
+
+function isSpxDailyWindowOpen() {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Riyadh",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date());
+
+  const hour = Number(
+    parts.find((part) => part.type === "hour")?.value || 0
+  );
+
+  const minute = Number(
+    parts.find((part) => part.type === "minute")?.value || 0
+  );
+
+  const totalMinutes = hour * 60 + minute;
+
+  return totalMinutes >= 3 * 60 + 30 &&
+    totalMinutes < 23 * 60;
+}
+
 function createAdminClient() {
   const url =
     process.env.SUPABASE_URL ||
@@ -296,9 +319,12 @@ export async function GET(
     const signal =
       await fetchSpxSignal(request);
 
+    const spxDailyWindowOpen =
+      isSpxDailyWindowOpen();
+
     if (
       !liveTrade &&
-      session?.isOpen === false
+      !spxDailyWindowOpen
     ) {
       return NextResponse.json(
         {
@@ -309,7 +335,7 @@ export async function GET(
             visibleTrades || [],
           signal,
           message:
-            "السوق مغلق — لا يتم إصدار فرصة SPX جديدة.",
+            "السوق مغلق — لا يتم إصدار فرصة SPX اليومية.",
           marketSession:
             session,
           updatedAt:
