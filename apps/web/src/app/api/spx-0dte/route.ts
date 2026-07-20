@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { calculateGammaFlip } from "@/lib/gamma-flip-engine";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -831,6 +832,35 @@ export async function GET() {
 
     const gamma = calculateGammaFromContracts(allContracts, stockPrice);
 
+    const nowNewYork = new Date(
+      new Date().toLocaleString("en-US", {
+        timeZone: "America/New_York",
+      })
+    );
+
+    const sessionClose = new Date(nowNewYork);
+    sessionClose.setHours(16, 0, 0, 0);
+
+    const remainingMs = Math.max(
+      sessionClose.getTime() - nowNewYork.getTime(),
+      5 * 60 * 1000
+    );
+
+    const gammaFlipModel = calculateGammaFlip({
+      contracts: allContracts.map((contract) => ({
+        side: contract.side,
+        strike: contract.strike,
+        openInterest: contract.openInterest,
+        ivPct: contract.ivPct,
+      })),
+      currentSpot: stockPrice,
+      timeYears:
+        remainingMs /
+        (365 * 24 * 60 * 60 * 1000),
+      rangePoints: 200,
+      step: 1,
+    });
+
     const magnetDistance =
       gamma.magnet > 0 && stockPrice > 0
         ? Math.abs(stockPrice - gamma.magnet)
@@ -1059,7 +1089,14 @@ export async function GET() {
 
         gamma: {
           netGex: round(gamma.netGex),
-          zeroGamma: round(gamma.zeroGamma),
+
+          netGexFlip: round(gamma.zeroGamma),
+
+          zeroGamma:
+            gammaFlipModel.zeroGamma == null
+              ? null
+              : round(gammaFlipModel.zeroGamma),
+
           callWall: round(gamma.callWall),
           putWall: round(gamma.putWall),
           magnet: round(gamma.magnet),

@@ -23,7 +23,8 @@ type MarketData = {
 
 type GammaData = {
   netGex: number;
-  zeroGamma: number;
+  netGexFlip: number;
+  zeroGamma: number | null;
   callWall: number;
   putWall: number;
   magnet: number;
@@ -611,12 +612,15 @@ export default function SpxWhalesPage() {
 
     if (
       spxPrice > 0 &&
+      gamma.zeroGamma != null &&
       gamma.zeroGamma > 0
     ) {
       marketStructureNotes.push(
+        gamma.zeroGamma != null &&
         spxPrice > gamma.zeroGamma
           ? "🟢 السعر أعلى Zero Gamma — هيكل السعر يميل لصالح المشترين."
-          : spxPrice < gamma.zeroGamma
+          : gamma.zeroGamma != null &&
+              spxPrice < gamma.zeroGamma
             ? "🔴 السعر أسفل Zero Gamma — هيكل السعر يميل لصالح البائعين."
             : "🟡 السعر عند Zero Gamma — السوق قريب من منطقة تحول مهمة."
       );
@@ -907,15 +911,29 @@ export default function SpxWhalesPage() {
               />
 
               <Metric
-                label="Zero Gamma"
+                label="Net GEX Flip"
                 value={
                   gamma
+                    ? formatNumber(
+                        gamma.netGexFlip,
+                        0
+                      )
+                    : "—"
+                }
+                color="text-violet-300"
+              />
+
+              <Metric
+                label="Zero Gamma"
+                value={
+                  gamma?.zeroGamma != null
                     ? formatNumber(
                         gamma.zeroGamma,
                         0
                       )
                     : "—"
                 }
+                color="text-cyan-300"
               />
 
               <Metric
