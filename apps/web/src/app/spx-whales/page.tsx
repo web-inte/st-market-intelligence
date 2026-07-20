@@ -612,18 +612,77 @@ export default function SpxWhalesPage() {
 
     if (
       spxPrice > 0 &&
+      gamma.netGexFlip > 0
+    ) {
+      const distanceToNetGexFlip =
+        Math.abs(
+          spxPrice - gamma.netGexFlip
+        );
+
+      marketStructureNotes.push(
+        distanceToNetGexFlip <= 5
+          ? `🟣 السعر قريب من Net GEX Flip عند ${formatNumber(
+              gamma.netGexFlip,
+              0
+            )} — مستوى تفاعل لحظي قد يعمل دعمًا أو مقاومة.`
+          : spxPrice > gamma.netGexFlip
+            ? `🟢 السعر أعلى Net GEX Flip ${formatNumber(
+                gamma.netGexFlip,
+                0
+              )} — المستوى اللحظي يعمل أسفل السعر كدعم محتمل.`
+            : `🔴 السعر أسفل Net GEX Flip ${formatNumber(
+                gamma.netGexFlip,
+                0
+              )} — المستوى اللحظي يعمل أعلى السعر كمقاومة محتملة.`
+      );
+    }
+
+    if (
+      spxPrice > 0 &&
       gamma.zeroGamma != null &&
       gamma.zeroGamma > 0
     ) {
+      const distanceToZeroGamma =
+        Math.abs(
+          spxPrice - gamma.zeroGamma
+        );
+
       marketStructureNotes.push(
-        gamma.zeroGamma != null &&
-        spxPrice > gamma.zeroGamma
-          ? "🟢 السعر أعلى Zero Gamma — هيكل السعر يميل لصالح المشترين."
-          : gamma.zeroGamma != null &&
-              spxPrice < gamma.zeroGamma
-            ? "🔴 السعر أسفل Zero Gamma — هيكل السعر يميل لصالح البائعين."
-            : "🟡 السعر عند Zero Gamma — السوق قريب من منطقة تحول مهمة."
+        distanceToZeroGamma <= 5
+          ? `🟡 السعر قريب من Zero Gamma عند ${formatNumber(
+              gamma.zeroGamma,
+              0
+            )} — السوق عند منطقة تحول في بيئة القاما.`
+          : spxPrice > gamma.zeroGamma
+            ? `🟢 السعر أعلى Zero Gamma ${formatNumber(
+                gamma.zeroGamma,
+                0
+              )} — بيئة القاما تميل إلى الاستقرار النسبي فوق المستوى.`
+            : `🔴 السعر أسفل Zero Gamma ${formatNumber(
+                gamma.zeroGamma,
+                0
+              )} — بيئة القاما أكثر قابلية لاتساع الحركة أسفل المستوى.`
       );
+    }
+
+    if (
+      gamma.zeroGamma != null &&
+      gamma.netGexFlip > 0
+    ) {
+      const flipGap =
+        Math.abs(
+          gamma.zeroGamma -
+            gamma.netGexFlip
+        );
+
+      if (flipGap <= 10) {
+        marketStructureNotes.push(
+          `🔵 Net GEX Flip وZero Gamma متقاربان بفارق ${formatNumber(
+            flipGap,
+            0
+          )} نقاط — المنطقة بينهما تُعد محورًا مهمًا لحركة SPX.`
+        );
+      }
     }
 
     marketStructureNotes.push(
