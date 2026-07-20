@@ -4,7 +4,6 @@ import {
   CandlestickSeries,
   ColorType,
   CrosshairMode,
-  HistogramSeries,
   LineStyle,
   createChart,
   type IChartApi,
@@ -18,10 +17,6 @@ import {
   useRef,
   useState,
 } from "react";
-import {
-  createPatternChartOverlay,
-  type ChartTopPattern,
-} from "./pattern-chart-overlay";
 
 type Candle = {
   time: number;
@@ -45,7 +40,6 @@ type StockSmartChartProps = {
   targets: TargetLevel[];
   side: "CALL" | "PUT" | "NEUTRAL";
   gammaData?: unknown;
-  topPattern?: ChartTopPattern | null;
 };
 
 type ChartLevel = {
@@ -589,7 +583,6 @@ export default function StockSmartChart({
   targets,
   side,
   gammaData,
-  topPattern = null,
 }: StockSmartChartProps) {
   const containerRef =
     useRef<HTMLDivElement | null>(
@@ -604,11 +597,6 @@ export default function StockSmartChart({
       null
     );
 
-  const volumeSeriesRef =
-    useRef<ISeriesApi<"Histogram"> | null>(
-      null
-    );
-
   const priceLinesRef =
     useRef<IPriceLine[]>([]);
 
@@ -619,22 +607,6 @@ export default function StockSmartChart({
     useRef<HTMLDivElement | null>(
       null
     );
-
-  const patternOverlayCleanupRef =
-    useRef<(() => void) | null>(
-      null
-    );
-
-  const candlesRequestRef =
-    useRef<{
-      key: string;
-      controller: AbortController;
-    } | null>(null);
-
-  const candlesCacheRef =
-    useRef<
-      Map<string, Candle[]>
-    >(new Map());
 
   const [candles, setCandles] =
     useState<Candle[]>([]);
@@ -648,109 +620,8 @@ export default function StockSmartChart({
   const [interval, setIntervalValue] =
     useState(15);
 
-  const isDailyInterval =
-    interval === 1440;
-
-  const hasDailyPattern =
-    isDailyInterval &&
-    !!topPattern &&
-    ((topPattern as {
-      status?: string;
-    }).status === "FORMING" ||
-      (topPattern as {
-        status?: string;
-      }).status === "CONFIRMED");
-
-  type NormalizedCandle = {
-    time: number;
-    open: number;
-    high: number;
-    low: number;
-    close: number;
-    volume: number;
-  };
-
-  function normalizeCandles(
-    rawCandles: unknown[]
-  ): Candle[] {
-    const normalized: NormalizedCandle[] =
-      [];
-
-    for (const raw of rawCandles) {
-      const item = toRecord(raw);
-
-      if (!item) {
-        continue;
-      }
-
-      const time = Number(item.time);
-      const open = Number(item.open);
-      const high = Number(item.high);
-      const low = Number(item.low);
-      const close = Number(item.close);
-      const volume = Number(
-        item.volume ?? 0
-      );
-
-      if (
-        !Number.isFinite(time) ||
-        time <= 0 ||
-        !Number.isInteger(time) ||
-        !Number.isFinite(open) ||
-        !Number.isFinite(high) ||
-        !Number.isFinite(low) ||
-        !Number.isFinite(close) ||
-        open <= 0 ||
-        high <= 0 ||
-        low <= 0 ||
-        close <= 0 ||
-        high < open ||
-        high < close ||
-        low > open ||
-        low > close ||
-        low > high ||
-        !Number.isFinite(volume) ||
-        volume < 0
-      ) {
-        continue;
-      }
-
-      normalized.push({
-        time,
-        open,
-        high,
-        low,
-        close,
-        volume,
-      });
-    }
-
-    normalized.sort(
-      (left, right) =>
-        left.time - right.time
-    );
-
-    const deduped: Candle[] = [];
-    let lastTime = -1;
-
-    for (const candle of normalized) {
-      if (candle.time === lastTime) {
-        continue;
-      }
-
-      deduped.push(candle);
-      lastTime = candle.time;
-    }
-
-    return deduped;
-  }
-
   const levels = useMemo(() => {
     const result: ChartLevel[] = [];
-
-    if (isDailyInterval) {
-      return result;
-    }
 
     const gamma =
       extractGammaView(
@@ -1030,7 +901,6 @@ export default function StockSmartChart({
     targets,
     side,
     gammaData,
-    isDailyInterval,
   ]);
 
   const inlineGammaLevels =
@@ -1046,37 +916,10 @@ export default function StockSmartChart({
 
   useEffect(() => {
     let cancelled = false;
-    let refreshTimer: number | null = null;
-
-    const requestKey = `${symbol}:${interval}`;
 
     async function loadCandles() {
-      const controller =
-        new AbortController();
-
-      if (candlesRequestRef.current) {
-        candlesRequestRef.current.controller.abort();
-      }
-
-      candlesRequestRef.current = {
-        key: requestKey,
-        controller,
-      };
-
       setLoading(true);
       setError("");
-
-      const cachedCandles =
-        candlesCacheRef.current.get(
-          requestKey
-        );
-
-      if (cachedCandles) {
-        setCandles(cachedCandles);
-        setLoading(false);
-      } else {
-        setCandles([]);
-      }
 
       try {
         const response = await fetch(
@@ -1085,86 +928,29 @@ export default function StockSmartChart({
           )}/candles?interval=${interval}`,
           {
             cache: "no-store",
-            signal: controller.signal,
           }
         );
 
-        let payload: unknown = null;
-
-        try {
-          payload =
-            await response.json();
-        } catch {
-          throw new Error(
-            "تعذر قراءة استجابة الشموع."
-          );
-        }
-
-        const payloadRecord =
-          toRecord(payload);
+        const payload =
+          await response.json();
 
         if (!response.ok) {
           throw new Error(
-            String(
-              payloadRecord?.error ||
-                ""
-            ) ||
+            payload?.error ||
               "تعذر تحميل الشارت."
           );
         }
 
         if (!cancelled) {
-          const payloadCandles =
-            Array.isArray(
-              payloadRecord?.candles
-            )
-              ? payloadRecord.candles
-              : [];
-
-          const normalizedCandles =
-            normalizeCandles(
-              payloadCandles
-            );
-
-          candlesCacheRef.current.set(
-            requestKey,
-            normalizedCandles
-          );
-
-          if (
-            process.env.NODE_ENV ===
-            "development"
-          ) {
-            console.debug(
-              "[stock-chart-candles]",
-              {
-                symbol,
-                interval,
-                candleCount:
-                  normalizedCandles.length,
-                firstTime:
-                  normalizedCandles[0]
-                    ?.time,
-                lastTime:
-                  normalizedCandles.at(-1)
-                    ?.time,
-                hasDailyPattern,
-              }
-            );
-          }
-
           setCandles(
-            normalizedCandles
+            Array.isArray(
+              payload?.candles
+            )
+              ? payload.candles
+              : []
           );
         }
       } catch (loadError) {
-        if (
-          controller.signal.aborted ||
-          cancelled
-        ) {
-          return;
-        }
-
         if (!cancelled) {
           setError(
             loadError instanceof Error
@@ -1173,48 +959,26 @@ export default function StockSmartChart({
           );
         }
       } finally {
-        if (
-          candlesRequestRef.current
-            ?.key === requestKey
-        ) {
-          candlesRequestRef.current =
-            null;
-        }
-
         if (!cancelled) {
           setLoading(false);
         }
       }
     }
 
-    void loadCandles();
+    loadCandles();
 
-    if (interval !== 1440) {
-      refreshTimer = window.setInterval(
-        () => {
-          void loadCandles();
-        },
+    const refreshTimer =
+      window.setInterval(
+        loadCandles,
         60_000
       );
-    }
 
     return () => {
       cancelled = true;
 
-      if (
-        candlesRequestRef.current
-          ?.key === requestKey
-      ) {
-        candlesRequestRef.current.controller.abort();
-        candlesRequestRef.current =
-          null;
-      }
-
-      if (refreshTimer !== null) {
-        window.clearInterval(
-          refreshTimer
-        );
-      }
+      window.clearInterval(
+        refreshTimer
+      );
     };
   }, [symbol, interval]);
 
@@ -1294,29 +1058,8 @@ export default function StockSmartChart({
         }
       );
 
-    const volumeSeries =
-      chart.addSeries(
-        HistogramSeries,
-        {
-          priceScaleId: "",
-          priceLineVisible: false,
-          lastValueVisible: false,
-        }
-      );
-
-    chart.priceScale("").applyOptions(
-      {
-        scaleMargins: {
-          top: 0.82,
-          bottom: 0,
-        },
-      }
-    );
-
     chartRef.current = chart;
     seriesRef.current = series;
-    volumeSeriesRef.current =
-      volumeSeries;
 
     const resizeObserver =
       new ResizeObserver(() => {
@@ -1335,18 +1078,8 @@ export default function StockSmartChart({
 
       chart.remove();
 
-      if (
-        patternOverlayCleanupRef.current
-      ) {
-        patternOverlayCleanupRef.current();
-        patternOverlayCleanupRef.current =
-          null;
-      }
-
       chartRef.current = null;
       seriesRef.current = null;
-      volumeSeriesRef.current =
-        null;
       priceLinesRef.current = [];
       currentPriceLineRef.current =
         null;
@@ -1357,58 +1090,25 @@ export default function StockSmartChart({
     const chart = chartRef.current;
     const series =
       seriesRef.current;
-    const volumeSeries =
-      volumeSeriesRef.current;
 
     if (
       !chart ||
       !series ||
-      !volumeSeries ||
       candles.length === 0
     ) {
       return;
     }
 
-    try {
-      series.setData([]);
-      volumeSeries.setData([]);
-
-      series.setData(
-        candles.map((candle) => ({
-          time:
-            candle.time as UTCTimestamp,
-          open: candle.open,
-          high: candle.high,
-          low: candle.low,
-          close: candle.close,
-        }))
-      );
-
-      volumeSeries.setData(
-        candles.map((candle) => ({
-          time:
-            candle.time as UTCTimestamp,
-          value:
-            Number(candle.volume) || 0,
-          color:
-            candle.close >=
-            candle.open
-              ? "rgba(16, 185, 129, 0.35)"
-              : "rgba(244, 63, 94, 0.35)",
-        }))
-      );
-    } catch (chartDataError) {
-      setError(
-        chartDataError instanceof Error
-          ? chartDataError.message ===
-            "The string did not match the expected pattern."
-            ? "تعذر رسم الشموع الحالية بسبب صيغة بيانات غير متوقعة."
-            : chartDataError.message
-          : "تعذر رسم الشموع الحالية."
-      );
-
-      return;
-    }
+    series.setData(
+      candles.map((candle) => ({
+        time:
+          candle.time as UTCTimestamp,
+        open: candle.open,
+        high: candle.high,
+        low: candle.low,
+        close: candle.close,
+      }))
+    );
 
     if (
       currentPriceLineRef.current
@@ -1425,7 +1125,6 @@ export default function StockSmartChart({
     );
 
     if (
-      !isDailyInterval &&
       Number.isFinite(latestClose) &&
       latestClose > 0
     ) {
@@ -1444,7 +1143,7 @@ export default function StockSmartChart({
     chart
       .timeScale()
       .fitContent();
-  }, [candles, interval, hasDailyPattern]);
+  }, [candles]);
 
   useEffect(() => {
     const series =
@@ -1583,63 +1282,6 @@ export default function StockSmartChart({
     };
   }, [inlineGammaLevels]);
 
-  useEffect(() => {
-    if (
-      patternOverlayCleanupRef.current
-    ) {
-      patternOverlayCleanupRef.current();
-      patternOverlayCleanupRef.current =
-        null;
-    }
-
-    const chart = chartRef.current;
-    const series =
-      seriesRef.current;
-
-    if (
-      !chart ||
-      !series ||
-      candles.length === 0 ||
-      !hasDailyPattern
-    ) {
-      return;
-    }
-
-    try {
-      patternOverlayCleanupRef.current =
-        createPatternChartOverlay({
-          chart,
-          candlesSeries: series,
-          candles,
-          interval,
-          topPattern,
-          existingLevelPrices:
-            levels.map(
-              (level) => level.price
-            ),
-        });
-    } catch {
-      patternOverlayCleanupRef.current =
-        null;
-    }
-
-    return () => {
-      if (
-        patternOverlayCleanupRef.current
-      ) {
-        patternOverlayCleanupRef.current();
-        patternOverlayCleanupRef.current =
-          null;
-      }
-    };
-  }, [
-    candles,
-    interval,
-    levels,
-    topPattern,
-    hasDailyPattern,
-  ]);
-
   const directionLabel =
     side === "CALL"
       ? "سيناريو صاعد — صفقة CALL"
@@ -1672,40 +1314,29 @@ export default function StockSmartChart({
         </div>
 
         <div className="flex flex-wrap gap-2">
-          {[5, 15, 30, 60].map((value) => (
-            <button
-              key={value}
-              type="button"
-              onClick={() =>
-                setIntervalValue(value)
-              }
-              className={[
-                "rounded-xl border px-3 py-2 text-xs font-bold transition",
-                interval === value
-                  ? "border-cyan-400/40 bg-cyan-400/10 text-cyan-300"
-                  : "border-white/[0.07] bg-white/[0.03] text-slate-400 hover:text-white",
-              ].join(" ")}
-            >
-              {value === 60
-                ? "ساعة"
-                : `${value} د`}
-            </button>
-          ))}
-
-          <button
-            type="button"
-            onClick={() =>
-              setIntervalValue(1440)
-            }
-            className={[
-              "rounded-xl border px-3 py-2 text-xs font-bold transition",
-              interval === 1440
-                ? "border-cyan-400/40 bg-cyan-400/10 text-cyan-300"
-                : "border-white/[0.07] bg-white/[0.03] text-slate-400 hover:text-white",
-            ].join(" ")}
-          >
-            اليومي
-          </button>
+          {[5, 15, 30, 60].map(
+            (value) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() =>
+                  setIntervalValue(
+                    value
+                  )
+                }
+                className={[
+                  "rounded-xl border px-3 py-2 text-xs font-bold transition",
+                  interval === value
+                    ? "border-cyan-400/40 bg-cyan-400/10 text-cyan-300"
+                    : "border-white/[0.07] bg-white/[0.03] text-slate-400 hover:text-white",
+                ].join(" ")}
+              >
+                {value === 60
+                  ? "ساعة"
+                  : `${value} د`}
+              </button>
+            )
+          )}
         </div>
       </div>
 

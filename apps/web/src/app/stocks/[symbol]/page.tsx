@@ -1,6 +1,4 @@
 import { cookies } from "next/headers";
-import PatternSummaryCard from "../../../components/pattern-summary-card";
-import type { PatternSummaryCardPattern } from "../../../components/pattern-summary-card";
 import StockSmartChart from "../../../components/stock-smart-chart";
 import {
   analyzeMarketData,
@@ -15,10 +13,6 @@ type StockPageProps = {
   params: Promise<{
     symbol: string;
   }>;
-};
-
-type PatternsApiResponse = {
-  topPattern: PatternSummaryCardPattern | null;
 };
 
 function getBaseUrl() {
@@ -450,45 +444,6 @@ async function getAnalysis(symbol: string) {
   return result;
 }
 
-async function getTopPattern(symbol: string) {
-  const patternCookieStore = await cookies();
-  const patternCookieHeader = patternCookieStore
-    .getAll()
-    .map(({ name, value }) => `${name}=${encodeURIComponent(value)}`)
-    .join("; ");
-
-  try {
-    const response = await fetch(
-      `${getBaseUrl()}/api/stocks/${encodeURIComponent(symbol)}/patterns`,
-      {
-        headers: patternCookieHeader
-          ? { cookie: patternCookieHeader }
-          : undefined,
-        cache: "no-store",
-      },
-    );
-
-    const result = (await response.json()) as PatternsApiResponse | { error?: string };
-
-    if (!response.ok || !("topPattern" in result)) {
-      return {
-        topPattern: null,
-        patternsError: true,
-      };
-    }
-
-    return {
-      topPattern: result.topPattern,
-      patternsError: false,
-    };
-  } catch {
-    return {
-      topPattern: null,
-      patternsError: true,
-    };
-  }
-}
-
 export default async function StockAnalysisPage({
   params,
 }: StockPageProps) {
@@ -500,7 +455,6 @@ export default async function StockAnalysisPage({
     .replace(/[^A-Z.-]/g, "");
 
   let analysis: AnalysisResponse;
-  const patternState = await getTopPattern(stockSymbol);
 
   try {
     analysis = await getAnalysis(stockSymbol);
@@ -976,7 +930,6 @@ export default async function StockAnalysisPage({
             })
           )}
           side={decision.side}
-          topPattern={patternState.topPattern}
           gammaData={{
             gammaStructure:
               chartOptions.gammaStructure ??
@@ -1023,13 +976,6 @@ export default async function StockAnalysisPage({
               chartOptions.zeroGammaLevel ??
               null,
           }}
-        />
-
-        <PatternSummaryCard
-          symbol={analysis.symbol}
-          topPattern={patternState.topPattern}
-          error={patternState.patternsError}
-          loading={false}
         />
 
         <section className="mb-5 rounded-3xl border border-slate-800 bg-slate-900/80 p-6">
