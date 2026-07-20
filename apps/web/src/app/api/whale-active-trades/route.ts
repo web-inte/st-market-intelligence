@@ -615,7 +615,7 @@ export async function GET() {
                     : original.currentPrice;
 
                 if (
-                  originalCostPrice <= 3
+                  originalCostPrice <= 2.7
                 ) {
                   selected = original;
                   trackingTicker =
@@ -643,65 +643,12 @@ export async function GET() {
                     );
 
                   if (!alternative) {
-                    const rejectedAt =
-                      new Date().toISOString();
-
-                    const {
-                      data: rejected,
-                      error: rejectError,
-                    } = await supabase
-                      .from(
-                        "whale_trade_setups"
-                      )
-                      .update({
-                        status:
-                          "PENDING_CONTRACT",
-                        contract_status:
-                          "PENDING",
-                        tracking_option_ticker:
-                          null,
-                        entry_price:
-                          null,
-                        current_price:
-                          null,
-                        best_price:
-                          null,
-                        contract_bid:
-                          null,
-                        contract_ask:
-                          null,
-                        contract_profit_dollars:
-                          null,
-                        contract_profit_pct:
-                          null,
-                        best_profit_dollars:
-                          null,
-                        best_profit_pct:
-                          null,
-                        alternative_reason:
-                          "تم رفض التفعيل: لا يوجد عقد بسعر 3.00$ أو أقل",
-                        last_error:
-                          null,
-                        updated_at:
-                          rejectedAt,
-                      })
-                      .eq("id", id)
-                      .select("*")
-                      .single();
-
-                    if (
-                      rejectError ||
-                      !rejected
-                    ) {
-                      throw (
-                        rejectError ||
-                        new Error(
-                          "تعذر تحديث حالة العقد المرفوض"
-                        )
-                      );
-                    }
-
-                    return rejected;
+                    selected = original;
+                    trackingTicker =
+                      original.ticker;
+                    isAlternative = false;
+                    alternativeReason =
+                      "لا يوجد عقد بديل مناسب ضمن الحد السعري 2.70$";
                   } else {
                     selected =
                       alternative;
@@ -746,8 +693,9 @@ export async function GET() {
 
               const profitDollars =
                 round(
-                  selected.currentPrice -
-                    entryPrice
+                  (selected.currentPrice -
+                    entryPrice) *
+                    100
                 );
 
               const profitPct =
@@ -762,8 +710,9 @@ export async function GET() {
 
               const bestProfitDollars =
                 round(
-                  bestPrice -
-                    entryPrice
+                  (bestPrice -
+                    entryPrice) *
+                    100
                 );
 
               const bestProfitPct =
@@ -775,169 +724,6 @@ export async function GET() {
                         100
                     )
                   : 0;
-
-              const gammaTargets =
-                Array.isArray(
-                  row.gamma_targets
-                )
-                  ? row.gamma_targets
-                      .map((item: unknown) => {
-                        const target =
-                          record(item);
-
-                        return {
-                          index:
-                            numberValue(
-                              target.index
-                            ),
-                          price:
-                            numberValue(
-                              target.price
-                            ),
-                        };
-                      })
-                      .filter(
-                        (
-                          target: {
-                            index: number;
-                            price: number;
-                          }
-                        ) =>
-                          target.index > 0 &&
-                          target.price > 0
-                      )
-                      .sort(
-                        (
-                          a: {
-                            index: number;
-                            price: number;
-                          },
-                          b: {
-                            index: number;
-                            price: number;
-                          }
-                        ) =>
-                          a.index -
-                          b.index
-                      )
-                  : [];
-
-              const stockPrice =
-                selected.stockPrice;
-
-              const previousHighestTarget =
-                Math.max(
-                  0,
-                  Math.min(
-                    3,
-                    Math.floor(
-                      numberValue(
-                        row.highest_target_hit
-                      )
-                    )
-                  )
-                );
-
-              const reachedTarget =
-                gammaTargets.reduce(
-                  (
-                    highest: number,
-                    target: {
-                      index: number;
-                      price: number;
-                    }
-                  ) => {
-                    const reached =
-                      originalSide === "CALL"
-                        ? stockPrice >=
-                          target.price
-                        : stockPrice <=
-                          target.price;
-
-                    return reached
-                      ? Math.max(
-                          highest,
-                          target.index
-                        )
-                      : highest;
-                  },
-                  0
-                );
-
-              const highestTargetHit =
-                Math.max(
-                  previousHighestTarget,
-                  reachedTarget
-                );
-
-              const stopPrice =
-                numberValue(
-                  row.stop_price
-                );
-
-              const isStopped =
-                stopPrice > 0 &&
-                (
-                  originalSide === "CALL"
-                    ? stockPrice <=
-                      stopPrice
-                    : stockPrice >=
-                      stopPrice
-                );
-
-              const expiration =
-                selected.expiration ||
-                textValue(
-                  row.original_expiration
-                ) ||
-                getExpiration(source);
-
-              const expirationTime =
-                expiration
-                  ? new Date(
-                      `${expiration}T23:59:59Z`
-                    ).getTime()
-                  : NaN;
-
-              const isExpired =
-                Number.isFinite(
-                  expirationTime
-                ) &&
-                expirationTime <
-                  Date.now();
-
-              const nextStatus =
-                isExpired
-                  ? "EXPIRED"
-                  : isStopped
-                    ? "STOPPED"
-                    : highestTargetHit >= 3
-                      ? "TARGET_3"
-                      : highestTargetHit >= 2
-                        ? "TARGET_2"
-                        : highestTargetHit >= 1
-                          ? "TARGET_1"
-                          : "ACTIVE";
-
-              const nextContractStatus =
-                isExpired
-                  ? "EXPIRED"
-                  : isStopped
-                    ? "STOPPED"
-                    : "ACTIVE";
-
-              const closedAt =
-                isExpired || isStopped
-                  ? row.closed_at ||
-                    selected.quoteAt
-                  : null;
-
-              const closeReason =
-                isExpired
-                  ? "انتهى عقد المتابعة"
-                  : isStopped
-                    ? "كسر سعر السهم وقف القاما"
-                    : null;
 
               const {
                 data: updated,
@@ -995,9 +781,6 @@ export async function GET() {
                   best_profit_pct:
                     bestProfitPct,
 
-                  highest_target_hit:
-                    highestTargetHit,
-
                   contract_quote_at:
                     selected.quoteAt,
 
@@ -1030,21 +813,13 @@ export async function GET() {
                           selected.stockPrice
                         ),
 
-                  status:
-                    nextStatus,
-
+                  status: "ACTIVE",
                   contract_status:
-                    nextContractStatus,
+                    "ACTIVE",
 
                   activated_at:
                     row.activated_at ||
                     selected.quoteAt,
-
-                  closed_at:
-                    closedAt,
-
-                  close_reason:
-                    closeReason,
 
                   last_error: null,
                   updated_at:
@@ -1101,63 +876,11 @@ export async function GET() {
         )
       );
 
-    const readyTrades =
-      refreshed.filter((trade) => {
-        const status =
-          textValue(
-            trade.status
-          ).toUpperCase();
-
-        const trackingTicker =
-          textValue(
-            trade.tracking_option_ticker
-          );
-
-        const trackingStrike =
-          numberValue(
-            trade.tracking_strike
-          );
-
-        const trackingExpiration =
-          textValue(
-            trade.tracking_expiration
-          );
-
-        const entryPrice =
-          numberValue(
-            trade.entry_price
-          );
-
-        const currentPrice =
-          numberValue(
-            trade.current_price
-          );
-
-        const visibleStatus =
-          status === "ACTIVE" ||
-          status === "TARGET_1" ||
-          status === "TARGET_2" ||
-          status === "TARGET_3" ||
-          status === "STOPPED" ||
-          status === "EXPIRED";
-
-        return (
-          visibleStatus &&
-          Boolean(trackingTicker) &&
-          trackingStrike > 0 &&
-          Boolean(trackingExpiration) &&
-          entryPrice > 0 &&
-          currentPrice > 0
-        );
-      });
-
     return NextResponse.json(
       {
         ok: true,
-        count:
-          readyTrades.length,
-        trades:
-          readyTrades,
+        count: refreshed.length,
+        trades: refreshed,
         updatedAt:
           new Date().toISOString(),
       },

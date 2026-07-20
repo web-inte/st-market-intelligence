@@ -1,10 +1,10 @@
 "use client";
 
 import {
-  CandlestickSeries,
   ColorType,
   CrosshairMode,
   LineStyle,
+  LineSeries,
   createChart,
   type IChartApi,
   type IPriceLine,
@@ -15,17 +15,7 @@ import {
   useEffect,
   useMemo,
   useRef,
-  useState,
 } from "react";
-
-type Candle = {
-  time: number;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  volume?: number;
-};
 
 type TargetLevel = {
   index: number;
@@ -40,7 +30,6 @@ type StockSmartChartProps = {
   targets: TargetLevel[];
   side: "CALL" | "PUT" | "NEUTRAL";
   gammaData?: unknown;
-  candlesEndpoint?: string;
 };
 
 type ChartLevel = {
@@ -584,7 +573,6 @@ export default function StockSmartChart({
   targets,
   side,
   gammaData,
-  candlesEndpoint,
 }: StockSmartChartProps) {
   const containerRef =
     useRef<HTMLDivElement | null>(
@@ -595,7 +583,7 @@ export default function StockSmartChart({
     useRef<IChartApi | null>(null);
 
   const seriesRef =
-    useRef<ISeriesApi<"Candlestick"> | null>(
+    useRef<ISeriesApi<"Line"> | null>(
       null
     );
 
@@ -609,18 +597,6 @@ export default function StockSmartChart({
     useRef<HTMLDivElement | null>(
       null
     );
-
-  const [candles, setCandles] =
-    useState<Candle[]>([]);
-
-  const [loading, setLoading] =
-    useState(true);
-
-  const [error, setError] =
-    useState("");
-
-  const [interval, setIntervalValue] =
-    useState(15);
 
   const levels = useMemo(() => {
     const result: ChartLevel[] = [];
@@ -917,81 +893,6 @@ export default function StockSmartChart({
     );
 
   useEffect(() => {
-    let cancelled = false;
-
-    async function loadCandles() {
-      setLoading(true);
-      setError("");
-
-      try {
-        const endpoint =
-          candlesEndpoint ||
-          `/api/stocks/${encodeURIComponent(
-            symbol
-          )}/candles`;
-
-        const separator =
-          endpoint.includes("?") ? "&" : "?";
-
-        const response = await fetch(
-          `${endpoint}${separator}interval=${interval}`,
-          {
-            cache: "no-store",
-          }
-        );
-
-        const payload =
-          await response.json();
-
-        if (!response.ok) {
-          throw new Error(
-            payload?.error ||
-              "تعذر تحميل الشارت."
-          );
-        }
-
-        if (!cancelled) {
-          setCandles(
-            Array.isArray(
-              payload?.candles
-            )
-              ? payload.candles
-              : []
-          );
-        }
-      } catch (loadError) {
-        if (!cancelled) {
-          setError(
-            loadError instanceof Error
-              ? loadError.message
-              : "تعذر تحميل الشارت."
-          );
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    }
-
-    loadCandles();
-
-    const refreshTimer =
-      window.setInterval(
-        loadCandles,
-        60_000
-      );
-
-    return () => {
-      cancelled = true;
-
-      window.clearInterval(
-        refreshTimer
-      );
-    };
-  }, [symbol, interval, candlesEndpoint]);
-
-  useEffect(() => {
     const container =
       containerRef.current;
 
@@ -1054,14 +955,11 @@ export default function StockSmartChart({
 
     const series =
       chart.addSeries(
-        CandlestickSeries,
+        LineSeries,
         {
-          upColor: "#10b981",
-          downColor: "#f43f5e",
-          wickUpColor: "#34d399",
-          wickDownColor:
-            "#fb7185",
-          borderVisible: false,
+          color: "rgba(0, 0, 0, 0)",
+          lineWidth: 1,
+          crosshairMarkerVisible: false,
           priceLineVisible: false,
           lastValueVisible: false,
         }
@@ -1100,24 +998,58 @@ export default function StockSmartChart({
     const series =
       seriesRef.current;
 
-    if (
-      !chart ||
-      !series ||
-      candles.length === 0
-    ) {
+    if (!chart || !series) {
       return;
     }
 
-    series.setData(
-      candles.map((candle) => ({
-        time:
-          candle.time as UTCTimestamp,
-        open: candle.open,
-        high: candle.high,
-        low: candle.low,
-        close: candle.close,
-      }))
+    const visiblePrices = [
+      currentPrice,
+      ...levels.map(
+        (level) => level.price
+      ),
+    ].filter(
+      (price) =>
+        Number.isFinite(price) &&
+        price > 0
     );
+
+    const fallbackPrice =
+      visiblePrices[0] ?? 1;
+
+    const minPrice = Math.min(
+      ...visiblePrices,
+      fallbackPrice
+    );
+
+    const maxPrice = Math.max(
+      ...visiblePrices,
+      fallbackPrice
+    );
+
+    const padding = Math.max(
+      (maxPrice - minPrice) * 0.08,
+      fallbackPrice * 0.01,
+      1
+    );
+
+    const now = Math.floor(
+      Date.now() / 1000
+    );
+
+    series.setData([
+      {
+        time:
+          (now - 60) as UTCTimestamp,
+        value: Math.max(
+          minPrice - padding,
+          0.01
+        ),
+      },
+      {
+        time: now as UTCTimestamp,
+        value: maxPrice + padding,
+      },
+    ]);
 
     if (
       currentPriceLineRef.current
@@ -1127,19 +1059,13 @@ export default function StockSmartChart({
       );
     }
 
-    const latestClose = Number(
-      candles[
-        candles.length - 1
-      ]?.close || 0
-    );
-
     if (
-      Number.isFinite(latestClose) &&
-      latestClose > 0
+      Number.isFinite(currentPrice) &&
+      currentPrice > 0
     ) {
       currentPriceLineRef.current =
         series.createPriceLine({
-          price: latestClose,
+          price: currentPrice,
           color: "#ffffff",
           lineWidth: 2,
           lineStyle:
@@ -1152,7 +1078,7 @@ export default function StockSmartChart({
     chart
       .timeScale()
       .fitContent();
-  }, [candles]);
+  }, [currentPrice, levels]);
 
   useEffect(() => {
     const series =
@@ -1322,31 +1248,6 @@ export default function StockSmartChart({
           </p>
         </div>
 
-        <div className="flex flex-wrap gap-2">
-          {[5, 15, 30, 60].map(
-            (value) => (
-              <button
-                key={value}
-                type="button"
-                onClick={() =>
-                  setIntervalValue(
-                    value
-                  )
-                }
-                className={[
-                  "rounded-xl border px-3 py-2 text-xs font-bold transition",
-                  interval === value
-                    ? "border-cyan-400/40 bg-cyan-400/10 text-cyan-300"
-                    : "border-white/[0.07] bg-white/[0.03] text-slate-400 hover:text-white",
-                ].join(" ")}
-              >
-                {value === 60
-                  ? "ساعة"
-                  : `${value} د`}
-              </button>
-            )
-          )}
-        </div>
       </div>
 
       {side === "NEUTRAL" ? (
@@ -1356,17 +1257,9 @@ export default function StockSmartChart({
       ) : null}
 
       <div className="relative">
-        {loading ? (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-950/80 text-sm font-bold text-cyan-300">
-            جاري تحميل شموع {symbol}...
-          </div>
-        ) : null}
-
-        {error ? (
-          <div className="m-5 rounded-2xl border border-rose-400/20 bg-rose-400/[0.06] p-5 text-sm text-rose-200">
-            {error}
-          </div>
-        ) : null}
+        <div className="mx-5 mt-5 rounded-2xl border border-cyan-300/20 bg-slate-900/55 px-4 py-3 text-right text-xs leading-6 text-slate-300 backdrop-blur-sm sm:mx-6">
+          يفضّل رسم مستويات الدخول والوقف والأهداف على الشارت الفعلي في TradingView، ومتابعة حركة السهم من هناك للحصول على تحديث أدق وأسرع.
+        </div>
 
         <div className="relative h-[480px] w-full">
           <div
