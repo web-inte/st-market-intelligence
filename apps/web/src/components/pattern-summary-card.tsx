@@ -100,11 +100,6 @@ export default function PatternSummaryCard({
           <h2 className="mt-2 text-2xl font-black text-white">
             تحليل النماذج الكلاسيكية
           </h2>
-          <div className="mt-3 max-w-3xl rounded-2xl border border-cyan-400/20 bg-slate-950/70 px-4 py-3 text-right">
-            <p className="text-sm leading-7 text-slate-300">
-              يرجى اختيار فريم اليومي لمتابعة النموذج الفني بدقة. ولأن بيانات الشموع في المنصة قد تتأخر قليلًا أو تختلف بشكل بسيط عن TradingView، يُفضّل تأكيد النموذج ورسم خطوط الاختراق والإلغاء والأهداف على شارت TradingView الفعلي ومتابعته من هناك.
-            </p>
-          </div>
         </div>
       </div>
 
