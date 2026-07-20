@@ -590,9 +590,6 @@ export default function StockSmartChart({
   const priceLinesRef =
     useRef<IPriceLine[]>([]);
 
-  const currentPriceLineRef =
-    useRef<IPriceLine | null>(null);
-
   const gammaLabelsLayerRef =
     useRef<HTMLDivElement | null>(
       null
@@ -988,8 +985,6 @@ export default function StockSmartChart({
       chartRef.current = null;
       seriesRef.current = null;
       priceLinesRef.current = [];
-      currentPriceLineRef.current =
-        null;
     };
   }, []);
 
@@ -1050,30 +1045,6 @@ export default function StockSmartChart({
         value: maxPrice + padding,
       },
     ]);
-
-    if (
-      currentPriceLineRef.current
-    ) {
-      series.removePriceLine(
-        currentPriceLineRef.current
-      );
-    }
-
-    if (
-      Number.isFinite(currentPrice) &&
-      currentPrice > 0
-    ) {
-      currentPriceLineRef.current =
-        series.createPriceLine({
-          price: currentPrice,
-          color: "#ffffff",
-          lineWidth: 2,
-          lineStyle:
-            LineStyle.Dotted,
-          axisLabelVisible: true,
-          title: "السعر الحالي",
-        });
-    }
 
     chart
       .timeScale()
