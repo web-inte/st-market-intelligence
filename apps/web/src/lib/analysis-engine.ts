@@ -521,13 +521,76 @@ export function buildSummary(
 export function buildAnalysis(
   analysis: AnalysisResponse
 ) {
-  const selectedContract =
-    selectContract(analysis);
+  /*
+   * تحديد الاتجاه النهائي بتصويت ثلاثة محركات مستقلة:
+   * 1) تدفق العقود
+   * 2) Gamma / GEX
+   * 3) الزخم السعري
+   *
+   * لا يكفي محرك واحد وحده لإجبار الاتجاه.
+   */
+  let callVotes = 0;
+  let putVotes = 0;
 
-  const flowScore = calculateFlowScore(
-    analysis.options.callVolumePct,
-    analysis.options.putVolumePct
-  );
+  const flowSide =
+    String(
+      analysis.options.volumeBias ||
+        "NEUTRAL"
+    ).toUpperCase();
+
+  if (flowSide === "CALL") {
+    callVotes += 1;
+  } else if (flowSide === "PUT") {
+    putVotes += 1;
+  }
+
+  const estimatedNetGex =
+    Number(
+      analysis.options.estimatedNetGex
+    ) || 0;
+
+  if (estimatedNetGex > 0) {
+    callVotes += 1;
+  } else if (estimatedNetGex < 0) {
+    putVotes += 1;
+  }
+
+  const changePct =
+    Number(
+      analysis.quote.changePct
+    ) || 0;
+
+  if (changePct > 0) {
+    callVotes += 1;
+  } else if (changePct < 0) {
+    putVotes += 1;
+  }
+
+  const resolvedSide: Side =
+    callVotes >= 2 &&
+    callVotes > putVotes
+      ? "CALL"
+      : putVotes >= 2 &&
+          putVotes > callVotes
+        ? "PUT"
+        : "NEUTRAL";
+
+  /*
+   * اختيار العقد بعد تثبيت الاتجاه،
+   * حتى لا يظهر عقد CALL مع قرار PUT أو العكس.
+   */
+  const selectedContract =
+    resolvedSide === "CALL"
+      ? analysis.options.bestCall
+      : resolvedSide === "PUT"
+        ? analysis.options.bestPut
+        : null;
+
+  const flowScore =
+    calculateFlowScore(
+      analysis.options.callVolumePct,
+      analysis.options.putVolumePct
+    );
 
   const contractScore =
     calculateContractScore(
@@ -544,51 +607,51 @@ export function buildAnalysis(
       flowScore,
       contractScore,
       momentumScore,
-      analysis.options.volumeBias,
+      resolvedSide,
       analysis.quote.changePct
     );
 
-  const preliminaryDecision = buildDecision(
-  opportunityScore,
-  analysis.options.volumeBias
-);
+  const gammaScore =
+    calculateGammaScore(
+      resolvedSide,
+      analysis.options.estimatedNetGex
+    );
 
-const gammaScore = calculateGammaScore(
-  preliminaryDecision.side,
-  analysis.options.estimatedNetGex
-);
+  const consensus =
+    calculateConsensus(
+      resolvedSide,
+      flowScore,
+      gammaScore,
+      momentumScore,
+      contractScore,
+      analysis.quote.changePct,
+      analysis.options.estimatedNetGex
+    );
 
-const consensus = calculateConsensus(
-  preliminaryDecision.side,
-  flowScore,
-  gammaScore,
-  momentumScore,
-  contractScore,
-  analysis.quote.changePct,
-  analysis.options.estimatedNetGex
-);
+  const adjustedOpportunityScore =
+    Math.max(
+      0,
+      Math.min(
+        100,
+        Math.round(
+          opportunityScore * 0.8 +
+            consensus.score * 0.2
+        )
+      )
+    );
 
-const adjustedOpportunityScore = Math.max(
-  0,
-  Math.min(
-    100,
-    Math.round(
-      opportunityScore * 0.8 +
-        consensus.score * 0.2
-    )
-  )
-);
+  const decision =
+    buildDecision(
+      adjustedOpportunityScore,
+      resolvedSide
+    );
 
-const decision = buildDecision(
-  adjustedOpportunityScore,
-  analysis.options.volumeBias
-);
-
-const gammaRisk = calculateGammaRisk(
-  decision.side,
-  analysis.quote.price,
-  analysis.options.gammaStructure
-);
+  const gammaRisk =
+    calculateGammaRisk(
+      decision.side,
+      analysis.quote.price,
+      analysis.options.gammaStructure
+    );
 
   return {
     decision,
