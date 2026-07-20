@@ -590,6 +590,164 @@ export default function SpxWhalesPage() {
           signal?.message ||
           "السوق مفتوح — لا توجد فرصة SPX مطابقة للشروط حاليًا.";
 
+  const spxPrice = Number(
+    market?.stockPrice || 0
+  );
+
+  const flowGap = Number(
+    market?.flowGap || 0
+  );
+
+  const marketStructureNotes: string[] = [];
+
+  if (gamma) {
+    marketStructureNotes.push(
+      gamma.netGex < 0
+        ? "🔴 Net GEX سالب — السوق أكثر قابلية لاتساع الحركة وارتفاع التقلب."
+        : gamma.netGex > 0
+          ? "🟢 Net GEX موجب — تحركات صناع السوق قد تساعد على تهدئة التقلب."
+          : "🟡 Net GEX متعادل — لا توجد أفضلية واضحة من هيكل القاما."
+    );
+
+    if (
+      spxPrice > 0 &&
+      gamma.zeroGamma > 0
+    ) {
+      marketStructureNotes.push(
+        spxPrice > gamma.zeroGamma
+          ? "🟢 السعر أعلى Zero Gamma — هيكل السعر يميل لصالح المشترين."
+          : spxPrice < gamma.zeroGamma
+            ? "🔴 السعر أسفل Zero Gamma — هيكل السعر يميل لصالح البائعين."
+            : "🟡 السعر عند Zero Gamma — السوق قريب من منطقة تحول مهمة."
+      );
+    }
+
+    marketStructureNotes.push(
+      market?.gammaChop
+        ? "🔴 Gamma Chop نشط — احتمالية التذبذب والاختراقات الكاذبة مرتفعة."
+        : "🟢 لا توجد حالة Gamma Chop — الحركة أكثر ملاءمة لبناء اتجاه."
+    );
+
+    if (
+      spxPrice > 0 &&
+      gamma.magnet > 0
+    ) {
+      const distanceToMagnet =
+        Math.abs(
+          spxPrice - gamma.magnet
+        );
+
+      marketStructureNotes.push(
+        distanceToMagnet <= 10
+          ? `🟡 السعر قريب من Magnet بفارق ${formatNumber(
+              distanceToMagnet,
+              0
+            )} نقاط — احتمال الانجذاب إليه مرتفع.`
+          : `🔵 Magnet يبعد ${formatNumber(
+              distanceToMagnet,
+              0
+            )} نقطة عن السعر الحالي.`
+      );
+    }
+  }
+
+  const gammaStructureNotes: string[] = [];
+
+  if (gamma) {
+    if (
+      spxPrice > 0 &&
+      gamma.callWall > 0
+    ) {
+      const callWallDistance =
+        gamma.callWall - spxPrice;
+
+      gammaStructureNotes.push(
+        callWallDistance > 0
+          ? `🟢 Call Wall عند ${formatNumber(
+              gamma.callWall,
+              0
+            )} ويبعد ${formatNumber(
+              callWallDistance,
+              0
+            )} نقطة — يمثل المقاومة الرئيسية أعلى السعر.`
+          : `🟡 السعر عند أو أعلى Call Wall ${formatNumber(
+              gamma.callWall,
+              0
+            )} — راقب ثبات الاختراق قبل الاعتماد على استمرار الصعود.`
+      );
+    }
+
+    if (
+      spxPrice > 0 &&
+      gamma.putWall > 0
+    ) {
+      const putWallDistance =
+        spxPrice - gamma.putWall;
+
+      gammaStructureNotes.push(
+        putWallDistance > 0
+          ? `🔴 Put Wall عند ${formatNumber(
+              gamma.putWall,
+              0
+            )} ويبعد ${formatNumber(
+              putWallDistance,
+              0
+            )} نقطة — يمثل الدعم الرئيسي أسفل السعر.`
+          : `🟡 السعر عند أو أسفل Put Wall ${formatNumber(
+              gamma.putWall,
+              0
+            )} — كسر المستوى قد يوسع الحركة الهابطة.`
+      );
+    }
+
+    gammaStructureNotes.push(
+      `🟢 أقوى Gamma CALL عند سترايك ${formatNumber(
+        gamma.strongestCallGammaStrike,
+        0
+      )} بقوة ${compactNumber(
+        gamma.strongestCallGammaValue
+      )}.`
+    );
+
+    gammaStructureNotes.push(
+      `🔴 أقوى Gamma PUT عند سترايك ${formatNumber(
+        gamma.strongestPutGammaStrike,
+        0
+      )} بقوة ${compactNumber(
+        gamma.strongestPutGammaValue
+      )}.`
+    );
+  }
+
+  const flowDirection =
+    market?.direction || "NEUTRAL";
+
+  const systemScore = Math.max(
+    0,
+    Math.min(
+      100,
+      Math.round(
+        50 +
+          Math.min(Math.abs(flowGap), 20) * 1.5 +
+          (market?.gammaChop ? -20 : 10) +
+          (flowDirection === "NEUTRAL" ? -15 : 10)
+      )
+    )
+  );
+
+  const systemDirection =
+    market?.gammaChop ||
+    flowDirection === "NEUTRAL"
+      ? "انتظار"
+      : flowDirection;
+
+  const systemSummary =
+    systemDirection === "CALL"
+      ? "الأفضلية الحالية تميل إلى CALL، بشرط وجود مساحة كافية قبل Call Wall واستمرار تفوق تدفق CALL."
+      : systemDirection === "PUT"
+        ? "الأفضلية الحالية تميل إلى PUT، بشرط بقاء الضغط البيعي ووجود مساحة كافية قبل Put Wall."
+        : "لا توجد أفضلية كافية حاليًا، والأفضل انتظار اتساع فرق التدفق أو خروج السعر من منطقة التذبذب.";
+
   return (
     <main
       dir="rtl"
@@ -826,6 +984,94 @@ export default function SpxWhalesPage() {
                 }
                 color="text-rose-300"
               />
+            </section>
+
+
+            <section className="mt-6 grid gap-4 lg:grid-cols-3">
+              <article className="rounded-3xl border border-cyan-400/20 bg-cyan-400/[0.05] p-5">
+                <p className="text-xs font-black text-cyan-300">
+                  المرحلة الأولى
+                </p>
+
+                <h2 className="mt-2 text-xl font-black">
+                  هيكل السوق
+                </h2>
+
+                <div className="mt-4 space-y-3 text-sm font-semibold leading-7 text-slate-300">
+                  {marketStructureNotes.length > 0 ? (
+                    marketStructureNotes.map(
+                      (note) => (
+                        <p key={note}>
+                          {note}
+                        </p>
+                      )
+                    )
+                  ) : (
+                    <p>
+                      لا تتوفر بيانات كافية لتحليل هيكل السوق حاليًا.
+                    </p>
+                  )}
+                </div>
+              </article>
+
+              <article className="rounded-3xl border border-violet-400/20 bg-violet-400/[0.05] p-5">
+                <p className="text-xs font-black text-violet-300">
+                  المرحلة الثانية
+                </p>
+
+                <h2 className="mt-2 text-xl font-black">
+                  تحليل مستويات القاما
+                </h2>
+
+                <div className="mt-4 space-y-3 text-sm font-semibold leading-7 text-slate-300">
+                  {gammaStructureNotes.length > 0 ? (
+                    gammaStructureNotes.map(
+                      (note) => (
+                        <p key={note}>
+                          {note}
+                        </p>
+                      )
+                    )
+                  ) : (
+                    <p>
+                      لا تتوفر مستويات قاما كافية للتحليل حاليًا.
+                    </p>
+                  )}
+                </div>
+              </article>
+
+              <article className="rounded-3xl border border-fuchsia-400/20 bg-fuchsia-400/[0.05] p-5">
+                <p className="text-xs font-black text-fuchsia-300">
+                  المرحلة الثالثة
+                </p>
+
+                <h2 className="mt-2 text-xl font-black">
+                  قرار النظام
+                </h2>
+
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <span className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm font-black">
+                    التقييم: {systemScore}/100
+                  </span>
+
+                  <span
+                    className={[
+                      "rounded-full border px-3 py-2 text-sm font-black",
+                      systemDirection === "CALL"
+                        ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-300"
+                        : systemDirection === "PUT"
+                          ? "border-rose-400/30 bg-rose-400/10 text-rose-300"
+                          : "border-amber-400/30 bg-amber-400/10 text-amber-300",
+                    ].join(" ")}
+                  >
+                    الاتجاه: {systemDirection}
+                  </span>
+                </div>
+
+                <p className="mt-4 text-sm font-semibold leading-7 text-slate-300">
+                  {systemSummary}
+                </p>
+              </article>
             </section>
 
             <section className="mt-6">
