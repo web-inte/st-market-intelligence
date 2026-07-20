@@ -1,5 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import {
+  buildGammaStructure,
+  type GammaInputContract,
+} from "@/lib/gamma-structure";
+
+import {
+  buildGammaStopPrice,
+  buildGammaTargets,
+} from "@/lib/gamma-trade-levels";
+
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
@@ -1012,6 +1022,236 @@ async function saveWhaleTrades(
   return JSON.parse(responseText);
 }
 
+
+type SavedWhaleTrade = WhaleTradeRow & {
+  id?: number | string;
+};
+
+function daysUntilExpiration(
+  expiration: string
+) {
+  const expirationTime =
+    new Date(
+      `${expiration}T23:59:59Z`
+    ).getTime();
+
+  if (!Number.isFinite(expirationTime)) {
+    return null;
+  }
+
+  return Math.ceil(
+    (expirationTime - Date.now()) /
+      86_400_000
+  );
+}
+
+async function syncWhaleTradeSetups(
+  savedRows: SavedWhaleTrade[],
+  contractsBySymbol: Map<
+    string,
+    MassiveContract[]
+  >,
+  supabaseUrl: string,
+  supabaseSecret: string
+) {
+  const eligibleRows = savedRows
+    .filter((row) => {
+      const whaleTradeId =
+        Number(row.id);
+
+      const daysToExpiration =
+        daysUntilExpiration(
+          row.expiration
+        );
+
+      return (
+        Number.isFinite(whaleTradeId) &&
+        whaleTradeId > 0 &&
+        row.whale_score >= 80 &&
+        row.execution_side === "BUY" &&
+        row.execution_confidence >= 65 &&
+        row.market_bias !== "NEUTRAL" &&
+        daysToExpiration !== null &&
+        daysToExpiration >= 1 &&
+        daysToExpiration <= 14
+      );
+    })
+    .map((row) => {
+      const symbolContracts =
+        contractsBySymbol.get(
+          row.symbol
+        ) || [];
+
+      const gammaContracts:
+        GammaInputContract[] =
+        symbolContracts
+          .map((contract) => ({
+            type:
+              contract.details?.contract_type ===
+              "put"
+                ? "put" as const
+                : "call" as const,
+
+            strike:
+              safeNumber(
+                contract.details?.strike_price
+              ),
+
+            openInterest:
+              safeNumber(
+                contract.open_interest
+              ),
+
+            gamma:
+              safeNumber(
+                contract.greeks?.gamma
+              ),
+          }))
+          .filter(
+            (contract) =>
+              contract.strike > 0 &&
+              contract.openInterest > 0 &&
+              contract.gamma !== 0
+          );
+
+      const gammaStructure =
+        buildGammaStructure(
+          gammaContracts,
+          row.stock_price
+        );
+
+      const side =
+        row.contract_type === "put"
+          ? "PUT" as const
+          : "CALL" as const;
+
+      const stopPrice =
+        buildGammaStopPrice(
+          gammaStructure,
+          side,
+          row.stock_price,
+          row.whale_score
+        );
+
+      const gammaTargets =
+        buildGammaTargets(
+          gammaStructure,
+          side,
+          row.stock_price,
+          stopPrice,
+          row.whale_score
+        );
+
+      return {
+        whale_trade_id:
+          Number(row.id),
+
+        symbol:
+          row.symbol,
+
+        original_option_ticker:
+          row.option_ticker,
+
+        original_contract_type:
+          row.contract_type.toUpperCase(),
+
+        original_strike:
+          row.strike,
+
+        original_expiration:
+          row.expiration,
+
+        original_contract_price:
+          row.contract_price,
+
+        premium_value:
+          row.premium_value,
+
+        stock_entry_price:
+          row.stock_price,
+
+        stop_price:
+          stopPrice,
+
+        gamma_targets:
+          gammaTargets,
+
+        gamma_snapshot:
+          gammaStructure,
+
+        source_snapshot: {
+          source:
+            "whale-trades-scan",
+          captured_at:
+            new Date().toISOString(),
+          raw: {
+            full_processed_row:
+              row,
+          },
+        },
+
+        status:
+          "PENDING_CONTRACT",
+
+        contract_status:
+          "PENDING",
+      };
+    });
+
+  if (eligibleRows.length === 0) {
+    return {
+      eligible: 0,
+      inserted: 0,
+    };
+  }
+
+  const response = await fetch(
+    `${supabaseUrl}/rest/v1/whale_trade_setups?on_conflict=whale_trade_id`,
+    {
+      method: "POST",
+      headers: {
+        apikey:
+          supabaseSecret,
+        Authorization:
+          `Bearer ${supabaseSecret}`,
+        "Content-Type":
+          "application/json",
+        Prefer:
+          "resolution=ignore-duplicates,return=representation",
+      },
+      body:
+        JSON.stringify(
+          eligibleRows
+        ),
+      cache:
+        "no-store",
+    }
+  );
+
+  const responseText =
+    await response.text();
+
+  if (!response.ok) {
+    throw new Error(
+      `فشل ربط صفقات الحيتان بالمتابعة: ${responseText}`
+    );
+  }
+
+  const insertedRows =
+    responseText.trim()
+      ? JSON.parse(responseText)
+      : [];
+
+  return {
+    eligible:
+      eligibleRows.length,
+    inserted:
+      Array.isArray(insertedRows)
+        ? insertedRows.length
+        : 0,
+  };
+}
+
 function authorizeRequest(
   request: NextRequest
 ) {
@@ -1100,6 +1340,12 @@ export async function GET(
   const detectedRows: WhaleTradeRow[] =
     [];
 
+  const contractsBySymbol =
+    new Map<
+      string,
+      MassiveContract[]
+    >();
+
   const failures: Array<{
     symbol: string;
     error: string;
@@ -1112,6 +1358,11 @@ export async function GET(
           symbol,
           massiveApiKey
         );
+
+      contractsBySymbol.set(
+        symbol,
+        contracts
+      );
 
       const symbolRows = contracts
         .map((contract) =>
@@ -1158,13 +1409,26 @@ export async function GET(
     )
     .slice(0, 50);
 
+  const cleanSupabaseUrl =
+    supabaseUrl.replace(
+      /\/+$/,
+      ""
+    );
+
   const savedRows =
     await saveWhaleTrades(
       uniqueRows,
-      supabaseUrl.replace(
-        /\/+$/,
-        ""
-      ),
+      cleanSupabaseUrl,
+      supabaseSecret
+    );
+
+  const trackingSync =
+    await syncWhaleTradeSetups(
+      Array.isArray(savedRows)
+        ? savedRows
+        : [],
+      contractsBySymbol,
+      cleanSupabaseUrl,
       supabaseSecret
     );
 
@@ -1182,6 +1446,13 @@ export async function GET(
       Array.isArray(savedRows)
         ? savedRows.length
         : uniqueRows.length,
+
+    trackingEligible:
+      trackingSync.eligible,
+
+    trackingInserted:
+      trackingSync.inserted,
+
     failures,
     results: uniqueRows,
     capturedAt:

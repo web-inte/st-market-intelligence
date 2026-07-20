@@ -849,173 +849,24 @@ export default function WhaleActiveTradesPage() {
                   ) : null}
 
                   <div className="p-5">
-                    <h3 className="text-sm font-black text-cyan-300">
-                      صفقة الحوت الأصلية
-                    </h3>
 
-                    <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
-                      <Metric
-                        label="السترايك"
-                        value={formatNumber(
-                          trade.original_strike ||
-                            source.strike
-                        )}
-                      />
-
-                      <Metric
-                        label="الانتهاء"
-                        value={
-                          trade.original_expiration ||
-                          textValue(
-                            source.expiration
-                          ) ||
-                          "—"
-                        }
-                      />
-
-                      <Metric
-                        label="سعر العقد"
-                        value={
-                          originalPrice
-                            ? `$${formatNumber(
-                                originalPrice
-                              )}`
-                            : "—"
-                        }
-                      />
-
-                      <Metric
-                        label="قيمة الصفقة"
-                        value={formatMoney(
-                          trade.premium_value
-                        )}
-                      />
-
-                      <Metric
-                        label="حجم التنفيذ"
-                        value={formatWholeNumber(
-                          source.volume_change ??
-                            source.last_trade_size ??
-                            source.trade_size
-                        )}
-                      />
-
-                      <Metric
-                        label="الحجم"
-                        value={formatWholeNumber(
-                          source.volume
-                        )}
-                      />
-
-                      <Metric
-                        label="الاهتمام المفتوح"
-                        value={formatWholeNumber(
-                          source.open_interest
-                        )}
-                      />
-
-                      <Metric
-                        label="السبريد"
-                        value={
-                          numberValue(
-                            source.spread_pct
-                          )
-                            ? `${formatNumber(
-                                source.spread_pct
-                              )}%`
-                            : "—"
-                        }
-                      />
-
-                      <Metric
-                        label="Bid"
-                        value={
-                          numberValue(
-                            source.bid
-                          )
-                            ? `$${formatNumber(
-                                source.bid
-                              )}`
-                            : "—"
-                        }
-                      />
-
-                      <Metric
-                        label="Ask"
-                        value={
-                          numberValue(
-                            source.ask
-                          )
-                            ? `$${formatNumber(
-                                source.ask
-                              )}`
-                            : "—"
-                        }
-                      />
-
-                      <Metric
-                        label="Delta"
-                        value={formatNumber(
-                          source.delta,
-                          4
-                        )}
-                      />
-
-                      <Metric
-                        label="Gamma"
-                        value={formatNumber(
-                          source.gamma,
-                          4
-                        )}
-                      />
-
-                      <Metric
-                        label="Theta"
-                        value={formatNumber(
-                          source.theta,
-                          4
-                        )}
-                      />
-
-                      <Metric
-                        label="Vega"
-                        value={formatNumber(
-                          source.vega,
-                          4
-                        )}
-                      />
-
-                      <Metric
-                        label="IV"
-                        value={
-                          numberValue(
-                            source.iv
-                          )
-                            ? `${formatNumber(
-                                source.iv
-                              )}%`
-                            : "—"
-                        }
-                      />
-
-                      <Metric
-                        label="سعر السهم"
-                        value={
-                          numberValue(
-                            source.stock_price
-                          )
-                            ? `$${formatNumber(
-                                source.stock_price
-                              )}`
-                            : "—"
-                        }
-                      />
-                    </div>
 
                     <div className="mt-5 border-t border-white/10 pt-5">
-                      <h3 className="text-sm font-black text-emerald-300">
-                        عقد التنفيذ والمتابعة
-                      </h3>
+                      <div className="mb-3 flex items-center justify-between gap-3">
+                        <div>
+                          <h3 className="text-sm font-black text-emerald-300">
+                            عقد التنفيذ والمتابعة
+                          </h3>
+
+                          <p className="mt-1 text-xs font-bold text-slate-500">
+                            العقد النهائي المعتمد للمتابعة ومستويات القاما
+                          </p>
+                        </div>
+
+                        <span className="rounded-lg border border-emerald-400/20 bg-emerald-400/10 px-3 py-1.5 text-[11px] font-black text-emerald-300">
+                          الأهم
+                        </span>
+                      </div>
 
                       <div className="mt-3 rounded-2xl border border-white/10 bg-slate-950/40 p-4">
                         <div className="break-all text-xs font-black text-slate-300">
@@ -1270,11 +1121,7 @@ export default function WhaleActiveTradesPage() {
                       </div>
                     </div>
 
-                    {trade.alternative_reason ? (
-                      <div className="mt-4 rounded-xl border border-amber-400/20 bg-amber-400/10 p-3 text-xs font-bold leading-6 text-amber-200">
-                        {trade.alternative_reason}
-                      </div>
-                    ) : null}
+
 
                     {trade.last_error ? (
                       <div className="mt-4 rounded-xl border border-rose-400/20 bg-rose-400/10 p-3 text-xs font-bold leading-6 text-rose-200">
