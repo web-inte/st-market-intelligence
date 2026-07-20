@@ -27,6 +27,10 @@ type GammaData = {
   callWall: number;
   putWall: number;
   magnet: number;
+  strongestCallGammaStrike: number;
+  strongestCallGammaValue: number;
+  strongestPutGammaStrike: number;
+  strongestPutGammaValue: number;
 };
 
 type SignalData = {
@@ -212,6 +216,11 @@ function Metric({
       </p>
 
       <p
+        dir={
+          valueClassName?.includes("force-ltr")
+            ? "ltr"
+            : undefined
+        }
         className={`mt-2 break-words font-black ${valueClassName || "text-lg sm:text-xl"} ${color}`}
       >
         {value}
@@ -684,6 +693,7 @@ export default function SpxWhalesPage() {
                     : "—"
                 }
                 color="text-emerald-300"
+                valueClassName="text-lg sm:text-xl force-ltr"
               />
 
               <Metric
@@ -696,6 +706,7 @@ export default function SpxWhalesPage() {
                     : "—"
                 }
                 color="text-rose-300"
+                valueClassName="text-lg sm:text-xl force-ltr"
               />
 
               <Metric
@@ -783,6 +794,37 @@ export default function SpxWhalesPage() {
                       )
                     : "—"
                 }
+              />
+
+
+              <Metric
+                label="أقوى Gamma CALL"
+                value={
+                  gamma
+                    ? `\u2066${formatNumber(
+                        gamma.strongestCallGammaStrike,
+                        0
+                      )} — ${compactNumber(
+                        gamma.strongestCallGammaValue
+                      )}\u2069`
+                    : "—"
+                }
+                color="text-emerald-300"
+              />
+
+              <Metric
+                label="أقوى Gamma PUT"
+                value={
+                  gamma
+                    ? `\u2066${formatNumber(
+                        gamma.strongestPutGammaStrike,
+                        0
+                      )} — ${compactNumber(
+                        gamma.strongestPutGammaValue
+                      )}\u2069`
+                    : "—"
+                }
+                color="text-rose-300"
               />
             </section>
 

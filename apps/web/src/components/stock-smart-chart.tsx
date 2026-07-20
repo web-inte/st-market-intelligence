@@ -40,6 +40,7 @@ type StockSmartChartProps = {
   targets: TargetLevel[];
   side: "CALL" | "PUT" | "NEUTRAL";
   gammaData?: unknown;
+  candlesEndpoint?: string;
 };
 
 type ChartLevel = {
@@ -583,6 +584,7 @@ export default function StockSmartChart({
   targets,
   side,
   gammaData,
+  candlesEndpoint,
 }: StockSmartChartProps) {
   const containerRef =
     useRef<HTMLDivElement | null>(
@@ -922,10 +924,17 @@ export default function StockSmartChart({
       setError("");
 
       try {
-        const response = await fetch(
+        const endpoint =
+          candlesEndpoint ||
           `/api/stocks/${encodeURIComponent(
             symbol
-          )}/candles?interval=${interval}`,
+          )}/candles`;
+
+        const separator =
+          endpoint.includes("?") ? "&" : "?";
+
+        const response = await fetch(
+          `${endpoint}${separator}interval=${interval}`,
           {
             cache: "no-store",
           }
@@ -980,7 +989,7 @@ export default function StockSmartChart({
         refreshTimer
       );
     };
-  }, [symbol, interval]);
+  }, [symbol, interval, candlesEndpoint]);
 
   useEffect(() => {
     const container =

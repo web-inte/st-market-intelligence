@@ -629,6 +629,28 @@ function calculateGammaFromContracts(
     (row) => row.strike <= stockPrice
   );
 
+  const strongestCallGammaRow =
+    rows.length > 0
+      ? rows.reduce(
+          (best, row) =>
+            row.callGex > best.callGex
+              ? row
+              : best,
+          rows[0]
+        )
+      : emptyRow;
+
+  const strongestPutGammaRow =
+    rows.length > 0
+      ? rows.reduce(
+          (best, row) =>
+            row.putGex > best.putGex
+              ? row
+              : best,
+          rows[0]
+        )
+      : emptyRow;
+
   const callWall =
     callWallCandidates.length > 0
       ? callWallCandidates.reduce(
@@ -724,6 +746,14 @@ function calculateGammaFromContracts(
     callWall,
     putWall,
     magnet,
+    strongestCallGammaStrike:
+      strongestCallGammaRow.strike,
+    strongestCallGammaValue:
+      strongestCallGammaRow.callGex,
+    strongestPutGammaStrike:
+      strongestPutGammaRow.strike,
+    strongestPutGammaValue:
+      strongestPutGammaRow.putGex,
   };
 }
 
@@ -1033,6 +1063,18 @@ export async function GET() {
           callWall: round(gamma.callWall),
           putWall: round(gamma.putWall),
           magnet: round(gamma.magnet),
+          strongestCallGammaStrike: round(
+            gamma.strongestCallGammaStrike
+          ),
+          strongestCallGammaValue: round(
+            gamma.strongestCallGammaValue
+          ),
+          strongestPutGammaStrike: round(
+            gamma.strongestPutGammaStrike
+          ),
+          strongestPutGammaValue: round(
+            gamma.strongestPutGammaValue
+          ),
         },
 
         filters: {
