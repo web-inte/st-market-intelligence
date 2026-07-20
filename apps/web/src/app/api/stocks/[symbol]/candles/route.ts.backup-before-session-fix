@@ -1,0 +1,169 @@
+import { NextResponse } from "next/server";
+
+export const dynamic = "force-dynamic";
+
+type RouteContext = {
+  params: Promise<{
+    symbol: string;
+  }>;
+};
+
+type MassiveBar = {
+  t?: number;
+  o?: number;
+  h?: number;
+  l?: number;
+  c?: number;
+  v?: number;
+};
+
+export async function GET(
+  request: Request,
+  context: RouteContext
+) {
+  try {
+    const { symbol: rawSymbol } =
+      await context.params;
+
+    const symbol = String(rawSymbol || "")
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9.-]/g, "");
+
+    if (!symbol) {
+      return NextResponse.json(
+        { error: "رمز السهم غير صالح." },
+        { status: 400 }
+      );
+    }
+
+    const apiKey =
+      process.env.MASSIVE_API_KEY;
+
+    if (!apiKey) {
+      return NextResponse.json(
+        {
+          error:
+            "MASSIVE_API_KEY غير موجود.",
+        },
+        { status: 500 }
+      );
+    }
+
+    const requestUrl = new URL(request.url);
+
+    const allowedIntervals = [
+      5,
+      15,
+      30,
+      60,
+    ];
+
+    const requestedInterval = Number(
+      requestUrl.searchParams.get(
+        "interval"
+      ) || 15
+    );
+
+    const interval =
+      allowedIntervals.includes(
+        requestedInterval
+      )
+        ? requestedInterval
+        : 15;
+
+    const toDate = new Date();
+    const fromDate = new Date(
+      toDate.getTime() -
+        8 * 24 * 60 * 60 * 1000
+    );
+
+    const to = toDate
+      .toISOString()
+      .slice(0, 10);
+
+    const from = fromDate
+      .toISOString()
+      .slice(0, 10);
+
+    const massiveUrl =
+      `https://api.massive.com/v2/aggs/ticker/` +
+      `${encodeURIComponent(symbol)}/range/` +
+      `${interval}/minute/${from}/${to}` +
+      `?adjusted=true&sort=asc&limit=50000` +
+      `&apiKey=${encodeURIComponent(apiKey)}`;
+
+    const response = await fetch(
+      massiveUrl,
+      {
+        cache: "no-store",
+        headers: {
+          Accept: "application/json",
+        },
+      }
+    );
+
+    const payload =
+      await response.json();
+
+    if (!response.ok) {
+      return NextResponse.json(
+        {
+          error:
+            payload?.error ||
+            payload?.message ||
+            "تعذر جلب شموع السهم.",
+        },
+        { status: response.status }
+      );
+    }
+
+    const results: MassiveBar[] =
+      Array.isArray(payload?.results)
+        ? payload.results
+        : [];
+
+    const candles = results
+      .map((bar) => ({
+        time: Math.floor(
+          Number(bar.t || 0) / 1000
+        ),
+        open: Number(bar.o || 0),
+        high: Number(bar.h || 0),
+        low: Number(bar.l || 0),
+        close: Number(bar.c || 0),
+        volume: Number(bar.v || 0),
+      }))
+      .filter(
+        (bar) =>
+          bar.time > 0 &&
+          bar.open > 0 &&
+          bar.high > 0 &&
+          bar.low > 0 &&
+          bar.close > 0
+      );
+
+    return NextResponse.json({
+      symbol,
+      interval,
+      candles,
+      updatedAt:
+        new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error(
+      "Stock candles error:",
+      error
+    );
+
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "حدث خطأ أثناء جلب الشموع.",
+      },
+      { status: 500 }
+    );
+  }
+}
