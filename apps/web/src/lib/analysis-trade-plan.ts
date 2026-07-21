@@ -1001,10 +1001,13 @@ const contractEntryPrice =
         isAnalysisPlan(row) &&
         isRealOptionTicker(
           row.contract_ticker
-        )
+        ) &&
+        row.side === activeSide &&
+        row.contract_ticker ===
+          contractTicker
     );
 
-     if (existing) {
+  if (existing) {
 
 const previousBestPrice =
   numberValue(
