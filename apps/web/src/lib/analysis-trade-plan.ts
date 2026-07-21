@@ -904,7 +904,7 @@ export async function syncAnalysisTradePlan(
 
   const qualifies =
     directionalSide !== null &&
-    score >= 80 &&
+    score >= 75 &&
     selectedContract !== null &&
     gammaSupportsSide &&
     momentumSupportsSide;
