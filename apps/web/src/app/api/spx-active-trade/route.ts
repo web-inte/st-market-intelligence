@@ -34,6 +34,13 @@ type SpxSignal = {
   } | null;
 };
 
+type SpxSignalWithExecution =
+  SpxSignal & {
+    executionContract?:
+      SpxSignal["bestContract"];
+  };
+
+
 function record(value: unknown): DataRecord {
   return value !== null &&
     typeof value === "object" &&
@@ -165,7 +172,7 @@ function createAdminClient() {
 
 async function fetchSpxSignal(
   request: Request
-): Promise<SpxSignal> {
+): Promise<SpxSignalWithExecution> {
   const requestOrigin =
     new URL(request.url).origin;
 
@@ -422,23 +429,56 @@ export async function GET(
     const session =
       await sessionResponse.json();
 
-    const spxDailyWindowOpen =
-      isSpxDailyWindowOpen();
+    const regularSessionOpen =
+      session?.isOpen === true &&
+      session?.phase === "REGULAR";
 
-    if (
-      !liveTrade &&
-      !spxDailyWindowOpen
-    ) {
+    /*
+      نستمر في جلب التحليل خارج الجلسة الرسمية
+      لعرض Flow والقاما والمستويات فقط.
+
+      لكن بيانات أسعار العقود خارج REGULAR
+      لا تُستخدم لإصدار أو متابعة أي صفقة.
+    */
+    const signal =
+      await fetchSpxSignal(request);
+
+    if (!regularSessionOpen) {
+      /*
+        عند انتهاء الجلسة الرسمية:
+        - إغلاق جميع صفقات SPX المفتوحة.
+        - إخفاؤها فورًا من الصفحة.
+        - عدم إصدار أي صفقة جديدة حتى REGULAR التالية.
+      */
+      const {
+        error: sessionCloseError,
+      } = await supabase
+        .from("spx_trade_setups")
+        .update({
+          status: "EXPIRED",
+          hidden_after: nowIso,
+          last_error:
+            "انتهت الجلسة الرسمية وتم إغلاق المتابعة تلقائيًا",
+        })
+        .in("status", [
+          "ACTIVE",
+          "WATCH",
+        ]);
+
+      if (sessionCloseError) {
+        throw sessionCloseError;
+      }
+
       return NextResponse.json(
         {
           ok: true,
           created: false,
           activeTrade: null,
-          trades:
-            visibleTrades || [],
-          signal: null,
+          trades: [],
+          signal,
+          executionEnabled: false,
           message:
-            "تداول SPX اليومي مغلق حاليًا — تبدأ المتابعة عند افتتاح جلسة GTH أو RTH القادمة.",
+            "السوق خارج الجلسة الرسمية — التحليل متاح، لكن أسعار العقود غير معتمدة ولا يتم إصدار أو متابعة صفقات حتى افتتاح الجلسة الرئيسية.",
           marketSession:
             session,
           updatedAt:
@@ -452,9 +492,6 @@ export async function GET(
         }
       );
     }
-
-    const signal =
-      await fetchSpxSignal(request);
 
     if (liveTrade) {
       const entryPrice =
@@ -794,8 +831,74 @@ export async function GET(
       );
     }
 
-    const contract =
+    const analyticalContract =
       signal.bestContract;
+
+    const contract =
+      signal.executionContract ||
+      analyticalContract;
+
+    /*
+      لا نغيّر اختيار الفرصة أو تقييمها.
+      فقط نمنع إعادة إنشاء نفس العقد لمدة 30 دقيقة
+      إذا تم إغلاقه يدويًا للاختبار.
+    */
+    const manualCloseCutoff =
+      new Date(
+        Date.now() -
+          30 * 60 * 1000
+      ).toISOString();
+
+    const {
+      data: recentlyClosedSameContract,
+      error: recentlyClosedError,
+    } = await supabase
+      .from("spx_trade_setups")
+      .select("id, option_ticker, hidden_after")
+      .eq(
+        "option_ticker",
+        contract.ticker
+      )
+      .eq("status", "EXPIRED")
+      .ilike(
+        "last_error",
+        "%إغلاق يدوي%"
+      )
+      .gte(
+        "hidden_after",
+        manualCloseCutoff
+      )
+      .order("hidden_after", {
+        ascending: false,
+      })
+      .limit(1)
+      .maybeSingle();
+
+    if (recentlyClosedError) {
+      throw recentlyClosedError;
+    }
+
+    if (recentlyClosedSameContract) {
+      return NextResponse.json(
+        {
+          ok: true,
+          created: false,
+          activeTrade: null,
+          trades:
+            visibleTrades || [],
+          signal,
+          message:
+            "تم إغلاق هذا العقد يدويًا — لن يعاد تفعيله لمدة 30 دقيقة.",
+          updatedAt: nowIso,
+        },
+        {
+          headers: {
+            "Cache-Control":
+              "private, no-store, max-age=0",
+          },
+        }
+      );
+    }
 
     const spxEntryPrice =
       numberValue(
@@ -908,13 +1011,17 @@ export async function GET(
           invalidationLevel,
 
         score:
-          contract.finalScore,
+          analyticalContract.finalScore,
 
         quality:
-          contract.quality,
+          analyticalContract.quality,
 
-        analysis_snapshot:
-          signal,
+        analysis_snapshot: {
+          ...signal,
+          analyticalContract,
+          executionContract:
+            contract,
+        },
 
         status:
           "ACTIVE",
@@ -963,9 +1070,24 @@ export async function GET(
 
         metadata: {
           score:
-            contract.finalScore,
+            analyticalContract.finalScore,
           quality:
-            contract.quality,
+            analyticalContract.quality,
+          analyticalTicker:
+            analyticalContract.ticker,
+          analyticalStrike:
+            analyticalContract.strike,
+          analyticalPrice:
+            analyticalContract.price,
+          executionTicker:
+            contract.ticker,
+          executionStrike:
+            contract.strike,
+          executionPrice:
+            entryPrice,
+          usedAffordableAlternative:
+            contract.ticker !==
+            analyticalContract.ticker,
           spxEntryPrice,
           invalidationLevel,
         },

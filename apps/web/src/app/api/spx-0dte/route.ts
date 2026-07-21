@@ -1062,6 +1062,212 @@ export async function GET() {
       }
     }
 
+    /*
+      عقد التنفيذ منفصل تمامًا عن العقد التحليلي:
+      - bestContract يبقى أساس القرار والتقييم.
+      - executionContract يُختار بعد اكتمال القرار فقط.
+      - جميع البدائل هنا اجتازت أصلًا نفس شروط eligibleContracts.
+    */
+    let executionContract:
+      ScoredContract | null =
+        bestContract;
+
+    if (
+      bestContract &&
+      bestContract.price > 3.5
+    ) {
+      /*
+        البحث عن عقد التنفيذ يتم بعد اكتمال القرار،
+        ومن جميع عقود اليوم، ولا يشارك في تقييم الفرصة.
+      */
+      const affordableExecutionCandidates =
+        allContracts
+          .filter((candidate) => {
+            return (
+              candidate.side ===
+                bestContract?.side &&
+              candidate.expiration ===
+                bestContract?.expiration &&
+              candidate.ticker !==
+                bestContract?.ticker &&
+              candidate.executionPrice >= 1 &&
+              candidate.executionPrice <= 3.5 &&
+              candidate.bid > 0 &&
+              candidate.ask > 0 &&
+              candidate.spreadPct <= 20 &&
+              candidate.volume >= 50 &&
+              (
+                candidate.openInterest >= 10 ||
+                candidate.volume >= 200
+              )
+            );
+          })
+          .sort((first, second) => {
+            const firstDeltaGap =
+              Math.abs(
+                Math.abs(first.delta) -
+                  Math.abs(
+                    bestContract?.delta || 0
+                  )
+              );
+
+            const secondDeltaGap =
+              Math.abs(
+                Math.abs(second.delta) -
+                  Math.abs(
+                    bestContract?.delta || 0
+                  )
+              );
+
+            if (firstDeltaGap !== secondDeltaGap) {
+              return firstDeltaGap - secondDeltaGap;
+            }
+
+            const firstStrikeGap =
+              Math.abs(
+                first.strike -
+                  (bestContract?.strike || 0)
+              );
+
+            const secondStrikeGap =
+              Math.abs(
+                second.strike -
+                  (bestContract?.strike || 0)
+              );
+
+            if (firstStrikeGap !== secondStrikeGap) {
+              return firstStrikeGap - secondStrikeGap;
+            }
+
+            return (
+              first.spreadPct -
+                second.spreadPct ||
+              second.volume -
+                first.volume ||
+              second.openInterest -
+                first.openInterest
+            );
+          });
+
+      const affordableExecutionRow =
+        affordableExecutionCandidates[0] || null;
+
+      if (affordableExecutionRow) {
+        executionContract = {
+          ...bestContract,
+
+          ticker:
+            affordableExecutionRow.ticker,
+
+          expiration:
+            affordableExecutionRow.expiration,
+
+          side:
+            affordableExecutionRow.side,
+
+          strike:
+            round(
+              affordableExecutionRow.strike
+            ),
+
+          stockPrice:
+            round(
+              affordableExecutionRow.stockPrice
+            ),
+
+          bid:
+            round(
+              affordableExecutionRow.bid
+            ),
+
+          ask:
+            round(
+              affordableExecutionRow.ask
+            ),
+
+          midpoint:
+            round(
+              affordableExecutionRow.midpoint
+            ),
+
+          price:
+            round(
+              affordableExecutionRow.executionPrice
+            ),
+
+          spreadPct:
+            round(
+              affordableExecutionRow.spreadPct
+            ),
+
+          delta:
+            round(
+              affordableExecutionRow.delta,
+              4
+            ),
+
+          gamma:
+            round(
+              affordableExecutionRow.gamma,
+              6
+            ),
+
+          theta:
+            round(
+              affordableExecutionRow.theta,
+              4
+            ),
+
+          vega:
+            round(
+              affordableExecutionRow.vega,
+              4
+            ),
+
+          ivPct:
+            round(
+              affordableExecutionRow.ivPct
+            ),
+
+          volume:
+            Math.round(
+              affordableExecutionRow.volume
+            ),
+
+          openInterest:
+            Math.round(
+              affordableExecutionRow.openInterest
+            ),
+
+          volumeOi:
+            round(
+              affordableExecutionRow.volumeOi
+            ),
+
+          distancePoints:
+            round(
+              affordableExecutionRow.distancePoints
+            ),
+
+          distancePct:
+            round(
+              affordableExecutionRow.distancePct,
+              3
+            ),
+
+          reasons: [
+            ...bestContract.reasons,
+            "عقد تنفيذ بديل أرخص من نفس اتجاه الفرصة.",
+          ],
+
+          warnings: [
+            ...bestContract.warnings,
+            "عقد التنفيذ البديل لا يغيّر تحليل الفرصة أو تقييمها.",
+          ],
+        };
+      }
+    }
+
     return NextResponse.json(
       {
         ok: true,
@@ -1126,6 +1332,7 @@ export async function GET() {
         },
 
         bestContract,
+        executionContract,
         contracts: scoredContracts.slice(0, 30),
 
         counts: {
