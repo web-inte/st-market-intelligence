@@ -67,6 +67,31 @@ export async function updateSession(
   const isApi =
     pathname.startsWith("/api/");
 
+  /*
+   * مسار فحص الحيتان يعمل من Cron أو GitHub Actions
+   * باستخدام CRON_SECRET، ولا يحتاج جلسة مستخدم.
+   * التحقق النهائي من السر يتم داخل route.ts نفسه.
+   */
+  if (
+    pathname === "/api/whale-trades/scan"
+  ) {
+    const cronSecret =
+      process.env.CRON_SECRET;
+
+    const authorization =
+      request.headers.get(
+        "authorization"
+      );
+
+    if (
+      cronSecret &&
+      authorization ===
+        `Bearer ${cronSecret}`
+    ) {
+      return response;
+    }
+  }
+
   // صفحات ومسارات عامة لا تتطلب اشتراكًا فعالًا.
   if (
     pathname === "/subscriptions" ||

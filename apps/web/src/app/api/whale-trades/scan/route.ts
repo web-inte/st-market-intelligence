@@ -16,8 +16,11 @@ const SYMBOLS = [
 ];
 
 const MIN_PREMIUM_VALUE = 1_000_000;
-const MIN_WHALE_SCORE = 65;
+const MIN_WHALE_SCORE = 80;
 const MAX_RESULTS_PER_SYMBOL = 250;
+const MAX_APPROVED_CONTRACT_PRICE = 3;
+const MAX_APPROVED_SPREAD_PCT = 15;
+
 
 type MassiveContract = {
   details?: {
@@ -709,6 +712,452 @@ async function fetchOptionChain(
   return contracts;
 }
 
+
+type CompositeMarketContext = {
+  callVolume: number;
+  putVolume: number;
+  netGex: number;
+};
+
+function buildCompositeMarketContext(
+  contracts: MassiveContract[]
+): CompositeMarketContext {
+  let callVolume = 0;
+  let putVolume = 0;
+  let callGex = 0;
+  let putGex = 0;
+
+  for (const contract of contracts) {
+    const side =
+      contract.details?.contract_type;
+
+    const volume =
+      safeNumber(
+        contract.day?.volume
+      );
+
+    const openInterest =
+      safeNumber(
+        contract.open_interest
+      );
+
+    const gamma =
+      Math.abs(
+        safeNumber(
+          contract.greeks?.gamma
+        )
+      );
+
+    const stockPrice =
+      safeNumber(
+        contract.underlying_asset?.price
+      );
+
+    const gex =
+      gamma *
+      openInterest *
+      100 *
+      stockPrice *
+      stockPrice *
+      0.01;
+
+    if (side === "call") {
+      callVolume += volume;
+      callGex += gex;
+    }
+
+    if (side === "put") {
+      putVolume += volume;
+      putGex += gex;
+    }
+  }
+
+  return {
+    callVolume,
+    putVolume,
+    netGex:
+      callGex - putGex,
+  };
+}
+
+function calculateCompositeWhaleScore(
+  row: WhaleTradeRow,
+  contract: MassiveContract,
+  context: CompositeMarketContext
+) {
+  /*
+   * لا نعتمد صفقات البيع أو الاتجاه غير المحسوم
+   * كتوصيات تنفيذية.
+   */
+  if (
+    row.execution_side !== "BUY"
+  ) {
+    return null;
+  }
+
+  if (
+    row.contract_price <= 0 ||
+    row.contract_price >
+      MAX_APPROVED_CONTRACT_PRICE
+  ) {
+    return null;
+  }
+
+  if (
+    row.spread_pct === null ||
+    row.spread_pct >
+      MAX_APPROVED_SPREAD_PCT
+  ) {
+    return null;
+  }
+
+  const isCall =
+    row.contract_type === "call";
+
+  const directionalVolume =
+    isCall
+      ? context.callVolume
+      : context.putVolume;
+
+  const oppositeVolume =
+    isCall
+      ? context.putVolume
+      : context.callVolume;
+
+  const totalDirectionalVolume =
+    directionalVolume +
+    oppositeVolume;
+
+  const directionalVolumePct =
+    totalDirectionalVolume > 0
+      ? (
+          directionalVolume /
+          totalDirectionalVolume
+        ) * 100
+      : 50;
+
+  /*
+   * التدفق المؤسسي: 35 نقطة
+   */
+  let flowScore = 0;
+
+  if (
+    row.premium_value >=
+    5_000_000
+  ) {
+    flowScore += 12;
+  } else if (
+    row.premium_value >=
+    2_000_000
+  ) {
+    flowScore += 10;
+  } else if (
+    row.premium_value >=
+    1_000_000
+  ) {
+    flowScore += 8;
+  }
+
+  flowScore +=
+    Math.min(
+      10,
+      row.execution_confidence *
+        0.1
+    );
+
+  if (
+    row.open_interest > 0 &&
+    row.volume >
+      row.open_interest
+  ) {
+    flowScore += 8;
+  } else if (
+    row.volume >= 500
+  ) {
+    flowScore += 5;
+  }
+
+  if (
+    directionalVolumePct >= 60
+  ) {
+    flowScore += 5;
+  } else if (
+    directionalVolumePct >= 52
+  ) {
+    flowScore += 3;
+  }
+
+  flowScore =
+    clamp(
+      Math.round(flowScore),
+      0,
+      35
+    );
+
+  /*
+   * القاما وGEX: 25 نقطة
+   */
+  let gammaScore = 0;
+
+  const gammaAligned =
+    isCall
+      ? context.netGex >= 0
+      : context.netGex <= 0;
+
+  if (gammaAligned) {
+    gammaScore += 12;
+  }
+
+  const absoluteGamma =
+    Math.abs(
+      safeNumber(row.gamma)
+    );
+
+  if (
+    absoluteGamma >= 0.02
+  ) {
+    gammaScore += 8;
+  } else if (
+    absoluteGamma >= 0.005
+  ) {
+    gammaScore += 5;
+  }
+
+  if (
+    row.direction_status ===
+    "الاتجاه والقاما داعمان"
+  ) {
+    gammaScore += 5;
+  } else if (
+    row.direction_status ===
+    "عكس الاتجاه"
+  ) {
+    return null;
+  }
+
+  gammaScore =
+    clamp(
+      Math.round(gammaScore),
+      0,
+      25
+    );
+
+  /*
+   * الزخم: 20 نقطة
+   * يعتمد على حركة العقد اليومية واتساقها
+   * مع اتجاه CALL أو PUT.
+   */
+  const dayOpen =
+    safeNumber(
+      contract.day?.open
+    );
+
+  const dayClose =
+    safeNumber(
+      contract.day?.close
+    );
+
+  const dayLow =
+    safeNumber(
+      contract.day?.low
+    );
+
+  const dayHigh =
+    safeNumber(
+      contract.day?.high
+    );
+
+  const momentumPct =
+    dayOpen > 0
+      ? (
+          (dayClose - dayOpen) /
+          dayOpen
+        ) * 100
+      : 0;
+
+  let momentumScore = 0;
+
+  if (momentumPct >= 15) {
+    momentumScore += 12;
+  } else if (
+    momentumPct >= 7
+  ) {
+    momentumScore += 9;
+  } else if (
+    momentumPct >= 2
+  ) {
+    momentumScore += 6;
+  }
+
+  if (
+    dayHigh > dayLow &&
+    dayClose >=
+      dayLow +
+        (dayHigh - dayLow) *
+          0.65
+  ) {
+    momentumScore += 5;
+  }
+
+  if (
+    directionalVolumePct >= 55
+  ) {
+    momentumScore += 3;
+  }
+
+  momentumScore =
+    clamp(
+      Math.round(momentumScore),
+      0,
+      20
+    );
+
+  /*
+   * جودة العقد: 20 نقطة
+   */
+  let contractScore = 0;
+
+  const absoluteDelta =
+    Math.abs(
+      safeNumber(row.delta)
+    );
+
+  if (
+    absoluteDelta >= 0.25 &&
+    absoluteDelta <= 0.55
+  ) {
+    contractScore += 7;
+  } else if (
+    absoluteDelta >= 0.18 &&
+    absoluteDelta <= 0.65
+  ) {
+    contractScore += 4;
+  }
+
+  if (
+    row.spread_pct <= 5
+  ) {
+    contractScore += 6;
+  } else if (
+    row.spread_pct <= 10
+  ) {
+    contractScore += 4;
+  } else {
+    contractScore += 2;
+  }
+
+  if (
+    row.open_interest >= 1000
+  ) {
+    contractScore += 4;
+  } else if (
+    row.open_interest >= 300
+  ) {
+    contractScore += 2;
+  }
+
+  if (
+    row.contract_price <= 2
+  ) {
+    contractScore += 3;
+  } else {
+    contractScore += 2;
+  }
+
+  contractScore =
+    clamp(
+      Math.round(contractScore),
+      0,
+      20
+    );
+
+  const totalScore =
+    flowScore +
+    gammaScore +
+    momentumScore +
+    contractScore;
+
+  if (
+    totalScore <
+    MIN_WHALE_SCORE
+  ) {
+    return null;
+  }
+
+  return {
+    score: totalScore,
+    flowScore,
+    gammaScore,
+    momentumScore,
+    contractScore,
+    reason:
+      `التقييم المركب ${totalScore}%` +
+      ` • التدفق ${flowScore}/35` +
+      ` • القاما وGEX ${gammaScore}/25` +
+      ` • الزخم ${momentumScore}/20` +
+      ` • جودة العقد ${contractScore}/20`,
+  };
+}
+
+function applyCompositeWhaleEngine(
+  rows: WhaleTradeRow[],
+  contracts: MassiveContract[]
+) {
+  const context =
+    buildCompositeMarketContext(
+      contracts
+    );
+
+  const contractsByTicker =
+    new Map(
+      contracts.map((contract) => [
+        contract.details?.ticker || "",
+        contract,
+      ])
+    );
+
+  return rows
+    .map((row) => {
+      const contract =
+        contractsByTicker.get(
+          row.option_ticker
+        );
+
+      if (!contract) {
+        return null;
+      }
+
+      const composite =
+        calculateCompositeWhaleScore(
+          row,
+          contract,
+          context
+        );
+
+      if (!composite) {
+        return null;
+      }
+
+      return {
+        ...row,
+        whale_score:
+          composite.score,
+        classification:
+          composite.score >= 90
+            ? "فرصة مؤسسية قوية"
+            : "فرصة مؤسسية مؤهلة",
+        reason:
+          `${composite.reason} • ${row.reason}`,
+      };
+    })
+    .filter(
+      (
+        row
+      ): row is WhaleTradeRow =>
+        row !== null
+    );
+}
+
 function analyzeContract(
   symbol: string,
   contract: MassiveContract
@@ -1113,18 +1562,25 @@ export async function GET(
           massiveApiKey
         );
 
-      const symbolRows = contracts
-        .map((contract) =>
-          analyzeContract(
-            symbol,
-            contract
+      const rawSymbolRows =
+        contracts
+          .map((contract) =>
+            analyzeContract(
+              symbol,
+              contract
+            )
           )
-        )
-        .filter(
-          (
-            row
-          ): row is WhaleTradeRow =>
-            row !== null
+          .filter(
+            (
+              row
+            ): row is WhaleTradeRow =>
+              row !== null
+          );
+
+      const symbolRows =
+        applyCompositeWhaleEngine(
+          rawSymbolRows,
+          contracts
         );
 
       detectedRows.push(
