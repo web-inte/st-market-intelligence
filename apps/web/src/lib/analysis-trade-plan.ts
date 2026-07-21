@@ -908,6 +908,7 @@ export async function syncAnalysisTradePlan(
     selectedContract !== null &&
     gammaSupportsSide &&
     momentumSupportsSide;
+
   if (!qualifies) {
     let warningReason =
       "انخفض تقييم الفرصة عن الحد المطلوب";

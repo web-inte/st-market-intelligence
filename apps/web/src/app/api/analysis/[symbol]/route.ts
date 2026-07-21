@@ -1183,16 +1183,54 @@ async function loadAnalysis(
       stockPrice
     );
 
-  const recommendedCalls = eligibleContracts
-  .filter((contract) => contract.type === "call")
-  .slice(0, 3);
+  const eligibleCalls = eligibleContracts.filter(
+    (contract) => contract.type === "call"
+  );
 
-const recommendedPuts = eligibleContracts
-  .filter((contract) => contract.type === "put")
-  .slice(0, 3);
+  const eligiblePuts = eligibleContracts.filter(
+    (contract) => contract.type === "put"
+  );
 
-const bestCall = recommendedCalls[0] ?? null;
-const bestPut = recommendedPuts[0] ?? null;
+  /*
+    نحافظ على أفضل 3 عقود حسب الجودة، ونضيف أفضل عقد
+    منخفض التكلفة إذا كان موجودًا خارج أول ثلاثة.
+    لا يتم تخفيف أي شرط من شروط الجودة.
+  */
+  const buildRecommendedContracts = (
+    contracts: NormalizedContract[]
+  ) => {
+    const topContracts = contracts.slice(0, 3);
+
+    const affordableContract = contracts.find(
+      (contract) =>
+        contract.ask > 0 &&
+        contract.ask <= 2.70
+    );
+
+    if (
+      affordableContract &&
+      !topContracts.some(
+        (contract) =>
+          contract.ticker === affordableContract.ticker
+      )
+    ) {
+      return [
+        ...topContracts,
+        affordableContract,
+      ];
+    }
+
+    return topContracts;
+  };
+
+  const recommendedCalls =
+    buildRecommendedContracts(eligibleCalls);
+
+  const recommendedPuts =
+    buildRecommendedContracts(eligiblePuts);
+
+  const bestCall = recommendedCalls[0] ?? null;
+  const bestPut = recommendedPuts[0] ?? null;
 
   return {
     symbol: cleanSymbol,
