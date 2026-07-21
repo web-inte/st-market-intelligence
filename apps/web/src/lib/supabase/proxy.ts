@@ -92,9 +92,22 @@ export async function updateSession(
     }
   }
 
-  // صفحات ومسارات عامة لا تتطلب اشتراكًا فعالًا.
+  // صفحات ومسارات عامة لا تتطلب تسجيل دخول أو اشتراكًا فعالًا.
+  const PUBLIC_ROUTES = [
+    "/",
+    "/login",
+    "/register",
+    "/forgot-password",
+    "/update-password",
+    "/subscriptions",
+    "/auth/callback",
+    "/auth/confirm",
+    "/auth/recovery",
+    "/auth/recovery-callback",
+  ];
+
   if (
-    pathname === "/subscriptions" ||
+    matchesRoute(pathname, PUBLIC_ROUTES) ||
     pathname === "/api/salla/webhook"
   ) {
     return response;
