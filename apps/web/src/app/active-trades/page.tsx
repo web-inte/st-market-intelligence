@@ -293,7 +293,15 @@ export default function ActiveTradesPage() {
           }
 
           setTrades(
-            payload.trades || []
+            [...(payload.trades || [])].sort(
+              (first, second) =>
+                new Date(
+                  second.activatedAt
+                ).getTime() -
+                new Date(
+                  first.activatedAt
+                ).getTime()
+            )
           );
 
           setUpdatedAt(
