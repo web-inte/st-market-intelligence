@@ -5,6 +5,10 @@ import {
   type Side,
 } from "./analysis-engine";
 
+import {
+  buildTargets,
+} from "./analysis-trade-plan";
+
 type DecisionSide = Exclude<Side, "NEUTRAL">;
 
 export type DecisionActiveTradeResult = {
@@ -628,6 +632,18 @@ export async function syncDecisionActiveTrade(
   const stopPrice =
     Number(result.stop) || null;
 
+  const analysisScore =
+    Math.round(result.score * 10);
+
+  const targets =
+    buildTargets(
+      analysis,
+      side,
+      entryPrice,
+      stopPrice ?? entryPrice,
+      analysisScore
+    );
+
   const optionEntry =
     Number(contract.midpoint) ||
     Number(contract.ask) ||
@@ -662,7 +678,8 @@ export async function syncDecisionActiveTrade(
           ),
         stop_price:
           stopPrice,
-        gamma_targets: [],
+        gamma_targets:
+          targets,
         gamma_snapshot: {
           source:
             "decision.activeTradeEngine",
@@ -681,6 +698,8 @@ export async function syncDecisionActiveTrade(
             result.gexSide,
           radarSide:
             result.radarSide,
+          selectedTargets:
+            targets,
           selectedContract: {
             ticker:
               contract.ticker,

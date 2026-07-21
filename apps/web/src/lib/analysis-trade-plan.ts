@@ -181,7 +181,7 @@ function uniqueLevels(
   });
 }
 
-function buildTargets(
+export function buildTargets(
   analysis: AnalysisResponse,
   side: ActiveSide,
   entryPrice: number,
