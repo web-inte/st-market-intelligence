@@ -557,9 +557,21 @@ export async function GET(
           entryPrice
         );
 
+      const previousLowest =
+        numberValue(
+          liveTrade.lowest_price,
+          entryPrice
+        );
+
       const bestPrice =
         Math.max(
           previousBest,
+          currentPrice
+        );
+
+      const lowestPrice =
+        Math.min(
+          previousLowest,
           currentPrice
         );
 
@@ -651,6 +663,9 @@ export async function GET(
 
         best_price:
           bestPrice,
+
+        lowest_price:
+          lowestPrice,
 
         best_price_at:
           bestPrice >
@@ -984,6 +999,9 @@ export async function GET(
           contract.ask,
 
         best_price:
+          entryPrice,
+
+        lowest_price:
           entryPrice,
 
         best_price_at:

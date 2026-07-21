@@ -59,6 +59,7 @@ type SpxTrade = {
   current_ask: number | null;
 
   best_price: number | null;
+  lowest_price: number | null;
   best_profit_dollars: number | null;
   best_profit_pct: number | null;
 
@@ -430,10 +431,12 @@ function TradeCard({
         />
 
         <Metric
-          label="سعر SPX عند الدخول"
-          value={SPX_PRICE_DISPLAY_NOTE}
-          color="text-cyan-300"
-          valueClassName="text-xs leading-6 text-center whitespace-normal"
+          label="أدنى سعر للعقد"
+          value={`$${formatNumber(
+            trade.lowest_price ??
+              trade.entry_price
+          )}`}
+          color="text-amber-300"
         />
 
         <Metric
