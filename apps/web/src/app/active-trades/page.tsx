@@ -153,8 +153,9 @@ function formatDateTime(value: string) {
   }
 
   return new Intl.DateTimeFormat(
-    "ar-SA",
+    "ar-SA-u-ca-gregory",
     {
+      year: "numeric",
       month: "2-digit",
       day: "2-digit",
       hour: "2-digit",
@@ -770,7 +771,7 @@ export default function ActiveTradesPage() {
                           </span>
                         </div>
 
-                        <p className="mt-2 text-xs text-slate-500">
+                        <p className="mt-2 text-sm font-semibold text-slate-400">
                           تفعيل:{" "}
                           {formatDateTime(
                             trade.activatedAt
