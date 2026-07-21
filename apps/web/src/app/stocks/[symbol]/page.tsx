@@ -1,3 +1,4 @@
+import ShareAnalysisMenu from "./ShareAnalysisMenu";
 import { cookies } from "next/headers";
 import StockSmartChart from "../../../components/stock-smart-chart";
 import {
@@ -749,9 +750,9 @@ export default async function StockAnalysisPage({
         <div className="mb-8 flex flex-wrap items-center justify-between gap-3">
           <a
             href="/dashboard"
-            className="group inline-flex items-center gap-3 rounded-2xl border border-white/[0.08] bg-slate-900/70 px-4 py-3 text-sm font-semibold text-slate-200 shadow-lg shadow-black/20 backdrop-blur-xl transition duration-300 hover:-translate-y-0.5 hover:border-cyan-400/30 hover:bg-cyan-400/[0.06] hover:text-cyan-300 hover:shadow-cyan-950/30"
+            className="group inline-flex min-h-12 items-center gap-3 rounded-2xl border border-white/[0.08] bg-slate-900/70 px-4 py-3 text-sm font-semibold text-slate-200 shadow-lg shadow-black/20 backdrop-blur-xl transition duration-300 hover:-translate-y-0.5 hover:border-cyan-400/30 hover:bg-cyan-400/[0.06] hover:text-cyan-300 hover:shadow-cyan-950/30"
           >
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/[0.07] bg-slate-950/70 text-cyan-400">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/[0.07] bg-slate-950/70 text-cyan-400">
               ←
             </span>
 
@@ -766,51 +767,34 @@ export default async function StockAnalysisPage({
             </span>
           </a>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+            <a
+              href={`/gamma-liquidity?symbol=${encodeURIComponent(
+                analysis.symbol
+              )}`}
+              className="inline-flex min-h-12 items-center justify-center rounded-2xl border border-violet-500/30 bg-violet-500/10 px-4 py-3 text-sm font-bold text-violet-300 transition hover:-translate-y-0.5 hover:border-violet-400 hover:bg-violet-500/20"
+            >
+              <span>
+                ⚡ القاما والسيولة
+              </span>
+
+              <span className="mr-2 rounded-full bg-yellow-400 px-2 py-0.5 text-[10px] font-black text-black">
+                PLUS
+              </span>
+            </a>
+
             <a
               href={`/stocks/${encodeURIComponent(
                 analysis.symbol
               )}`}
-              className="rounded-2xl border border-white/[0.08] bg-slate-900/70 px-4 py-3 text-sm font-bold text-slate-300 transition hover:border-cyan-400/30 hover:text-cyan-300"
+              className="inline-flex min-h-12 items-center justify-center rounded-2xl border border-white/[0.08] bg-slate-900/70 px-4 py-3 text-sm font-bold text-slate-300 transition hover:-translate-y-0.5 hover:border-cyan-400/30 hover:bg-cyan-400/[0.06] hover:text-cyan-300"
             >
               تحديث التحليل
-            
-            
             </a>
 
-<a
-  href={`/gamma-liquidity?symbol=${encodeURIComponent(
-    analysis.symbol
-  )}`}
-  className="rounded-2xl border border-violet-500/30 bg-violet-500/10 px-4 py-3 text-sm font-bold text-violet-300 transition hover:border-violet-400 hover:bg-violet-500/20 fixed left-1/2 top-4 z-[80] -translate-x-1/2 max-w-[calc(100vw-10rem)]"
-
-          style={{
-          position: "fixed",
-          top: 16,
-          left: "50%",
-          right: "auto",
-          transform: "translateX(-50%)",
-          zIndex: 90,
-        }}
-        
-          data-floating-gamma="true"
-        >
-  ⚡ القاما والسيولة
-  <span className="mr-2 rounded-full bg-yellow-400 px-2 py-0.5 text-[10px] font-black text-black">
-    PLUS
-  </span>
-</a>
-
-
-            <a
-              href={telegramShareUrl}
-              target="_blank"
-              rel="noreferrer"
-              aria-label={`مشاركة تحليل ${analysis.symbol}`}
-              className="flex h-12 w-12 items-center justify-center rounded-2xl border border-white/[0.08] bg-slate-900/70 text-xl text-cyan-300 transition hover:border-cyan-400/30 hover:bg-cyan-400/[0.07]"
-            >
-              ↗
-            </a>
+            <ShareAnalysisMenu
+              symbol={analysis.symbol}
+            />
           </div>
         </div>
 
