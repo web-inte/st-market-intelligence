@@ -427,7 +427,7 @@ async function findAlternativeContract(input: {
       return (
         contract.ticker &&
         contract.currentPrice > 0 &&
-        contract.currentPrice <= 2.7 &&
+        contract.currentPrice <= 3 &&
         contract.delta >= 0.25 &&
         contract.delta <= 0.55 &&
         contract.spreadPct <= 15
@@ -480,6 +480,60 @@ async function findAlternativeContract(input: {
     });
 
   return candidates[0] || null;
+}
+
+
+function buildWhaleStockPlan(
+  stockEntryPrice: number,
+  side: string,
+  gammaValue: number
+) {
+  const normalizedSide =
+    String(side || "").toUpperCase();
+
+  const direction =
+    normalizedSide === "PUT"
+      ? -1
+      : 1;
+
+  const gammaRiskAdjustment =
+    Math.min(
+      Math.abs(gammaValue) * 0.6,
+      0.012
+    );
+
+  const riskPct =
+    Math.min(
+      0.02,
+      Math.max(
+        0.008,
+        0.008 + gammaRiskAdjustment
+      )
+    );
+
+  const riskDistance =
+    stockEntryPrice * riskPct;
+
+  return {
+    stopPrice: round(
+      stockEntryPrice -
+        direction * riskDistance
+    ),
+    targets: [
+      round(
+        stockEntryPrice +
+          direction * riskDistance
+      ),
+      round(
+        stockEntryPrice +
+          direction * riskDistance * 2
+      ),
+      round(
+        stockEntryPrice +
+          direction * riskDistance * 3
+      ),
+    ],
+  };
 }
 
 export async function GET() {
@@ -615,7 +669,7 @@ export async function GET() {
                     : original.currentPrice;
 
                 if (
-                  originalCostPrice <= 2.7
+                  originalCostPrice <= 3
                 ) {
                   selected = original;
                   trackingTicker =
@@ -648,7 +702,7 @@ export async function GET() {
                       original.ticker;
                     isAlternative = false;
                     alternativeReason =
-                      "لا يوجد عقد بديل مناسب ضمن الحد السعري 2.70$";
+                      "لا يوجد عقد مناسب بسعر 3.00$ أو أقل";
                   } else {
                     selected =
                       alternative;
@@ -656,7 +710,7 @@ export async function GET() {
                       alternative.ticker;
                     isAlternative = true;
                     alternativeReason =
-                      "تم اختيار عقد بديل لأن سعر العقد الأصلي أعلى من 2.70$";
+                      "تم اعتماد أفضل عقد متاح بسعر 3.00$ أو أقل";
                   }
                 }
               }
@@ -725,6 +779,24 @@ export async function GET() {
                     )
                   : 0;
 
+              const stockEntryPrice =
+                numberValue(
+                  row.stock_entry_price
+                ) > 0
+                  ? numberValue(
+                      row.stock_entry_price
+                    )
+                  : selected.stockPrice;
+
+              const whaleStockPlan =
+                buildWhaleStockPlan(
+                  stockEntryPrice,
+                  originalSide,
+                  numberValue(
+                    source.gamma
+                  )
+                );
+
               const {
                 data: updated,
                 error: updateError,
@@ -785,11 +857,18 @@ export async function GET() {
                     selected.quoteAt,
 
                   stock_entry_price:
+                    stockEntryPrice,
+
+                  stop_price:
+                    whaleStockPlan.stopPrice,
+
+                  gamma_targets:
+                    whaleStockPlan.targets,
+
+                  highest_target_hit:
                     numberValue(
-                      row.stock_entry_price
-                    ) > 0
-                      ? row.stock_entry_price
-                      : selected.stockPrice,
+                      row.highest_target_hit
+                    ),
 
                   stock_current_price:
                     selected.stockPrice,

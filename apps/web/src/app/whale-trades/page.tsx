@@ -2,8 +2,7 @@ import Link from "next/link";
 import AutoRefresh from "./auto-refresh";
 
 import { hydrateWhaleTrade } from "@/lib/hydrate-whale-trade";
-import { detectOptionStrategies } from "@/lib/options-strategy-engine";
-import WhaleStrategyCard from "./whale-strategy-card";
+import WhaleOpportunityCard from "./whale-opportunity-card";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
@@ -271,7 +270,71 @@ async function getWhaleTrades(): Promise<WhaleTrade[]> {
 
     const data = await response.json();
 
-    return Array.isArray(data) ? data : [];
+    const whaleTrades =
+      Array.isArray(data)
+        ? data
+        : [];
+
+    /*
+     * لا نعرض إلا الفرص التي تم تجهيز عقد متابعة
+     * لها بسعر دخول لا يتجاوز 3.00 دولار.
+     */
+    const setupsUrl =
+      `${supabaseUrl.replace(/\/+$/, "")}/rest/v1/whale_trade_setups` +
+      "?select=whale_trade_id,entry_price" +
+      "&entry_price=gt.0" +
+      "&entry_price=lte.3";
+
+    const setupsResponse =
+      await fetch(setupsUrl, {
+        headers: {
+          apikey: supabaseSecret,
+          Authorization:
+            `Bearer ${supabaseSecret}`,
+        },
+        cache: "no-store",
+      });
+
+    if (!setupsResponse.ok) {
+      console.error(
+        "Failed to fetch eligible whale setups:",
+        setupsResponse.status,
+        await setupsResponse.text(),
+      );
+
+      return [];
+    }
+
+    const setupsData =
+      await setupsResponse.json();
+
+    const eligibleTradeIds =
+      new Set(
+        (
+          Array.isArray(setupsData)
+            ? setupsData
+            : []
+        ).map(
+          (
+            setup: {
+              whale_trade_id?:
+                | number
+                | string
+                | null;
+            },
+          ) =>
+            String(
+              setup.whale_trade_id ?? "",
+            ),
+        ),
+      );
+
+    return whaleTrades.filter(
+      (trade) =>
+        eligibleTradeIds.has(
+          String(trade.id),
+        ),
+    );
   } catch (error) {
     console.error("Whale trades request failed:", error);
 
@@ -539,12 +602,30 @@ export default async function WhaleTradesPage({
     return true;
   });
 
-  const strategyDetection =
-    detectOptionStrategies(filteredTrades);
+  const rankedTrades = [...filteredTrades]
+    .sort((firstTrade, secondTrade) => {
+      const scoreDifference =
+        safeNumber(secondTrade.whale_score) -
+        safeNumber(firstTrade.whale_score);
+
+      if (scoreDifference !== 0) {
+        return scoreDifference;
+      }
+
+      return (
+        safeNumber(secondTrade.premium_value) -
+        safeNumber(firstTrade.premium_value)
+      );
+    })
+    .slice(0, 10);
+
+  const strategyDetection = {
+    strategies: [],
+    unmatchedTrades: rankedTrades,
+  };
 
   const displayedItemsCount =
-    strategyDetection.strategies.length +
-    strategyDetection.unmatchedTrades.length;
+    rankedTrades.length;
 
   const totalPremium = filteredTrades.reduce(
     (total, trade) => total + safeNumber(trade.premium_value),
@@ -637,483 +718,75 @@ export default async function WhaleTradesPage({
     >
       <div className="mx-auto max-w-7xl">
         <AutoRefresh intervalMs={20_000} />
-        <header className="mb-7 overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-l from-cyan-500/10 via-slate-900/90 to-amber-400/10 p-5 shadow-2xl shadow-black/30 sm:p-8">
-          <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <div className="mb-3 flex flex-wrap items-center gap-2">
-                <span className="rounded-full border border-cyan-400/30 bg-cyan-400/10 px-3 py-1 text-xs font-black text-cyan-300">
-                  LIVE FLOW
-                </span>
+        <header className="mb-7 rounded-3xl border border-white/10 bg-gradient-to-l from-cyan-500/10 via-slate-900/90 to-emerald-500/[0.06] p-5 shadow-2xl shadow-black/30 sm:p-8">
+            <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <p className="text-xs font-black text-cyan-300">
+                  أفضل الفرص المؤسسية الآن
+                </p>
 
-                <span className="rounded-full border border-amber-400/30 bg-amber-400/10 px-3 py-1 text-xs font-black text-amber-300">
-                  الرصد المؤسسي
-                </span>
+                <h1 className="mt-2 text-3xl font-black sm:text-5xl">
+                  فرص الحيتان
+                </h1>
+
+                <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-400 sm:text-base">
+                  يعرض النظام أفضل الفرص المؤسسية التي اجتازت معايير الترشيح،
+                  مع القرار وسبب الاختيار والمتابعة المباشرة داخل بطاقة واحدة.
+                </p>
               </div>
 
-              <h1 className="text-3xl font-black sm:text-5xl">
-                صفقات الحيتان
-              </h1>
-
-              <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-400 sm:text-base">
-                تحليل صفقات الأوبشن الكبيرة حسب قيمة التنفيذ الفعلية،
-                وموقع التنفيذ من Bid وAsk، مع تصنيف Block وSweep المحتمل
-                والتكرار المؤسسي وجودة العقد.
-              </p>
-            </div>
-
-            <div className="flex flex-wrap gap-3">
-              <Link
-                href="/dashboard"
-                className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-bold transition hover:bg-white/10"
-              >
-                ← العودة إلى المنصة
-              </Link>
-
-              <Link
-                href="/whale-active-trades"
-                className="rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-sm font-black text-emerald-300 transition hover:bg-emerald-400/15"
-              >
-                متابعة صفقات الحيتان
-              </Link>
-
-              <Link
-                href={refreshHref}
-                className="rounded-xl bg-cyan-400 px-5 py-3 text-sm font-black text-slate-950 transition hover:bg-cyan-300"
-              >
-                تحديث النتائج
-              </Link>
-            </div>
-          </div>
-        </header>
-
-        <section className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-6">
-          <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-            <p className="text-xs text-slate-500">الصفقات الظاهرة</p>
-            <p className="mt-2 text-3xl font-black">
-              {displayedItemsCount}
-            </p>
-          </div>
-
-          <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-            <p className="text-xs text-slate-500">إجمالي القيمة</p>
-            <p className="mt-2 text-2xl font-black text-amber-300">
-              ${formatMoney(totalPremium)}
-            </p>
-          </div>
-
-          <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/[0.05] p-4">
-            <p className="text-xs text-slate-500">CALL</p>
-            <p className="mt-2 text-2xl font-black text-emerald-300">
-              {callPremiumPct.toFixed(1)}%
-            </p>
-          </div>
-
-          <div className="rounded-2xl border border-rose-400/20 bg-rose-400/[0.05] p-4">
-            <p className="text-xs text-slate-500">PUT</p>
-            <p className="mt-2 text-2xl font-black text-rose-300">
-              {putPremiumPct.toFixed(1)}%
-            </p>
-          </div>
-
-          <div className="rounded-2xl border border-cyan-400/20 bg-cyan-400/[0.05] p-4">
-            <p className="text-xs text-slate-500">Sweep / Block</p>
-            <p className="mt-2 text-2xl font-black text-cyan-300">
-              {sweepCount} / {blockCount}
-            </p>
-          </div>
-
-          <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-            <p className="text-xs text-slate-500">متوسط القوة</p>
-            <p className="mt-2 text-3xl font-black">
-              {averageScore}%
-            </p>
-          </div>
-        </section>
-
-        <section className="mb-6 overflow-hidden rounded-2xl border border-white/10 bg-slate-900/60 p-4 sm:p-5">
-          <div className="mb-3 flex items-center justify-between text-xs">
-            <span className="font-bold text-emerald-300">
-              CALL ${formatMoney(callPremium)}
-            </span>
-
-            <span className="font-bold text-rose-300">
-              PUT ${formatMoney(putPremium)}
-            </span>
-          </div>
-
-          <div className="flex h-3 overflow-hidden rounded-full bg-slate-800">
-            <div
-              className="bg-emerald-400 transition-all"
-              style={{ width: `${callPremiumPct}%` }}
-            />
-
-            <div
-              className="bg-rose-400 transition-all"
-              style={{ width: `${putPremiumPct}%` }}
-            />
-          </div>
-        </section>
-
-        {largestTrade && (
-          <section className="mb-6 rounded-2xl border border-amber-400/25 bg-amber-400/[0.05] p-5">
-            <p className="text-xs font-black text-amber-300">
-              أكبر صفقة مرصودة
-            </p>
-
-            <div className="mt-3 flex flex-wrap items-center gap-3">
-              <span className="text-3xl font-black">
-                {largestTrade.symbol || "—"}
-              </span>
-
-              <span
-                className={`rounded-lg border px-3 py-1 text-sm font-black ${getContractClasses(
-                  getContractType(largestTrade),
-                )}`}
-              >
-                {getContractType(largestTrade).toUpperCase()}
-              </span>
-
-              <span className="text-xl font-black text-amber-300">
-                ${formatMoney(largestTrade.premium_value)}
-              </span>
-
-              <span className="text-sm text-slate-400">
-                Strike {formatNumber(largestTrade.strike, 0)}
-              </span>
-            </div>
-          </section>
-        )}
-
-        <form
-          method="GET"
-          className="mb-7 grid gap-3 rounded-3xl border border-white/10 bg-white/[0.035] p-4 sm:grid-cols-2 sm:p-5 lg:grid-cols-6"
-        >
-          <input
-            name="symbol"
-            defaultValue={symbolFilter}
-            placeholder="رمز السهم"
-            className="rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-sm font-bold uppercase outline-none transition placeholder:text-slate-600 focus:border-cyan-400/50"
-          />
-
-          <select
-            name="type"
-            defaultValue={typeFilter}
-            className="rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-sm font-bold outline-none focus:border-cyan-400/50"
-          >
-            <option value="">CALL وPUT</option>
-            <option value="call">CALL فقط</option>
-            <option value="put">PUT فقط</option>
-          </select>
-
-          <select
-            name="classification"
-            defaultValue={classificationFilter}
-            className="rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-sm font-bold outline-none focus:border-cyan-400/50"
-          >
-            <option value="">جميع التصنيفات</option>
-            <option value="sweep">Sweep محتمل</option>
-            <option value="block">Block</option>
-            <option value="repeat">تكرار مؤسسي</option>
-            <option value="million">صفقات مليونية</option>
-          </select>
-
-          <select
-            name="execution"
-            defaultValue={executionFilter}
-            className="rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-sm font-bold outline-none focus:border-cyan-400/50"
-          >
-            <option value="">كل اتجاهات التنفيذ</option>
-            <option value="BUY">شراء محتمل</option>
-            <option value="SELL">بيع محتمل</option>
-            <option value="UNKNOWN">غير محسوم</option>
-          </select>
-
-          <select
-            name="minPremium"
-            defaultValue={minPremium > 0 ? String(minPremium) : ""}
-            className="rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-sm font-bold outline-none focus:border-cyan-400/50"
-          >
-            <option value="">كل القيم</option>
-            <option value="250000">250 ألف فأكثر</option>
-            <option value="500000">500 ألف فأكثر</option>
-            <option value="1000000">مليون فأكثر</option>
-            <option value="2000000">مليونان فأكثر</option>
-            <option value="5000000">5 ملايين فأكثر</option>
-          </select>
-
-          <div className="flex gap-2">
-            <button
-              type="submit"
-              className="flex-1 rounded-xl bg-cyan-400 px-4 py-3 text-sm font-black text-slate-950 transition hover:bg-cyan-300"
-            >
-              تطبيق
-            </button>
-
-            <Link
-              href="/whale-trades"
-              className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-bold transition hover:bg-white/10"
-            >
-              مسح
-            </Link>
-          </div>
-        </form>
-
-        {filteredTrades.length === 0 ? (
-          <section className="rounded-3xl border border-dashed border-white/15 bg-white/[0.025] px-6 py-20 text-center">
-            <div className="text-6xl">🐋</div>
-
-            <h2 className="mt-5 text-2xl font-black">
-              لا توجد صفقات مطابقة حاليًا
-            </h2>
-
-            <p className="mx-auto mt-3 max-w-xl text-sm leading-7 text-slate-400">
-              قد يكون السوق مغلقًا، أو لم تصل أي صفقة إلى الحد الأدنى
-              المطلوب، أو أن الفلاتر الحالية تستبعد الصفقات الموجودة.
-            </p>
-          </section>
-        ) : (
-          <section className="grid gap-5 xl:grid-cols-2">
-            {strategyDetection.strategies.map((strategy) => (
-              <WhaleStrategyCard
-                key={strategy.id}
-                strategy={strategy}
-              />
-            ))}
-
-            {strategyDetection.unmatchedTrades.map((trade) => {
-              const contractType = getContractType(trade);
-              const whaleScore = Math.round(
-                safeNumber(trade.whale_score),
-              );
-
-              const tradeSize =
-                safeNumber(trade.trade_size) ||
-                safeNumber(trade.volume_change) ||
-                safeNumber(trade.volume);
-
-              return (
-                <article
-                  key={String(trade.id)}
-                  className="overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-b from-white/[0.055] to-white/[0.025] shadow-2xl shadow-black/20"
+              <div className="flex flex-wrap gap-3">
+                <Link
+                  href="/dashboard"
+                  className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-bold transition hover:bg-white/10"
                 >
-                  <div className="flex items-start justify-between gap-4 border-b border-white/10 p-5">
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h2 className="text-3xl font-black">
-                          {trade.symbol || "—"}
-                        </h2>
+                  ← العودة إلى المنصة
+                </Link>
 
-                        <span
-                          className={`rounded-lg border px-3 py-1 text-xs font-black ${getContractClasses(
-                            contractType,
-                          )}`}
-                        >
-                          {contractType.toUpperCase()}
-                        </span>
+                <Link
+                  href="/whale-trades"
+                  className="rounded-xl bg-cyan-400 px-5 py-3 text-sm font-black text-slate-950 transition hover:bg-cyan-300"
+                >
+                  تحديث الفرص
+                </Link>
+              </div>
+            </div>
 
-                        <span className="rounded-lg border border-white/10 bg-white/5 px-3 py-1 text-xs font-black">
-                          Strike {formatNumber(trade.strike, 0)}
-                        </span>
+            <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-white/10 pt-5 text-sm">
+              <span className="rounded-xl border border-cyan-400/20 bg-cyan-400/[0.07] px-4 py-2 font-bold text-cyan-300">
+                {displayedItemsCount} فرص مرشحة
+              </span>
 
-                        {trade.is_sweep && (
-                          <span className="rounded-lg border border-cyan-400/30 bg-cyan-400/10 px-3 py-1 text-xs font-black text-cyan-300">
-                            SWEEP محتمل
-                          </span>
-                        )}
+              <span className="text-slate-500">
+                المتابعة تتحدث تلقائيًا داخل كل فرصة
+              </span>
+            </div>
+          </header>
 
-                        {trade.is_block && (
-                          <span className="rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-1 text-xs font-black text-amber-300">
-                            BLOCK
-                          </span>
-                        )}
-                      </div>
+          {rankedTrades.length === 0 ? (
+            <section className="rounded-3xl border border-dashed border-white/15 bg-white/[0.025] px-6 py-20 text-center">
+              <div className="text-6xl">🐋</div>
 
-                      <p className="mt-3 text-xs text-slate-500">
-                        الانتهاء: {trade.expiration || "—"}
-                      </p>
-                    </div>
+              <h2 className="mt-5 text-2xl font-black">
+                لا توجد فرصة مؤسسية مكتملة حاليًا
+              </h2>
 
-                    <div
-                      className={`min-w-20 rounded-2xl border px-3 py-3 text-center ${getScoreClasses(
-                        whaleScore,
-                      )}`}
-                    >
-                      <p className="text-[10px]">قوة الصفقة</p>
-                      <p className="mt-1 text-2xl font-black">
-                        {whaleScore}%
-                      </p>
-                    </div>
-                  </div>
+              <p className="mx-auto mt-3 max-w-xl text-sm leading-7 text-slate-400">
+                لم تصل أي صفقة إلى معايير الترشيح المطلوبة في الوقت الحالي.
+              </p>
+            </section>
+          ) : (
+            <section className="grid gap-6 xl:grid-cols-2">
+              {rankedTrades.map((trade) => (
+                <WhaleOpportunityCard
+                  key={String(trade.id)}
+                  trade={trade}
+                />
+              ))}
+            </section>
+          )}
 
-                  <div className="grid grid-cols-2 gap-px bg-white/10 sm:grid-cols-4">
-                    <div className="bg-slate-950/90 p-4">
-                      <p className="text-xs text-slate-500">
-                        قيمة الصفقة
-                      </p>
-                      <p className="mt-1 text-lg font-black text-amber-300">
-                        ${formatMoney(trade.premium_value)}
-                      </p>
-                    </div>
-
-                    <div className="bg-slate-950/90 p-4">
-                      <p className="text-xs text-slate-500">
-                        حجم التنفيذ
-                      </p>
-                      <p className="mt-1 text-lg font-black">
-                        {formatInteger(tradeSize)}
-                      </p>
-                    </div>
-
-                    <div className="bg-slate-950/90 p-4">
-                      <p className="text-xs text-slate-500">
-                        الاهتمام المفتوح
-                      </p>
-                      <p className="mt-1 text-lg font-black">
-                        {formatInteger(trade.open_interest)}
-                      </p>
-                    </div>
-
-                    <div className="bg-slate-950/90 p-4">
-                      <p className="text-xs text-slate-500">
-                        سعر العقد
-                      </p>
-                      <p className="mt-1 text-lg font-black">
-                        ${formatNumber(trade.contract_price)}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="space-y-4 p-5">
-                    <div className="flex flex-wrap gap-2">
-                      <span
-                        className={`rounded-lg border px-3 py-2 text-xs font-bold ${getSideClasses(
-                          trade.estimated_side,
-                        )}`}
-                      >
-                        {getClearTradeDecision(trade).label}
-                      </span>
-
-                      <span className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-bold text-slate-300">
-                        {getExecutionLabel(trade.execution_location)}
-                      </span>
-
-                      <span className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-bold text-slate-300">
-                        {trade.money_position || "موضع غير محدد"}
-                      </span>
-
-                      {safeNumber(trade.repeat_count) >= 3 && (
-                        <span className="rounded-lg border border-violet-400/30 bg-violet-400/10 px-3 py-2 text-xs font-bold text-violet-300">
-                          تكرار {formatInteger(trade.repeat_count)} مرات
-                        </span>
-                      )}
-
-                      {trade.hedge_flag && (
-                        <span className="rounded-lg border border-slate-400/30 bg-slate-400/10 px-3 py-2 text-xs font-bold text-slate-300">
-                          تحوط محتمل
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3 rounded-2xl border border-white/10 bg-black/20 p-4 sm:grid-cols-4">
-                      <div>
-                        <p className="text-xs text-slate-500">Bid</p>
-                        <p className="mt-1 font-black">
-                          {formatNumber(trade.bid)}
-                        </p>
-                      </div>
-
-                      <div>
-                        <p className="text-xs text-slate-500">Ask</p>
-                        <p className="mt-1 font-black">
-                          {formatNumber(trade.ask)}
-                        </p>
-                      </div>
-
-                      <div>
-                        <p className="text-xs text-slate-500">السبريد</p>
-                        <p className="mt-1 font-black">
-                          {formatPercent(trade.spread_pct)}
-                        </p>
-                      </div>
-
-                      <div>
-                        <p className="text-xs text-slate-500">IV</p>
-                        <p className="mt-1 font-black">
-                          {formatPercent(
-                            safeNumber(trade.iv) * 100,
-                          )}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3 rounded-2xl border border-white/10 bg-black/20 p-4 sm:grid-cols-5">
-                      <div>
-                        <p className="text-xs text-slate-500">
-                          سعر السهم
-                        </p>
-                        <p className="mt-1 font-bold">
-                          ${formatNumber(trade.stock_price)}
-                        </p>
-                      </div>
-
-                      <div>
-                        <p className="text-xs text-slate-500">Delta</p>
-                        <p className="mt-1 font-bold">
-                          {formatNumber(trade.delta, 3)}
-                        </p>
-                      </div>
-
-                      <div>
-                        <p className="text-xs text-slate-500">Gamma</p>
-                        <p className="mt-1 font-bold">
-                          {formatNumber(trade.gamma, 4)}
-                        </p>
-                      </div>
-
-                      <div>
-                        <p className="text-xs text-slate-500">Theta</p>
-                        <p className="mt-1 font-bold">
-                          {formatNumber(trade.theta, 3)}
-                        </p>
-                      </div>
-
-                      <div>
-                        <p className="text-xs text-slate-500">Vega</p>
-                        <p className="mt-1 font-bold">
-                          {formatNumber(trade.vega, 3)}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="rounded-2xl border border-cyan-400/15 bg-cyan-400/[0.035] p-4">
-                      <p className="mb-2 text-xs font-black text-cyan-300">
-                        تحليل الصفقة
-                      </p>
-
-                      <p className="text-sm leading-7 text-slate-300">
-                        {trade.reason ||
-                          "لم يكتمل تحليل هذه الصفقة بعد."}
-                      </p>
-                    </div>
-
-                    <div className="flex flex-col gap-2 border-t border-white/10 pt-4 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
-                      <span>
-                        {trade.direction_status ||
-                          "اتجاه التنفيذ غير محسوم"}
-                      </span>
-
-                      <span>
-                        آخر تنفيذ: {formatDate(getTradeTime(trade))}
-                      </span>
-                    </div>
-                  </div>
-                </article>
-              );
-            })}
-          </section>
-        )}
-
-        <section className="mt-7 rounded-2xl border border-amber-400/20 bg-amber-400/[0.04] p-5">
+          <section className="mt-7 rounded-2xl border border-amber-400/20 bg-amber-400/[0.04] p-5">
           <h3 className="font-black text-amber-300">
             ملاحظات مهمة
           </h3>
