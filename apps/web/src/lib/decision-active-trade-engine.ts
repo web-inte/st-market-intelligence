@@ -650,6 +650,10 @@ export async function syncDecisionActiveTrade(
         side,
         contract_ticker:
           contractTicker,
+        contract_strike:
+          Number(contract.strike) || null,
+        contract_expiration:
+          contract.expiration || null,
         entry_price:
           entryPrice,
         entry_score:
