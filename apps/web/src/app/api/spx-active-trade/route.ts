@@ -66,26 +66,78 @@ function round(value: number, digits = 2) {
 }
 
 
+function todayNewYork() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+
 function isSpxDailyWindowOpen() {
   const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Riyadh",
+    timeZone: "America/New_York",
+    weekday: "short",
     hour: "2-digit",
     minute: "2-digit",
     hourCycle: "h23",
   }).formatToParts(new Date());
 
+  const weekday =
+    parts.find(
+      (part) => part.type === "weekday"
+    )?.value || "";
+
   const hour = Number(
-    parts.find((part) => part.type === "hour")?.value || 0
+    parts.find(
+      (part) => part.type === "hour"
+    )?.value || 0
   );
 
   const minute = Number(
-    parts.find((part) => part.type === "minute")?.value || 0
+    parts.find(
+      (part) => part.type === "minute"
+    )?.value || 0
   );
 
-  const totalMinutes = hour * 60 + minute;
+  const totalMinutes =
+    hour * 60 + minute;
 
-  return totalMinutes >= 3 * 60 + 30 &&
-    totalMinutes < 23 * 60;
+  const morningTradingDay =
+    ["Mon", "Tue", "Wed", "Thu", "Fri"].includes(
+      weekday
+    );
+
+  const eveningTradingDay =
+    ["Sun", "Mon", "Tue", "Wed", "Thu"].includes(
+      weekday
+    );
+
+  // جلسة GTH:
+  // 20:15 مساءً حتى 09:25 صباحًا بتوقيت نيويورك.
+  const globalSessionOpen =
+    (
+      eveningTradingDay &&
+      totalMinutes >= 20 * 60 + 15
+    ) ||
+    (
+      morningTradingDay &&
+      totalMinutes < 9 * 60 + 25
+    );
+
+  // جلسة RTH لعقد SPXW المنتهي في اليوم نفسه:
+  // 09:30 صباحًا حتى 16:00 مساءً بتوقيت نيويورك.
+  const regularZeroDteSessionOpen =
+    morningTradingDay &&
+    totalMinutes >= 9 * 60 + 30 &&
+    totalMinutes < 16 * 60;
+
+  return (
+    globalSessionOpen ||
+    regularZeroDteSessionOpen
+  );
 }
 
 function createAdminClient() {
@@ -268,8 +320,62 @@ export async function GET(
     const supabase =
       createAdminClient();
 
+
     const nowIso =
       new Date().toISOString();
+
+
+    const today =
+      todayNewYork();
+
+    const stoppedCutoff =
+      new Date(
+        Date.now() -
+          30 * 60 * 1000
+      ).toISOString();
+
+    /*
+      تنظيف صفقات SPX القديمة:
+      1) عقود الأيام السابقة تختفي فورًا.
+      2) الصفقات التي ضربت الوقف تختفي بعد 30 دقيقة.
+    */
+    const {
+      error: expiredCleanupError,
+    } = await supabase
+      .from("spx_trade_setups")
+      .update({
+        status: "EXPIRED",
+        hidden_after: nowIso,
+        last_error:
+          "انتهى تاريخ عقد SPX",
+      })
+      .in("status", [
+        "WATCH",
+        "ACTIVE",
+      ])
+      .lt("expiration", today);
+
+    if (expiredCleanupError) {
+      throw expiredCleanupError;
+    }
+
+    const {
+      error: stoppedCleanupError,
+    } = await supabase
+      .from("spx_trade_setups")
+      .update({
+        hidden_after: nowIso,
+      })
+      .eq("status", "STOPPED")
+      .lt(
+        "stopped_at",
+        stoppedCutoff
+      );
+
+    if (stoppedCleanupError) {
+      throw stoppedCleanupError;
+    }
+
 
     const {
       data: visibleTrades,
@@ -316,9 +422,6 @@ export async function GET(
     const session =
       await sessionResponse.json();
 
-    const signal =
-      await fetchSpxSignal(request);
-
     const spxDailyWindowOpen =
       isSpxDailyWindowOpen();
 
@@ -333,9 +436,9 @@ export async function GET(
           activeTrade: null,
           trades:
             visibleTrades || [],
-          signal,
+          signal: null,
           message:
-            "السوق مغلق — لا يتم إصدار فرصة SPX اليومية.",
+            "تداول SPX اليومي مغلق حاليًا — تبدأ المتابعة عند افتتاح جلسة GTH أو RTH القادمة.",
           marketSession:
             session,
           updatedAt:
@@ -350,19 +453,63 @@ export async function GET(
       );
     }
 
-    if (liveTrade) {
-      const snapshot =
-        await fetchContractSnapshot(
-          textValue(
-            liveTrade.option_ticker
-          ),
-          massiveApiKey
-        );
+    const signal =
+      await fetchSpxSignal(request);
 
+    if (liveTrade) {
       const entryPrice =
         numberValue(
           liveTrade.entry_price
         );
+
+      let snapshotErrorMessage:
+        string | null = null;
+
+      let snapshot = {
+        bid: numberValue(
+          liveTrade.current_bid
+        ),
+        ask: numberValue(
+          liveTrade.current_ask
+        ),
+        midpoint: numberValue(
+          liveTrade.current_price,
+          entryPrice
+        ),
+        currentPrice: numberValue(
+          liveTrade.current_price,
+          entryPrice
+        ),
+        quoteAt:
+          textValue(
+            liveTrade.last_quote_at
+          ) || nowIso,
+      };
+
+      try {
+        snapshot =
+          await fetchContractSnapshot(
+            textValue(
+              liveTrade.option_ticker
+            ),
+            massiveApiKey
+          );
+      } catch (snapshotError) {
+        snapshotErrorMessage =
+          snapshotError instanceof Error
+            ? snapshotError.message
+            : "تعذر تحديث سعر العقد مؤقتًا";
+
+        console.warn(
+          "SPX contract snapshot unavailable:",
+          {
+            ticker:
+              liveTrade.option_ticker,
+            error:
+              snapshotErrorMessage,
+          }
+        );
+      }
 
       const currentPrice =
         snapshot.currentPrice;
@@ -451,7 +598,6 @@ export async function GET(
               Date.now() +
                 30 *
                   60 *
-                  60 *
                   1000
             ).toISOString()
           : null;
@@ -494,7 +640,7 @@ export async function GET(
           snapshot.quoteAt,
 
         last_error:
-          null,
+          snapshotErrorMessage,
 
         ...(stopped
           ? {

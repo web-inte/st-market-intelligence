@@ -599,217 +599,661 @@ export default function SpxWhalesPage() {
     market?.flowGap || 0
   );
 
-  const marketStructureNotes: string[] = [];
-
-  if (gamma) {
-    marketStructureNotes.push(
-      gamma.netGex < 0
-        ? "🔴 Net GEX سالب — السوق أكثر قابلية لاتساع الحركة وارتفاع التقلب."
-        : gamma.netGex > 0
-          ? "🟢 Net GEX موجب — تحركات صناع السوق قد تساعد على تهدئة التقلب."
-          : "🟡 Net GEX متعادل — لا توجد أفضلية واضحة من هيكل القاما."
-    );
-
-    if (
-      spxPrice > 0 &&
-      gamma.netGexFlip > 0
-    ) {
-      const distanceToNetGexFlip =
-        Math.abs(
-          spxPrice - gamma.netGexFlip
-        );
-
-      marketStructureNotes.push(
-        distanceToNetGexFlip <= 5
-          ? `🟣 السعر قريب من Net GEX Flip عند ${formatNumber(
-              gamma.netGexFlip,
-              0
-            )} — مستوى تفاعل لحظي قد يعمل دعمًا أو مقاومة.`
-          : spxPrice > gamma.netGexFlip
-            ? `🟢 السعر أعلى Net GEX Flip ${formatNumber(
-                gamma.netGexFlip,
-                0
-              )} — المستوى اللحظي يعمل أسفل السعر كدعم محتمل.`
-            : `🔴 السعر أسفل Net GEX Flip ${formatNumber(
-                gamma.netGexFlip,
-                0
-              )} — المستوى اللحظي يعمل أعلى السعر كمقاومة محتملة.`
-      );
-    }
-
-    if (
-      spxPrice > 0 &&
-      gamma.zeroGamma != null &&
-      gamma.zeroGamma > 0
-    ) {
-      const distanceToZeroGamma =
-        Math.abs(
-          spxPrice - gamma.zeroGamma
-        );
-
-      marketStructureNotes.push(
-        distanceToZeroGamma <= 5
-          ? `🟡 السعر قريب من Zero Gamma عند ${formatNumber(
-              gamma.zeroGamma,
-              0
-            )} — السوق عند منطقة تحول في بيئة القاما.`
-          : spxPrice > gamma.zeroGamma
-            ? `🟢 السعر أعلى Zero Gamma ${formatNumber(
-                gamma.zeroGamma,
-                0
-              )} — بيئة القاما تميل إلى الاستقرار النسبي فوق المستوى.`
-            : `🔴 السعر أسفل Zero Gamma ${formatNumber(
-                gamma.zeroGamma,
-                0
-              )} — بيئة القاما أكثر قابلية لاتساع الحركة أسفل المستوى.`
-      );
-    }
-
-    if (
-      gamma.zeroGamma != null &&
-      gamma.netGexFlip > 0
-    ) {
-      const flipGap =
-        Math.abs(
-          gamma.zeroGamma -
-            gamma.netGexFlip
-        );
-
-      if (flipGap <= 10) {
-        marketStructureNotes.push(
-          `🔵 Net GEX Flip وZero Gamma متقاربان بفارق ${formatNumber(
-            flipGap,
-            0
-          )} نقاط — المنطقة بينهما تُعد محورًا مهمًا لحركة SPX.`
-        );
-      }
-    }
-
-    marketStructureNotes.push(
-      market?.gammaChop
-        ? "🔴 Gamma Chop نشط — احتمالية التذبذب والاختراقات الكاذبة مرتفعة."
-        : "🟢 لا توجد حالة Gamma Chop — الحركة أكثر ملاءمة لبناء اتجاه."
-    );
-
-    if (
-      spxPrice > 0 &&
-      gamma.magnet > 0
-    ) {
-      const distanceToMagnet =
-        Math.abs(
-          spxPrice - gamma.magnet
-        );
-
-      marketStructureNotes.push(
-        distanceToMagnet <= 10
-          ? `🟡 السعر قريب من Magnet بفارق ${formatNumber(
-              distanceToMagnet,
-              0
-            )} نقاط — احتمال الانجذاب إليه مرتفع.`
-          : `🔵 Magnet يبعد ${formatNumber(
-              distanceToMagnet,
-              0
-            )} نقطة عن السعر الحالي.`
-      );
-    }
-  }
-
-  const gammaStructureNotes: string[] = [];
-
-  if (gamma) {
-    if (
-      spxPrice > 0 &&
-      gamma.callWall > 0
-    ) {
-      const callWallDistance =
-        gamma.callWall - spxPrice;
-
-      gammaStructureNotes.push(
-        callWallDistance > 0
-          ? `🟢 Call Wall عند ${formatNumber(
-              gamma.callWall,
-              0
-            )} ويبعد ${formatNumber(
-              callWallDistance,
-              0
-            )} نقطة — يمثل المقاومة الرئيسية أعلى السعر.`
-          : `🟡 السعر عند أو أعلى Call Wall ${formatNumber(
-              gamma.callWall,
-              0
-            )} — راقب ثبات الاختراق قبل الاعتماد على استمرار الصعود.`
-      );
-    }
-
-    if (
-      spxPrice > 0 &&
-      gamma.putWall > 0
-    ) {
-      const putWallDistance =
-        spxPrice - gamma.putWall;
-
-      gammaStructureNotes.push(
-        putWallDistance > 0
-          ? `🔴 Put Wall عند ${formatNumber(
-              gamma.putWall,
-              0
-            )} ويبعد ${formatNumber(
-              putWallDistance,
-              0
-            )} نقطة — يمثل الدعم الرئيسي أسفل السعر.`
-          : `🟡 السعر عند أو أسفل Put Wall ${formatNumber(
-              gamma.putWall,
-              0
-            )} — كسر المستوى قد يوسع الحركة الهابطة.`
-      );
-    }
-
-    gammaStructureNotes.push(
-      `🟢 أقوى Gamma CALL عند سترايك ${formatNumber(
-        gamma.strongestCallGammaStrike,
-        0
-      )} بقوة ${compactNumber(
-        gamma.strongestCallGammaValue
-      )}.`
-    );
-
-    gammaStructureNotes.push(
-      `🔴 أقوى Gamma PUT عند سترايك ${formatNumber(
-        gamma.strongestPutGammaStrike,
-        0
-      )} بقوة ${compactNumber(
-        gamma.strongestPutGammaValue
-      )}.`
-    );
-  }
-
   const flowDirection =
     market?.direction || "NEUTRAL";
+
+  const callFlowPct = Number(
+    market?.callFlowPct || 0
+  );
+
+  const putFlowPct = Number(
+    market?.putFlowPct || 0
+  );
+
+  const netGex = Number(
+    gamma?.netGex || 0
+  );
+
+  const zeroGamma =
+    gamma?.zeroGamma != null
+      ? Number(gamma.zeroGamma)
+      : 0;
+
+  const netGexFlip = Number(
+    gamma?.netGexFlip || 0
+  );
+
+  const magnet = Number(
+    gamma?.magnet || 0
+  );
+
+  const callWall = Number(
+    gamma?.callWall || 0
+  );
+
+  const putWall = Number(
+    gamma?.putWall || 0
+  );
+
+  const pivotLevels = [
+    netGexFlip,
+    zeroGamma,
+    magnet,
+    putWall,
+  ].filter(
+    (level) =>
+      Number.isFinite(level) &&
+      level > 0 &&
+      (
+        spxPrice <= 0 ||
+        Math.abs(level - spxPrice) <= 30
+      )
+  );
+
+  const pivotLow =
+    pivotLevels.length > 0
+      ? Math.min(...pivotLevels)
+      : 0;
+
+  const pivotHigh =
+    pivotLevels.length > 0
+      ? Math.max(...pivotLevels)
+      : 0;
+
+  const pivotLabel =
+    pivotLow > 0 && pivotHigh > 0
+      ? Math.abs(pivotHigh - pivotLow) < 1
+        ? formatNumber(pivotLow, 0)
+        : `${formatNumber(
+            pivotLow,
+            0
+          )} – ${formatNumber(
+            pivotHigh,
+            0
+          )}`
+      : "غير محددة";
+
+  const marketReading =
+    flowDirection === "CALL"
+      ? `تدفق CALL متفوق بنسبة ${formatNumber(
+          callFlowPct
+        )}% مقابل ${formatNumber(
+          putFlowPct
+        )}% لـ PUT${
+          netGex > 0
+            ? "، وصافي القاما موجب"
+            : netGex < 0
+              ? "، لكن صافي القاما سالب"
+              : ""
+        }${
+          market?.gammaChop
+            ? "، مع وجود Gamma Chop"
+            : "، ولا توجد حالة Gamma Chop"
+        }.`
+      : flowDirection === "PUT"
+        ? `تدفق PUT متفوق بنسبة ${formatNumber(
+            putFlowPct
+          )}% مقابل ${formatNumber(
+            callFlowPct
+          )}% لـ CALL${
+            netGex > 0
+              ? "، وصافي القاما موجب"
+              : netGex < 0
+                ? "، وصافي القاما سالب"
+                : ""
+          }${
+            market?.gammaChop
+              ? "، مع وجود Gamma Chop"
+              : "، ولا توجد حالة Gamma Chop"
+          }.`
+        : `تدفقات CALL وPUT متقاربة، ولا توجد أفضلية اتجاه واضحة${
+            market?.gammaChop
+              ? " مع وجود Gamma Chop."
+              : "."
+          }`;
+
+  const primaryScenario =
+    flowDirection === "CALL"
+      ? pivotHigh > 0 && callWall > pivotHigh
+        ? `الثبات فوق المنطقة المحورية ${pivotLabel} يدعم استمرار الحركة باتجاه Call Wall عند ${formatNumber(
+            callWall,
+            0
+          )}.`
+        : "الأفضلية تميل إلى CALL، لكن لا توجد مساحة واضحة كافية حتى المقاومة التالية."
+      : flowDirection === "PUT"
+        ? pivotLow > 0 && putWall < pivotLow
+          ? `الثبات أسفل المنطقة المحورية ${pivotLabel} يدعم استمرار الحركة باتجاه Put Wall عند ${formatNumber(
+              putWall,
+              0
+            )}.`
+          : "الأفضلية تميل إلى PUT، لكن لا توجد مساحة واضحة كافية حتى الدعم التالي."
+        : "لا يوجد سيناريو اتجاهي واضح حاليًا؛ الأفضل انتظار اتساع فرق التدفق وخروج السعر من المنطقة المحورية.";
+
+  const invalidationScenario =
+    flowDirection === "CALL"
+      ? pivotLow > 0
+        ? `كسر ${formatNumber(
+            pivotLow,
+            0
+          )} والثبات أسفله يضعف سيناريو CALL ويستدعي إعادة التقييم.`
+        : "انقلاب Flow إلى PUT أو ظهور Gamma Chop يلغي أفضلية CALL الحالية."
+      : flowDirection === "PUT"
+        ? pivotHigh > 0
+          ? `اختراق ${formatNumber(
+              pivotHigh,
+              0
+            )} والثبات فوقه يضعف سيناريو PUT ويستدعي إعادة التقييم.`
+          : "انقلاب Flow إلى CALL أو اختفاء الضغط البيعي يلغي أفضلية PUT الحالية."
+        : "يظل سيناريو الانتظار قائمًا حتى يظهر تفوق واضح في Flow ويخرج السعر من نطاق التذبذب.";
+
+  const confidenceReasons: string[] = [];
+
+  if (flowDirection !== "NEUTRAL") {
+    confidenceReasons.push(
+      "✅ اتجاه Flow واضح"
+    );
+  } else {
+    confidenceReasons.push(
+      "⚠️ اتجاه Flow محايد"
+    );
+  }
+
+  if (netGex > 0) {
+    confidenceReasons.push(
+      "✅ Net GEX موجب"
+    );
+  } else if (netGex < 0) {
+    confidenceReasons.push(
+      "⚠️ Net GEX سالب ويرفع التقلب"
+    );
+  }
+
+  confidenceReasons.push(
+    market?.gammaChop
+      ? "⚠️ Gamma Chop نشط"
+      : "✅ لا يوجد Gamma Chop"
+  );
+
+  if (
+    pivotLow > 0 &&
+    pivotHigh > 0
+  ) {
+    confidenceReasons.push(
+      `✅ المنطقة المحورية محددة عند ${pivotLabel}`
+    );
+  }
 
   const systemScore = Math.max(
     0,
     Math.min(
       100,
       Math.round(
-        50 +
-          Math.min(Math.abs(flowGap), 20) * 1.5 +
-          (market?.gammaChop ? -20 : 10) +
-          (flowDirection === "NEUTRAL" ? -15 : 10)
+        45 +
+          Math.min(
+            Math.abs(flowGap),
+            25
+          ) *
+            1.4 +
+          (
+            flowDirection === "NEUTRAL"
+              ? -15
+              : 10
+          ) +
+          (
+            market?.gammaChop
+              ? -20
+              : 10
+          ) +
+          (
+            pivotLevels.length >= 2
+              ? 10
+              : 0
+          )
       )
     )
   );
 
-  const systemDirection =
+  type GammaLevelSummary = {
+    key: string;
+    label: string;
+    price: number;
+    role: string;
+    distance: number;
+    side: "ABOVE" | "BELOW" | "AT";
+  };
+
+  const gammaLevels: GammaLevelSummary[] = [];
+
+  const addGammaLevel = (
+    key: string,
+    label: string,
+    rawPrice: number,
+    role: string
+  ) => {
+    const price = Number(rawPrice || 0);
+
+    if (!Number.isFinite(price) || price <= 0) {
+      return;
+    }
+
+    const difference =
+      spxPrice > 0
+        ? price - spxPrice
+        : 0;
+
+    gammaLevels.push({
+      key,
+      label,
+      price,
+      role,
+      distance: Math.abs(difference),
+      side:
+        difference > 1
+          ? "ABOVE"
+          : difference < -1
+            ? "BELOW"
+            : "AT",
+    });
+  };
+
+  if (gamma) {
+    addGammaLevel(
+      "call-wall",
+      "Call Wall",
+      gamma.callWall,
+      "المقاومة الرئيسية"
+    );
+
+    addGammaLevel(
+      "put-wall",
+      "Put Wall",
+      gamma.putWall,
+      "الدعم الرئيسي"
+    );
+
+    addGammaLevel(
+      "magnet",
+      "Magnet",
+      gamma.magnet,
+      "منطقة جذب سعري"
+    );
+
+    addGammaLevel(
+      "net-gex-flip",
+      "Net GEX Flip",
+      gamma.netGexFlip,
+      "مستوى تفاعل لحظي"
+    );
+
+    if (gamma.zeroGamma != null) {
+      addGammaLevel(
+        "zero-gamma",
+        "Zero Gamma",
+        gamma.zeroGamma,
+        "منطقة تحول في بيئة القاما"
+      );
+    }
+  }
+
+  const sortedGammaLevels =
+    [...gammaLevels].sort(
+      (first, second) =>
+        first.distance -
+        second.distance
+    );
+
+  const nearestSupport =
+    sortedGammaLevels.find(
+      (level) =>
+        level.side === "BELOW" &&
+        (
+          level.key === "put-wall" ||
+          level.key === "net-gex-flip" ||
+          level.key === "zero-gamma" ||
+          level.key === "magnet"
+        )
+    ) || null;
+
+  const nearestResistance =
+    sortedGammaLevels.find(
+      (level) =>
+        level.side === "ABOVE" &&
+        (
+          level.key === "call-wall" ||
+          level.key === "net-gex-flip" ||
+          level.key === "zero-gamma" ||
+          level.key === "magnet"
+        )
+    ) || null;
+
+  const clusteredLevels =
+    gammaLevels.filter(
+      (level) =>
+        spxPrice > 0 &&
+        level.distance <= 10
+    );
+
+  const gammaClusterLow =
+    clusteredLevels.length > 0
+      ? Math.min(
+          ...clusteredLevels.map(
+            (level) => level.price
+          )
+        )
+      : 0;
+
+  const gammaClusterHigh =
+    clusteredLevels.length > 0
+      ? Math.max(
+          ...clusteredLevels.map(
+            (level) => level.price
+          )
+        )
+      : 0;
+
+  const gammaClusterLabel =
+    gammaClusterLow > 0 &&
+    gammaClusterHigh > 0
+      ? Math.abs(
+          gammaClusterHigh -
+            gammaClusterLow
+        ) < 1
+        ? formatNumber(
+            gammaClusterLow,
+            0
+          )
+        : `${formatNumber(
+            gammaClusterLow,
+            0
+          )} – ${formatNumber(
+            gammaClusterHigh,
+            0
+          )}`
+      : "لا توجد منطقة متقاربة حاليًا";
+
+  const gammaRiskSummary =
+    clusteredLevels.length >= 3
+      ? `توجد كثافة مرتفعة من مستويات القاما قرب السعر داخل نطاق ${gammaClusterLabel}، لذلك هذه المنطقة مرشحة لتفاعل قوي أو تذبذب قبل تحديد الاتجاه.`
+      : clusteredLevels.length === 2
+        ? `يوجد تداخل بين مستويين مهمين قرب السعر عند ${gammaClusterLabel}، ما يجعل المنطقة حساسة للاختراق أو الارتداد.`
+        : "مستويات القاما متباعدة نسبيًا، لذلك الحركة بين الدعم والمقاومة قد تكون أوضح.";
+
+  const strongestGammaBias =
+    gamma &&
+    gamma.strongestCallGammaValue >
+      gamma.strongestPutGammaValue
+      ? `تجمع Gamma CALL أقوى عند ${formatNumber(
+          gamma.strongestCallGammaStrike,
+          0
+        )} بقوة ${compactNumber(
+          gamma.strongestCallGammaValue
+        )}.`
+      : gamma &&
+          gamma.strongestPutGammaValue >
+            gamma.strongestCallGammaValue
+        ? `تجمع Gamma PUT أقوى عند ${formatNumber(
+            gamma.strongestPutGammaStrike,
+            0
+          )} بقوة ${compactNumber(
+            gamma.strongestPutGammaValue
+          )}.`
+        : "قوة Gamma CALL وPUT متقاربة، ولا توجد أفضلية واضحة من التجمعات.";
+
+  const decisionSupportFactors: string[] = [];
+  const decisionRiskFactors: string[] = [];
+
+  let advancedDecisionScore = 50;
+
+  const flowStrength =
+    Math.abs(callFlowPct - putFlowPct);
+
+  if (flowDirection === "CALL") {
+    advancedDecisionScore += Math.min(
+      20,
+      flowStrength * 0.8
+    );
+
+    decisionSupportFactors.push(
+      `تفوق CALL Flow بنسبة ${formatNumber(
+        callFlowPct
+      )}%`
+    );
+  } else if (flowDirection === "PUT") {
+    advancedDecisionScore += Math.min(
+      20,
+      flowStrength * 0.8
+    );
+
+    decisionSupportFactors.push(
+      `تفوق PUT Flow بنسبة ${formatNumber(
+        putFlowPct
+      )}%`
+    );
+  } else {
+    advancedDecisionScore -= 20;
+
+    decisionRiskFactors.push(
+      "تدفقات CALL وPUT متقاربة"
+    );
+  }
+
+  if (market?.gammaChop) {
+    advancedDecisionScore -= 22;
+
+    decisionRiskFactors.push(
+      "Gamma Chop نشط ويرفع احتمالية الاختراقات الكاذبة"
+    );
+  } else {
+    advancedDecisionScore += 10;
+
+    decisionSupportFactors.push(
+      "لا توجد حالة Gamma Chop"
+    );
+  }
+
+  if (netGex > 0) {
+    if (flowDirection !== "NEUTRAL") {
+      advancedDecisionScore += 7;
+    }
+
+    decisionSupportFactors.push(
+      "Net GEX موجب ويميل إلى تهدئة التقلب"
+    );
+  } else if (netGex < 0) {
+    advancedDecisionScore -= 3;
+
+    decisionRiskFactors.push(
+      "Net GEX سالب وقد يوسّع الحركة بسرعة"
+    );
+  }
+
+  const aboveZeroGamma =
+    zeroGamma > 0 &&
+    spxPrice > zeroGamma;
+
+  const belowZeroGamma =
+    zeroGamma > 0 &&
+    spxPrice < zeroGamma;
+
+  if (
+    flowDirection === "CALL" &&
+    aboveZeroGamma
+  ) {
+    advancedDecisionScore += 10;
+
+    decisionSupportFactors.push(
+      "السعر أعلى Zero Gamma ويدعم سيناريو CALL"
+    );
+  } else if (
+    flowDirection === "PUT" &&
+    belowZeroGamma
+  ) {
+    advancedDecisionScore += 10;
+
+    decisionSupportFactors.push(
+      "السعر أسفل Zero Gamma ويدعم سيناريو PUT"
+    );
+  } else if (
+    flowDirection === "CALL" &&
+    belowZeroGamma
+  ) {
+    advancedDecisionScore -= 12;
+
+    decisionRiskFactors.push(
+      "السعر أسفل Zero Gamma رغم تفوق CALL"
+    );
+  } else if (
+    flowDirection === "PUT" &&
+    aboveZeroGamma
+  ) {
+    advancedDecisionScore -= 12;
+
+    decisionRiskFactors.push(
+      "السعر أعلى Zero Gamma رغم تفوق PUT"
+    );
+  }
+
+  const distanceToMagnet =
+    magnet > 0 && spxPrice > 0
+      ? Math.abs(spxPrice - magnet)
+      : 999;
+
+  if (distanceToMagnet <= 5) {
+    advancedDecisionScore -= 8;
+
+    decisionRiskFactors.push(
+      "السعر ملاصق لـ Magnet وقد يبقى في حالة جذب وتذبذب"
+    );
+  } else if (distanceToMagnet <= 10) {
+    advancedDecisionScore -= 4;
+
+    decisionRiskFactors.push(
+      "السعر قريب من Magnet"
+    );
+  }
+
+  const callRoom =
+    callWall > 0 && spxPrice > 0
+      ? callWall - spxPrice
+      : 0;
+
+  const putRoom =
+    putWall > 0 && spxPrice > 0
+      ? spxPrice - putWall
+      : 0;
+
+  if (flowDirection === "CALL") {
+    if (callRoom >= 15) {
+      advancedDecisionScore += 8;
+
+      decisionSupportFactors.push(
+        `توجد مساحة ${formatNumber(
+          callRoom,
+          0
+        )} نقطة حتى Call Wall`
+      );
+    } else if (callRoom > 0) {
+      advancedDecisionScore -= 8;
+
+      decisionRiskFactors.push(
+        `المسافة إلى Call Wall محدودة: ${formatNumber(
+          callRoom,
+          0
+        )} نقاط`
+      );
+    }
+  }
+
+  if (flowDirection === "PUT") {
+    if (putRoom >= 15) {
+      advancedDecisionScore += 8;
+
+      decisionSupportFactors.push(
+        `توجد مساحة ${formatNumber(
+          putRoom,
+          0
+        )} نقطة حتى Put Wall`
+      );
+    } else if (putRoom > 0) {
+      advancedDecisionScore -= 8;
+
+      decisionRiskFactors.push(
+        `المسافة إلى Put Wall محدودة: ${formatNumber(
+          putRoom,
+          0
+        )} نقاط`
+      );
+    }
+  }
+
+  const modeledDecisionScore = Math.max(
+    0,
+    Math.min(
+      100,
+      Math.round(
+        advancedDecisionScore
+      )
+    )
+  );
+
+  const advancedDecision =
     market?.gammaChop ||
-    flowDirection === "NEUTRAL"
+    flowDirection === "NEUTRAL" ||
+    modeledDecisionScore < 65
       ? "انتظار"
       : flowDirection;
 
-  const systemSummary =
-    systemDirection === "CALL"
-      ? "الأفضلية الحالية تميل إلى CALL، بشرط وجود مساحة كافية قبل Call Wall واستمرار تفوق تدفق CALL."
-      : systemDirection === "PUT"
-        ? "الأفضلية الحالية تميل إلى PUT، بشرط بقاء الضغط البيعي ووجود مساحة كافية قبل Put Wall."
-        : "لا توجد أفضلية كافية حاليًا، والأفضل انتظار اتساع فرق التدفق أو خروج السعر من منطقة التذبذب.";
+  const decisionQuality =
+    modeledDecisionScore >= 85
+      ? "ممتازة"
+      : modeledDecisionScore >= 75
+        ? "جيدة"
+        : modeledDecisionScore >= 65
+          ? "مقبولة بحذر"
+          : "غير مؤهلة";
+
+  const decisionRiskLevel =
+    market?.gammaChop ||
+    modeledDecisionScore < 60
+      ? "مرتفع"
+      : netGex < 0 ||
+          distanceToMagnet <= 10
+        ? "متوسط"
+        : "منخفض";
+
+  const activationCondition =
+    advancedDecision === "CALL"
+      ? pivotHigh > 0
+        ? `الثبات فوق ${formatNumber(
+            pivotHigh,
+            0
+          )} مع استمرار تفوق CALL Flow.`
+        : "استمرار تفوق CALL Flow مع اختراق المقاومة الأقرب والثبات فوقها."
+      : advancedDecision === "PUT"
+        ? pivotLow > 0
+          ? `الثبات أسفل ${formatNumber(
+              pivotLow,
+              0
+            )} مع استمرار تفوق PUT Flow.`
+          : "استمرار تفوق PUT Flow مع كسر الدعم الأقرب والثبات أسفله."
+        : "انتظار اتساع فرق Flow وخروج السعر بوضوح من منطقة التفاعل.";
+
+  const advancedInvalidation =
+    advancedDecision === "CALL"
+      ? pivotLow > 0
+        ? `كسر ${formatNumber(
+            pivotLow,
+            0
+          )} أو انقلاب Flow إلى PUT.`
+        : "انقلاب Flow إلى PUT أو ظهور Gamma Chop."
+      : advancedDecision === "PUT"
+        ? pivotHigh > 0
+          ? `اختراق ${formatNumber(
+              pivotHigh,
+              0
+            )} أو انقلاب Flow إلى CALL.`
+          : "انقلاب Flow إلى CALL أو ظهور Gamma Chop."
+        : "لا يوجد إلغاء قبل تفعيل سيناريو واضح.";
 
   return (
     <main
@@ -1064,91 +1508,386 @@ export default function SpxWhalesPage() {
             </section>
 
 
-            <section className="mt-6 grid gap-4 lg:grid-cols-3">
-              <article className="rounded-3xl border border-cyan-400/20 bg-cyan-400/[0.05] p-5">
+            <section className="mt-6 rounded-3xl border border-cyan-400/20 bg-slate-900/70 p-5 sm:p-6">
+              <div>
                 <p className="text-xs font-black text-cyan-300">
                   المرحلة الأولى
                 </p>
 
-                <h2 className="mt-2 text-xl font-black">
-                  هيكل السوق
+                <h2 className="mt-2 text-2xl font-black">
+                  التقرير التنفيذي
                 </h2>
+              </div>
 
-                <div className="mt-4 space-y-3 text-sm font-semibold leading-7 text-slate-300">
-                  {marketStructureNotes.length > 0 ? (
-                    marketStructureNotes.map(
-                      (note) => (
-                        <p key={note}>
-                          {note}
-                        </p>
-                      )
-                    )
-                  ) : (
-                    <p>
-                      لا تتوفر بيانات كافية لتحليل هيكل السوق حاليًا.
+              <div className="mt-5 grid gap-4 lg:grid-cols-2">
+                <article className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+                  <p className="text-sm font-black text-cyan-300">
+                    📊 قراءة السوق
+                  </p>
+
+                  <p className="mt-3 text-sm font-semibold leading-7 text-slate-300">
+                    {marketReading}
+                  </p>
+                </article>
+
+                <article className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+                  <p className="text-sm font-black text-violet-300">
+                    🎯 المنطقة المحورية
+                  </p>
+
+                  <p className="mt-3 text-2xl font-black text-white">
+                    {pivotLabel}
+                  </p>
+
+                  <p className="mt-2 text-xs font-semibold leading-6 text-slate-400">
+                    تجمع Net GEX Flip وZero Gamma وMagnet والجدار الأقرب عند توفرها.
+                  </p>
+                </article>
+
+                <article className="rounded-2xl border border-emerald-400/20 bg-emerald-400/[0.05] p-4">
+                  <p className="text-sm font-black text-emerald-300">
+                    📈 السيناريو الأساسي
+                  </p>
+
+                  <p className="mt-3 text-sm font-semibold leading-7 text-slate-300">
+                    {primaryScenario}
+                  </p>
+                </article>
+
+                <article className="rounded-2xl border border-rose-400/20 bg-rose-400/[0.05] p-4">
+                  <p className="text-sm font-black text-rose-300">
+                    ⚠️ سيناريو الإلغاء
+                  </p>
+
+                  <p className="mt-3 text-sm font-semibold leading-7 text-slate-300">
+                    {invalidationScenario}
+                  </p>
+                </article>
+              </div>
+
+              <article className="mt-4 rounded-2xl border border-fuchsia-400/20 bg-fuchsia-400/[0.05] p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-black text-fuchsia-300">
+                      ⭐ درجة الثقة
                     </p>
-                  )}
-                </div>
-              </article>
 
-              <article className="rounded-3xl border border-violet-400/20 bg-violet-400/[0.05] p-5">
-                <p className="text-xs font-black text-violet-300">
-                  المرحلة الثانية
-                </p>
-
-                <h2 className="mt-2 text-xl font-black">
-                  تحليل مستويات القاما
-                </h2>
-
-                <div className="mt-4 space-y-3 text-sm font-semibold leading-7 text-slate-300">
-                  {gammaStructureNotes.length > 0 ? (
-                    gammaStructureNotes.map(
-                      (note) => (
-                        <p key={note}>
-                          {note}
-                        </p>
-                      )
-                    )
-                  ) : (
-                    <p>
-                      لا تتوفر مستويات قاما كافية للتحليل حاليًا.
+                    <p className="mt-2 text-3xl font-black">
+                      {systemScore}/100
                     </p>
-                  )}
-                </div>
-              </article>
-
-              <article className="rounded-3xl border border-fuchsia-400/20 bg-fuchsia-400/[0.05] p-5">
-                <p className="text-xs font-black text-fuchsia-300">
-                  المرحلة الثالثة
-                </p>
-
-                <h2 className="mt-2 text-xl font-black">
-                  قرار النظام
-                </h2>
-
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <span className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm font-black">
-                    التقييم: {systemScore}/100
-                  </span>
+                  </div>
 
                   <span
                     className={[
-                      "rounded-full border px-3 py-2 text-sm font-black",
-                      systemDirection === "CALL"
+                      "rounded-full border px-4 py-2 text-sm font-black",
+                      flowDirection === "CALL"
                         ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-300"
-                        : systemDirection === "PUT"
+                        : flowDirection === "PUT"
                           ? "border-rose-400/30 bg-rose-400/10 text-rose-300"
                           : "border-amber-400/30 bg-amber-400/10 text-amber-300",
                     ].join(" ")}
                   >
-                    الاتجاه: {systemDirection}
+                    الاتجاه: {
+                      flowDirection === "NEUTRAL"
+                        ? "انتظار"
+                        : flowDirection
+                    }
                   </span>
                 </div>
 
-                <p className="mt-4 text-sm font-semibold leading-7 text-slate-300">
-                  {systemSummary}
-                </p>
+                <div className="mt-4 grid gap-2 text-sm font-semibold leading-7 text-slate-300 sm:grid-cols-2">
+                  {confidenceReasons.map(
+                    (reason) => (
+                      <p key={reason}>
+                        {reason}
+                      </p>
+                    )
+                  )}
+                </div>
               </article>
+            </section>
+
+            <section className="mt-6 rounded-3xl border border-violet-400/20 bg-slate-900/70 p-5 sm:p-6">
+              <div>
+                <p className="text-xs font-black text-violet-300">
+                  المرحلة الثانية
+                </p>
+
+                <h2 className="mt-2 text-2xl font-black">
+                  خريطة مستويات القاما
+                </h2>
+              </div>
+
+              <div className="mt-5 grid gap-4 lg:grid-cols-3">
+                <article className="rounded-2xl border border-emerald-400/20 bg-emerald-400/[0.05] p-4">
+                  <p className="text-sm font-black text-emerald-300">
+                    الدعم الأقرب
+                  </p>
+
+                  <p className="mt-3 text-2xl font-black">
+                    {nearestSupport
+                      ? formatNumber(
+                          nearestSupport.price,
+                          0
+                        )
+                      : "—"}
+                  </p>
+
+                  <p className="mt-2 text-sm font-semibold leading-7 text-slate-300">
+                    {nearestSupport
+                      ? `${nearestSupport.label} — ${nearestSupport.role} ويبعد ${formatNumber(
+                          nearestSupport.distance,
+                          0
+                        )} نقطة عن السعر.`
+                      : "لا يوجد مستوى دعم واضح أسفل السعر ضمن البيانات الحالية."}
+                  </p>
+                </article>
+
+                <article className="rounded-2xl border border-rose-400/20 bg-rose-400/[0.05] p-4">
+                  <p className="text-sm font-black text-rose-300">
+                    المقاومة الأقرب
+                  </p>
+
+                  <p className="mt-3 text-2xl font-black">
+                    {nearestResistance
+                      ? formatNumber(
+                          nearestResistance.price,
+                          0
+                        )
+                      : "—"}
+                  </p>
+
+                  <p className="mt-2 text-sm font-semibold leading-7 text-slate-300">
+                    {nearestResistance
+                      ? `${nearestResistance.label} — ${nearestResistance.role} وتبعد ${formatNumber(
+                          nearestResistance.distance,
+                          0
+                        )} نقطة عن السعر.`
+                      : "لا يوجد مستوى مقاومة واضح أعلى السعر ضمن البيانات الحالية."}
+                  </p>
+                </article>
+
+                <article className="rounded-2xl border border-cyan-400/20 bg-cyan-400/[0.05] p-4">
+                  <p className="text-sm font-black text-cyan-300">
+                    منطقة التفاعل
+                  </p>
+
+                  <p className="mt-3 text-2xl font-black">
+                    {gammaClusterLabel}
+                  </p>
+
+                  <p className="mt-2 text-sm font-semibold leading-7 text-slate-300">
+                    {gammaRiskSummary}
+                  </p>
+                </article>
+              </div>
+
+              <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                <article className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+                  <p className="text-sm font-black text-violet-300">
+                    ترتيب المستويات حسب القرب
+                  </p>
+
+                  <div className="mt-3 space-y-2 text-sm font-semibold leading-7 text-slate-300">
+                    {sortedGammaLevels.length > 0 ? (
+                      sortedGammaLevels.map(
+                        (level) => (
+                          <p key={level.key}>
+                            {level.label}:{" "}
+                            <span className="font-black text-white">
+                              {formatNumber(
+                                level.price,
+                                0
+                              )}
+                            </span>{" "}
+                            — {level.role} — يبعد{" "}
+                            {formatNumber(
+                              level.distance,
+                              0
+                            )} نقطة
+                          </p>
+                        )
+                      )
+                    ) : (
+                      <p>
+                        لا تتوفر مستويات قاما كافية حاليًا.
+                      </p>
+                    )}
+                  </div>
+                </article>
+
+                <article className="rounded-2xl border border-amber-400/20 bg-amber-400/[0.05] p-4">
+                  <p className="text-sm font-black text-amber-300">
+                    قراءة تجمعات القاما
+                  </p>
+
+                  <p className="mt-3 text-sm font-semibold leading-7 text-slate-300">
+                    {strongestGammaBias}
+                  </p>
+
+                  <p className="mt-3 text-xs font-semibold leading-6 text-slate-400">
+                    أقوى تجمع لا يُستخدم وحده كإشارة دخول؛ يتم دمجه مع Flow وموقع السعر والجدران.
+                  </p>
+                </article>
+              </div>
+            </section>
+
+            <section className="mt-6 rounded-3xl border border-fuchsia-400/20 bg-slate-900/70 p-5 sm:p-6">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs font-black text-fuchsia-300">
+                    المرحلة الثالثة
+                  </p>
+
+                  <h2 className="mt-2 text-2xl font-black">
+                    قرار النظام المتقدم
+                  </h2>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <span
+                    className={[
+                      "rounded-full border px-4 py-2 text-sm font-black",
+                      advancedDecision === "CALL"
+                        ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-300"
+                        : advancedDecision === "PUT"
+                          ? "border-rose-400/30 bg-rose-400/10 text-rose-300"
+                          : "border-amber-400/30 bg-amber-400/10 text-amber-300",
+                    ].join(" ")}
+                  >
+                    القرار: {advancedDecision}
+                  </span>
+
+                  <span className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm font-black">
+                    الجودة: {decisionQuality}
+                  </span>
+                </div>
+              </div>
+
+              <div className="mt-5 grid gap-4 sm:grid-cols-3">
+                <article className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+                  <p className="text-xs font-bold text-slate-500">
+                    درجة السيناريو
+                  </p>
+
+                  <p className="mt-2 text-3xl font-black">
+                    {modeledDecisionScore}/100
+                  </p>
+                </article>
+
+                <article className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+                  <p className="text-xs font-bold text-slate-500">
+                    مستوى الخطر
+                  </p>
+
+                  <p
+                    className={[
+                      "mt-2 text-2xl font-black",
+                      decisionRiskLevel === "منخفض"
+                        ? "text-emerald-300"
+                        : decisionRiskLevel === "متوسط"
+                          ? "text-amber-300"
+                          : "text-rose-300",
+                    ].join(" ")}
+                  >
+                    {decisionRiskLevel}
+                  </p>
+                </article>
+
+                <article className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+                  <p className="text-xs font-bold text-slate-500">
+                    الهدف الهيكلي
+                  </p>
+
+                  <p className="mt-2 text-2xl font-black">
+                    {advancedDecision === "CALL" &&
+                    callWall > 0
+                      ? formatNumber(
+                          callWall,
+                          0
+                        )
+                      : advancedDecision === "PUT" &&
+                          putWall > 0
+                        ? formatNumber(
+                            putWall,
+                            0
+                          )
+                        : "انتظار"}
+                  </p>
+                </article>
+              </div>
+
+              <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                <article className="rounded-2xl border border-emerald-400/20 bg-emerald-400/[0.05] p-4">
+                  <p className="text-sm font-black text-emerald-300">
+                    العوامل الداعمة
+                  </p>
+
+                  <div className="mt-3 space-y-2 text-sm font-semibold leading-7 text-slate-300">
+                    {decisionSupportFactors.length > 0 ? (
+                      decisionSupportFactors.map(
+                        (factor) => (
+                          <p key={factor}>
+                            ✅ {factor}
+                          </p>
+                        )
+                      )
+                    ) : (
+                      <p>
+                        لا توجد عوامل داعمة كافية حاليًا.
+                      </p>
+                    )}
+                  </div>
+                </article>
+
+                <article className="rounded-2xl border border-rose-400/20 bg-rose-400/[0.05] p-4">
+                  <p className="text-sm font-black text-rose-300">
+                    عوامل الخطر
+                  </p>
+
+                  <div className="mt-3 space-y-2 text-sm font-semibold leading-7 text-slate-300">
+                    {decisionRiskFactors.length > 0 ? (
+                      decisionRiskFactors.map(
+                        (factor) => (
+                          <p key={factor}>
+                            ⚠️ {factor}
+                          </p>
+                        )
+                      )
+                    ) : (
+                      <p>
+                        لا توجد عوامل خطر جوهرية حاليًا.
+                      </p>
+                    )}
+                  </div>
+                </article>
+              </div>
+
+              <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                <article className="rounded-2xl border border-cyan-400/20 bg-cyan-400/[0.05] p-4">
+                  <p className="text-sm font-black text-cyan-300">
+                    شرط التفعيل
+                  </p>
+
+                  <p className="mt-3 text-sm font-semibold leading-7 text-slate-300">
+                    {activationCondition}
+                  </p>
+                </article>
+
+                <article className="rounded-2xl border border-amber-400/20 bg-amber-400/[0.05] p-4">
+                  <p className="text-sm font-black text-amber-300">
+                    شرط الإلغاء
+                  </p>
+
+                  <p className="mt-3 text-sm font-semibold leading-7 text-slate-300">
+                    {advancedInvalidation}
+                  </p>
+                </article>
+              </div>
+
+              <p className="mt-4 text-xs font-semibold leading-6 text-slate-500">
+                درجة السيناريو تقيس توافق Flow وهيكل القاما وموقع السعر، وهي مستقلة عن تقييم جودة عقد الأوبشن نفسه.
+              </p>
             </section>
 
             <section className="mt-6">
