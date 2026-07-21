@@ -695,7 +695,7 @@ export async function GET(
               stop_profit_pct:
                 currentProfitPct,
               stop_reason:
-                `كسر مستوى الإبطال ${invalidationLevel}`,
+                `كسر الوقف ${invalidationLevel}`,
               close_reason:
                 "SPX_INVALIDATION",
             }
@@ -930,7 +930,7 @@ export async function GET(
             visibleTrades || [],
           signal,
           message:
-            "ظهرت فرصة لكن لم يتوفر مستوى إبطال صالح من بيانات القاما.",
+            "ظهرت فرصة لكن لم يتوفر وقف صالح من بيانات القاما.",
           updatedAt: nowIso,
         },
         {
@@ -1066,7 +1066,7 @@ export async function GET(
           0,
 
         message:
-          `تم تفعيل صفقة ${contract.side} عند مستوى إبطال ${invalidationLevel}`,
+          `تم تفعيل صفقة ${contract.side} عند وقف ${invalidationLevel}`,
 
         metadata: {
           score:

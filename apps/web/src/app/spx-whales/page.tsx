@@ -366,7 +366,7 @@ function TradeCard({
 
       {trade.status === "STOPPED" ? (
         <div className="mt-5 rounded-2xl border border-rose-400/25 bg-rose-400/10 p-4 font-black text-rose-200">
-          ضرب وقف SPX عند مستوى{" "}
+          ضرب وقف SPX عند{" "}
           {formatNumber(
             trade.invalidation_level
           )}
@@ -444,7 +444,7 @@ function TradeCard({
         />
 
         <Metric
-          label="مستوى الإبطال"
+          label="الوقف"
           value={formatNumber(
             trade.invalidation_level
           )}
@@ -539,18 +539,93 @@ export default function SpxWhalesPage() {
     []
   );
 
+  const hasTrackedTrade =
+    Boolean(
+      data?.activeTrade ||
+      data?.trades?.some(
+        (trade) =>
+          trade.status === "ACTIVE" ||
+          trade.status === "WATCH"
+      )
+    );
+
+  const regularSessionOpen =
+    data?.marketSession?.isOpen === true &&
+    data?.marketSession?.phase === "REGULAR";
+
   useEffect(() => {
-    void load(true);
+    /*
+      أول تحميل يتم فورًا دون انتظار المؤقت.
+    */
+    if (!data) {
+      void load(true);
+    }
 
-    const timer =
-      window.setInterval(
-        () => void load(false),
-        20_000
+    let timer:
+      number | undefined;
+
+    const startPolling = () => {
+      if (
+        document.hidden ||
+        !regularSessionOpen
+      ) {
+        return;
+      }
+
+      const refreshInterval =
+        hasTrackedTrade
+          ? 5_000
+          : 20_000;
+
+      timer =
+        window.setInterval(
+          () => void load(false),
+          refreshInterval
+        );
+    };
+
+    const stopPolling = () => {
+      if (timer !== undefined) {
+        window.clearInterval(timer);
+        timer = undefined;
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      stopPolling();
+
+      if (!document.hidden) {
+        /*
+          عند الرجوع إلى الصفحة:
+          تحديث فوري ثم استئناف المؤقت
+          حسب وجود صفقة وحالة الجلسة.
+        */
+        void load(false);
+        startPolling();
+      }
+    };
+
+    startPolling();
+
+    document.addEventListener(
+      "visibilitychange",
+      handleVisibilityChange
+    );
+
+    return () => {
+      stopPolling();
+
+      document.removeEventListener(
+        "visibilitychange",
+        handleVisibilityChange
       );
-
-    return () =>
-      window.clearInterval(timer);
-  }, [load]);
+    };
+  }, [
+    load,
+    data,
+    hasTrackedTrade,
+    regularSessionOpen,
+  ]);
 
   const signal =
     data?.signal;
