@@ -4,6 +4,9 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 const SYMBOLS = [
+  "SPY",
+  "QQQ",
+  "IWM",
   "NVDA",
   "TSLA",
   "AAPL",
@@ -11,13 +14,32 @@ const SYMBOLS = [
   "META",
   "AMD",
   "AMZN",
+  "GOOG",
+  "GOOGL",
   "AVGO",
   "PLTR",
+  "MSTR",
+  "NFLX",
+  "COIN",
+  "SMCI",
+  "MU",
+  "ARM",
+  "INTC",
+  "QCOM",
+  "CRM",
+  "ORCL",
+  "UBER",
+  "SNOW",
+  "SHOP",
+  "BA",
+  "JPM",
+  "BAC",
+  "XOM",
 ];
 
 const MIN_PREMIUM_VALUE = 1_000_000;
 const MIN_WHALE_SCORE = 80;
-const MAX_RESULTS_PER_SYMBOL = 250;
+const MAX_RESULTS_PER_SYMBOL = 180;
 const MAX_APPROVED_CONTRACT_PRICE = 3;
 const MAX_APPROVED_SPREAD_PCT = 15;
 
