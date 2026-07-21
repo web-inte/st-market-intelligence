@@ -47,6 +47,92 @@ const WATCHLIST = [
   "PYPL",
   "XOM",
   "BA",
+  "TTD",
+  "CRWD",
+  "DDOG",
+  "NET",
+  "PANW",
+  "ZS",
+  "MDB",
+  "TEAM",
+  "ANET",
+  "APP",
+  "HOOD",
+  "RBLX",
+  "TTWO",
+  "EA",
+  "DECK",
+  "ONON",
+  "ABNB",
+  "BKNG",
+  "DE",
+  "CAT",
+  "GE",
+  "ETN",
+  "PH",
+  "CMI",
+  "TT",
+  "LULU",
+  "VRTX",
+  "REGN",
+  "MRK",
+  "ABBV",
+  "ISRG",
+  "INTU",
+  "ADSK",
+  "ADP",
+  "PAYX",
+  "CB",
+  "MMC",
+  "ICE",
+  "CME",
+  "SPGI",
+  "MCO",
+  "MSCI",
+  "AON",
+  "AJG",
+  "RSG",
+  "WM",
+  "URI",
+  "FAST",
+  "ODFL",
+  "CPRT",
+  "FERG",
+  "XYL",
+  "VRT",
+  "KLAC",
+  "LRCX",
+  "APH",
+  "CDNS",
+  "SNPS",
+  "NXPI",
+  "MCHP",
+  "FICO",
+  "AXON",
+  "HCA",
+  "ELV",
+  "CI",
+  "HUM",
+  "CNC",
+  "NOC",
+  "GD",
+  "LMT",
+  "RTX",
+  "HON",
+  "EMR",
+  "ITW",
+  "ROK",
+  "JCI",
+  "LEN",
+  "DHI",
+  "PHM",
+  "NVR",
+  "LOW",
+  "TJX",
+  "CMG",
+  "ORLY",
+  "ROST",
+  "GWW",
 ];
 const TELEGRAM_CHANNEL_URL = "https://t.me/STtradevip";
 
@@ -482,24 +568,61 @@ export default function Home() {
       setError("");
 
       try {
-        const results = await Promise.allSettled(
-          WATCHLIST.map(async (stockSymbol) => {
-            const response = await fetch(
-              `/api/analysis/${encodeURIComponent(stockSymbol)}`,
-              {
-                cache: "no-store",
-              },
+        const BATCH_SIZE = 40;
+        const BATCH_DELAY_MS = 500;
+
+        const results: PromiseSettledResult<Opportunity>[] = [];
+
+        for (
+          let startIndex = 0;
+          startIndex < WATCHLIST.length;
+          startIndex += BATCH_SIZE
+        ) {
+          const batch = WATCHLIST.slice(
+            startIndex,
+            startIndex + BATCH_SIZE
+          );
+
+          const batchResults =
+            await Promise.allSettled(
+              batch.map(async (stockSymbol) => {
+                const response = await fetch(
+                  `/api/analysis/${encodeURIComponent(stockSymbol)}`,
+                  {
+                    cache: "no-store",
+                  },
+                );
+
+                if (!response.ok) {
+                  throw new Error(
+                    `تعذر تحليل ${stockSymbol}`
+                  );
+                }
+
+                const analysis =
+                  (await response.json()) as AnalysisResponse;
+
+                return createOpportunity(analysis);
+              }),
             );
 
-            if (!response.ok) {
-              throw new Error(`تعذر تحليل ${stockSymbol}`);
-            }
+          results.push(...batchResults);
 
-            const analysis = (await response.json()) as AnalysisResponse;
+          const hasAnotherBatch =
+            startIndex + BATCH_SIZE <
+            WATCHLIST.length;
 
-            return createOpportunity(analysis);
-          }),
-        );
+          if (hasAnotherBatch) {
+            await new Promise<void>(
+              (resolve) => {
+                window.setTimeout(
+                  resolve,
+                  BATCH_DELAY_MS
+                );
+              }
+            );
+          }
+        }
 
         if (cancelled) {
           return;
