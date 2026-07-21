@@ -38,7 +38,7 @@ const SYMBOLS = [
 ];
 
 const MIN_PREMIUM_VALUE = 1_000_000;
-const MIN_WHALE_SCORE = 80;
+const MIN_WHALE_SCORE = 70;
 const MAX_RESULTS_PER_SYMBOL = 180;
 const MAX_APPROVED_CONTRACT_PRICE = 3;
 const MAX_APPROVED_SPREAD_PCT = 15;
@@ -320,12 +320,12 @@ function detectExecutionSide(
       Math.round(position);
     reason =
       "التنفيذ قريب جدًا من Ask؛ شراء العقد مرجح بقوة";
-  } else if (position >= 65) {
+  } else if (position >= 55) {
     side = "BUY";
     confidence =
       Math.round(position);
     reason =
-      "التنفيذ أقرب إلى Ask؛ شراء العقد مرجح";
+      "التنفيذ يميل إلى Ask؛ شراء العقد مرجح";
   } else if (position <= 20) {
     side = "SELL";
     confidence =
