@@ -8,6 +8,10 @@ import {
 import {
   syncAnalysisTradePlan,
 } from "../../../../lib/analysis-trade-plan";
+import {
+  evaluateDecisionActiveTrade,
+  syncDecisionActiveTrade,
+} from "../../../../lib/decision-active-trade-engine";
 import { getOrSetCache } from "../../../../lib/market-cache";
 
 export const dynamic = "force-dynamic";
@@ -1415,10 +1419,38 @@ export async function GET(
       );
     }
 
+    const decisionEnginePreview =
+      evaluateDecisionActiveTrade(
+        typedAnalysis
+      );
+
+    let decisionTrade = null;
+
+    if (
+      decisionEnginePreview.qualifies
+    ) {
+      try {
+        decisionTrade =
+          await syncDecisionActiveTrade(
+            typedAnalysis,
+            decisionEnginePreview
+          );
+      } catch (
+        decisionTradeError
+      ) {
+        console.error(
+          `Decision trade sync failed for ${cleanSymbol}:`,
+          decisionTradeError
+        );
+      }
+    }
+
     return NextResponse.json(
       {
         ...analysis,
         tradePlan,
+        decisionEnginePreview,
+        decisionTrade,
       },
       {
       status: 200,
