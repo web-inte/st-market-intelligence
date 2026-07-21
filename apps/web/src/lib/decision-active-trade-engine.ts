@@ -591,22 +591,35 @@ export async function syncDecisionActiveTrade(
       .from("stock_trade_setups")
       .select("*")
       .eq("symbol", result.symbol)
-      .eq("side", side)
-      .eq("contract_ticker", contractTicker)
       .eq("status", "active")
-      .gt("expires_at", nowIso)
       .order("created_at", {
         ascending: false,
-      })
-      .limit(1)
-      .maybeSingle();
+      });
 
   if (existingQuery.error) {
     throw existingQuery.error;
   }
 
-  if (existingQuery.data) {
-    return existingQuery.data;
+  const blockingTrade =
+    (existingQuery.data || []).find(
+      (row) => {
+        const rowStatus = String(
+          row.status || ""
+        ).toUpperCase();
+
+        const contractStatus = String(
+          row.contract_status || ""
+        ).toUpperCase();
+
+        return (
+          rowStatus !== "STOPPED" &&
+          contractStatus !== "STOPPED"
+        );
+      }
+    );
+
+  if (blockingTrade) {
+    return blockingTrade;
   }
 
   const entryPrice =

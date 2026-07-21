@@ -24,6 +24,8 @@ type SetupRow = {
   first_seen_at: string;
   last_seen_at: string;
   expires_at: string;
+  status?: string | null;
+  contract_status?: string | null;
 };
 
 type GammaLevel =
@@ -995,17 +997,29 @@ const contractEntryPrice =
     نتخلص من الخطط القديمة التي كانت تحفظ اسمًا
     شكليًا مثل AAPL:CALL بدل رمز عقد Massive الحقيقي.
   */
+  /*
+    نسمح بصفقة واحدة فقط لكل رمز ما دامت الصفقة السابقة
+    لم تضرب الوقف، مهما تغيّر العقد أو الاتجاه أو المحرك.
+    بعد STOPPED يمكن إنشاء صفقة جديدة لنفس الرمز.
+  */
   const existing =
-    rows.find(
-      (row) =>
-        isAnalysisPlan(row) &&
+    rows.find((row) => {
+      const rowStatus = String(
+        row.status || ""
+      ).toUpperCase();
+
+      const contractStatus = String(
+        row.contract_status || ""
+      ).toUpperCase();
+
+      return (
         isRealOptionTicker(
           row.contract_ticker
         ) &&
-        row.side === activeSide &&
-        row.contract_ticker ===
-          contractTicker
-    );
+        rowStatus !== "STOPPED" &&
+        contractStatus !== "STOPPED"
+      );
+    });
 
   if (existing) {
 
