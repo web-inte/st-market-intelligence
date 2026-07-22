@@ -568,17 +568,29 @@ export default function Home() {
       setError("");
 
       try {
-        const BATCH_SIZE = 40;
-        const BATCH_DELAY_MS = 500;
+        /*
+          حماية واجهة المنصة من إطلاق عشرات
+          طلبات التحليل المتزامنة.
+
+          البحث اليدوي عن أي رمز لا يتأثر بهذا الحد.
+        */
+        const DASHBOARD_SCAN_LIMIT = 12;
+        const BATCH_SIZE = 2;
+        const BATCH_DELAY_MS = 1_500;
+
+        const scanSymbols = WATCHLIST.slice(
+          0,
+          DASHBOARD_SCAN_LIMIT
+        );
 
         const results: PromiseSettledResult<Opportunity>[] = [];
 
         for (
           let startIndex = 0;
-          startIndex < WATCHLIST.length;
+          startIndex < scanSymbols.length;
           startIndex += BATCH_SIZE
         ) {
-          const batch = WATCHLIST.slice(
+          const batch = scanSymbols.slice(
             startIndex,
             startIndex + BATCH_SIZE
           );
@@ -610,7 +622,7 @@ export default function Home() {
 
           const hasAnotherBatch =
             startIndex + BATCH_SIZE <
-            WATCHLIST.length;
+            scanSymbols.length;
 
           if (hasAnotherBatch) {
             await new Promise<void>(
