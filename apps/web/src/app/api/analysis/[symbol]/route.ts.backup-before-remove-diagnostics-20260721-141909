@@ -1,0 +1,1555 @@
+import { NextResponse } from "next/server";
+
+import {
+  analyzeMarketData,
+  type AnalysisResponse,
+  type AnalysisTradePlan,
+} from "../../../../lib/analysis-engine";
+import {
+  syncAnalysisTradePlan,
+} from "../../../../lib/analysis-trade-plan";
+import { getOrSetCache } from "../../../../lib/market-cache";
+
+export const dynamic = "force-dynamic";
+
+type FinnhubQuote = {
+  c?: number;
+  d?: number;
+  dp?: number;
+  h?: number;
+  l?: number;
+  o?: number;
+  pc?: number;
+  t?: number;
+};
+
+type MassiveContract = {
+  details?: {
+    contract_type?: "call" | "put";
+    expiration_date?: string;
+    strike_price?: number;
+    ticker?: string;
+  };
+
+  greeks?: {
+    delta?: number;
+    gamma?: number;
+    theta?: number;
+    vega?: number;
+  };
+
+  implied_volatility?: number;
+  open_interest?: number;
+
+  day?: {
+    volume?: number;
+    close?: number;
+  };
+
+  last_quote?: {
+    bid?: number;
+    ask?: number;
+    midpoint?: number;
+    timeframe?: string;
+  };
+
+  last_trade?: {
+    price?: number;
+    size?: number;
+    timeframe?: string;
+  };
+
+  underlying_asset?: {
+    price?: number;
+    timeframe?: string;
+  };
+};
+
+type MassiveResponse = {
+  results?: MassiveContract[];
+  next_url?: string;
+  status?: string;
+  error?: string;
+};
+
+type NormalizedContract = {
+  ticker: string;
+  type: "call" | "put";
+  expiration: string;
+  strike: number;
+
+  bid: number;
+  ask: number;
+  midpoint: number;
+  spreadPct: number | null;
+
+  volume: number;
+  openInterest: number;
+  volumeOiRatio: number | null;
+
+  delta: number;
+  gamma: number;
+  theta: number;
+  vega: number;
+  iv: number;
+
+  lastTradePrice: number;
+  lastTradeSize: number;
+
+  quoteTimeframe: string | null;
+  tradeTimeframe: string | null;
+};
+
+type GammaLevel = {
+  strike: number;
+  callGex: number;
+  putGex: number;
+  netGex: number;
+  totalGex: number;
+  distancePct: number;
+};
+
+type GammaStructure = {
+  estimatedFlip: number | null;
+  magnet: GammaLevel | null;
+  callWall: GammaLevel | null;
+  putWall: GammaLevel | null;
+  nearestSupport: GammaLevel | null;
+  nearestResistance: GammaLevel | null;
+  strongestSupport: GammaLevel | null;
+  strongestResistance: GammaLevel | null;
+};
+
+function buildGammaStructure(
+  contracts: NormalizedContract[],
+  stockPrice: number
+): GammaStructure {
+  const strikesMap = new Map<
+    number,
+    {
+      callGex: number;
+      putGex: number;
+    }
+  >();
+
+  for (const contract of contracts) {
+    if (
+      contract.strike <= 0 ||
+      contract.openInterest <= 0 ||
+      contract.gamma === 0 ||
+      stockPrice <= 0
+    ) {
+      continue;
+    }
+
+    /*
+      تقدير GEX للعقد:
+      Gamma × OI × 100 × Price² × 1%
+
+      نفصل CALL وPUT بدل دمجهما مباشرة حتى
+      نستخرج Call Wall وPut Wall.
+    */
+    const estimatedGex =
+      Math.abs(contract.gamma) *
+      contract.openInterest *
+      100 *
+      stockPrice *
+      stockPrice *
+      0.01;
+
+    const current = strikesMap.get(
+      contract.strike
+    ) ?? {
+      callGex: 0,
+      putGex: 0,
+    };
+
+    if (contract.type === "call") {
+      current.callGex += estimatedGex;
+    } else {
+      current.putGex += estimatedGex;
+    }
+
+    strikesMap.set(contract.strike, current);
+  }
+
+  const levels: GammaLevel[] = Array.from(
+    strikesMap.entries()
+  )
+    .map(([strike, values]) => {
+      const distancePct =
+        stockPrice > 0
+          ? (Math.abs(strike - stockPrice) /
+              stockPrice) *
+            100
+          : 0;
+
+      return {
+        strike: round(strike, 2),
+        callGex: round(values.callGex),
+        putGex: round(values.putGex),
+
+        /*
+          نفترض CALL موجب وPUT سالب لأغراض
+          بناء الهيكل التحليلي فقط.
+        */
+        netGex: round(
+          values.callGex - values.putGex
+        ),
+
+        totalGex: round(
+          values.callGex + values.putGex
+        ),
+
+        distancePct: round(distancePct, 2),
+      };
+    })
+    .sort((a, b) => a.strike - b.strike);
+
+  const supports = levels.filter(
+    (level) =>
+      level.strike < stockPrice &&
+      level.putGex > 0
+  );
+
+  const resistances = levels.filter(
+    (level) =>
+      level.strike > stockPrice &&
+      level.callGex > 0
+  );
+
+  const nearestSupport =
+    [...supports].sort(
+      (a, b) => b.strike - a.strike
+    )[0] ?? null;
+
+  const nearestResistance =
+    [...resistances].sort(
+      (a, b) => a.strike - b.strike
+    )[0] ?? null;
+
+  const strongestSupport =
+    [...supports].sort(
+      (a, b) => b.putGex - a.putGex
+    )[0] ?? null;
+
+  const strongestResistance =
+    [...resistances].sort(
+      (a, b) => b.callGex - a.callGex
+    )[0] ?? null;
+
+  const callWall =
+    [...levels].sort(
+      (a, b) => b.callGex - a.callGex
+    )[0] ?? null;
+
+  const putWall =
+    [...levels].sort(
+      (a, b) => b.putGex - a.putGex
+    )[0] ?? null;
+
+  const magnet =
+    [...levels].sort(
+      (a, b) => b.totalGex - a.totalGex
+    )[0] ?? null;
+
+  /*
+    Gamma Flip تقديري:
+    نبحث عن انتقال netGex بين موجب وسالب
+    ونختار أقرب انتقال لسعر السهم.
+  */
+  const flipCandidates: number[] = [];
+
+  for (let index = 1; index < levels.length; index += 1) {
+    const previous = levels[index - 1];
+    const current = levels[index];
+
+    const crossedZero =
+      (previous.netGex <= 0 &&
+        current.netGex >= 0) ||
+      (previous.netGex >= 0 &&
+        current.netGex <= 0);
+
+    if (crossedZero) {
+      flipCandidates.push(
+        round(
+          (previous.strike + current.strike) / 2,
+          2
+        )
+      );
+    }
+  }
+
+  const estimatedFlip =
+    flipCandidates.sort(
+      (a, b) =>
+        Math.abs(a - stockPrice) -
+        Math.abs(b - stockPrice)
+    )[0] ?? null;
+
+  return {
+    estimatedFlip,
+    magnet,
+    callWall,
+    putWall,
+    nearestSupport,
+    nearestResistance,
+    strongestSupport,
+    strongestResistance,
+  };
+}
+
+type MassivePagesResult = {
+  contracts: MassiveContract[];
+  pagesFetched: number;
+  hasMorePages: boolean;
+  massiveStatus: string;
+};
+
+type AnalysisPayload = {
+  symbol: string;
+
+  quote: {
+    price: number;
+    change: number;
+    changePct: number;
+    open: number;
+    high: number;
+    low: number;
+    previousClose: number;
+    timestamp: number;
+  };
+
+  options: {
+    contractsReturned: number;
+    pagesFetched: number;
+    chainIsPartial: boolean;
+
+    callsCount: number;
+    putsCount: number;
+
+    callVolume: number;
+    putVolume: number;
+    totalVolume: number;
+
+    callVolumePct: number;
+    putVolumePct: number;
+    volumeBias: "CALL" | "PUT" | "NEUTRAL";
+
+    callOpenInterest: number;
+    putOpenInterest: number;
+
+    estimatedNetGex: number;
+    gammaStructure: ReturnType<typeof buildGammaStructure>;
+    eligibleContractsCount: number;
+
+    bestCall: NormalizedContract | null;
+    bestPut: NormalizedContract | null;
+
+    recommendedCalls: NormalizedContract[];
+    recommendedPuts: NormalizedContract[];
+  };
+
+  dataQuality: {
+    finnhubConnected: boolean;
+    massiveConnected: boolean;
+    massiveStatus: string;
+    pagesFetched: number;
+    chainComplete: boolean;
+    note: string;
+  };
+
+  tradePlan?: AnalysisTradePlan | null;
+
+  capturedAt: string;
+};
+
+const MASSIVE_API_ORIGIN = "https://api.massive.com";
+
+const DEFAULT_MAX_PAGES = 4;
+
+/*
+  نطاق جلب السلسلة لبناء القاما واختيار العقود.
+  نطلب CALL وPUT منفصلين حتى لا تستهلك جهة واحدة
+  صفحات السلسلة وتخفي العقود الأقوى في الجهة الأخرى.
+*/
+const CHAIN_MIN_DTE = 1;
+const CHAIN_MAX_DTE = 45;
+const CHAIN_STRIKE_RANGE_PCT = 20;
+
+/*
+  بوابة العقد النهائي.
+  هذه الشروط متعمدة لتقليل عدد الفرص ورفع قابلية التنفيذ.
+*/
+const CONTRACT_MIN_DTE = 7;
+const CONTRACT_MAX_DTE = 35;
+const CONTRACT_MIN_VOLUME = 100;
+const CONTRACT_MIN_OPEN_INTEREST = 100;
+const CONTRACT_MIN_DELTA = 0.3;
+const CONTRACT_MAX_DELTA = 0.65;
+const CONTRACT_MAX_SPREAD_PCT = 15;
+const CONTRACT_MAX_STRIKE_DISTANCE_PCT = 8;
+const CONTRACT_MIN_MIDPOINT = 0.35;
+const CONTRACT_MAX_MIDPOINT = 15;
+const CONTRACT_MIN_QUALITY_SCORE = 70;
+
+/*
+  النتيجة الحديثة تبقى 60 ثانية.
+  إذا تعطل المزود مؤقتًا يمكن استخدام آخر نتيجة
+  سليمة لمدة 5 دقائق.
+*/
+const ANALYSIS_CACHE_TTL_MS = 60_000;
+const ANALYSIS_CACHE_STALE_MS = 5 * 60_000;
+
+function safeNumber(value: unknown, fallback = 0) {
+  const parsed = Number(value);
+
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function round(value: number, decimals = 2) {
+  const factor = 10 ** decimals;
+
+  return Math.round(value * factor) / factor;
+}
+
+function getMidpoint(
+  bid: number,
+  ask: number,
+  suppliedMidpoint: number
+) {
+  if (suppliedMidpoint > 0) return suppliedMidpoint;
+  if (bid > 0 && ask > 0) return (bid + ask) / 2;
+  if (ask > 0) return ask;
+  if (bid > 0) return bid;
+
+  return 0;
+}
+
+function getSpreadPct(
+  bid: number,
+  ask: number,
+  midpoint: number
+) {
+  if (bid < 0 || ask <= 0 || midpoint <= 0) {
+    return null;
+  }
+
+  return ((ask - bid) / midpoint) * 100;
+}
+
+function getConfiguredMaxPages() {
+  const configured = Number(
+    process.env.MASSIVE_MAX_OPTION_PAGES
+  );
+
+  if (!Number.isInteger(configured) || configured < 1) {
+    return DEFAULT_MAX_PAGES;
+  }
+
+  return Math.min(configured, 10);
+}
+
+function normalizeNextUrl(
+  nextUrl: string,
+  massiveKey: string
+) {
+  const parsedUrl = new URL(nextUrl, MASSIVE_API_ORIGIN);
+
+  if (parsedUrl.origin !== MASSIVE_API_ORIGIN) {
+    throw new Error(
+      "Massive next_url returned an invalid origin"
+    );
+  }
+
+  if (!parsedUrl.searchParams.has("apiKey")) {
+    parsedUrl.searchParams.set("apiKey", massiveKey);
+  }
+
+  return parsedUrl.toString();
+}
+
+async function fetchMassivePage(
+  url: string,
+  massiveKey: string
+) {
+  const controller = new AbortController();
+
+  const timeout = setTimeout(() => {
+    controller.abort();
+  }, 15_000);
+
+  try {
+    const response = await fetch(url, {
+      cache: "no-store",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${massiveKey}`,
+      },
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const details = await response.text();
+
+      throw new Error(
+        `Massive request failed (${response.status}): ${details}`
+      );
+    }
+
+    return (await response.json()) as MassiveResponse;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function formatUtcDate(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function addUtcDays(date: Date, days: number) {
+  const result = new Date(date);
+  result.setUTCDate(result.getUTCDate() + days);
+  return result;
+}
+
+async function fetchMassiveOptionSidePages(
+  symbol: string,
+  contractType: "call" | "put",
+  stockPrice: number,
+  massiveKey: string
+): Promise<MassivePagesResult> {
+  const maxPages = getConfiguredMaxPages();
+  const now = new Date();
+
+  const minimumExpiration = formatUtcDate(
+    addUtcDays(now, CHAIN_MIN_DTE)
+  );
+
+  const maximumExpiration = formatUtcDate(
+    addUtcDays(now, CHAIN_MAX_DTE)
+  );
+
+  const strikeRange = CHAIN_STRIKE_RANGE_PCT / 100;
+  const minimumStrike = Math.max(
+    0.01,
+    stockPrice * (1 - strikeRange)
+  );
+  const maximumStrike =
+    stockPrice * (1 + strikeRange);
+
+  const searchParams = new URLSearchParams({
+    limit: "250",
+    contract_type: contractType,
+    order: "asc",
+    sort: "expiration_date",
+    apiKey: massiveKey,
+  });
+
+  searchParams.set(
+    "expiration_date.gte",
+    minimumExpiration
+  );
+  searchParams.set(
+    "expiration_date.lte",
+    maximumExpiration
+  );
+  searchParams.set(
+    "strike_price.gte",
+    minimumStrike.toFixed(2)
+  );
+  searchParams.set(
+    "strike_price.lte",
+    maximumStrike.toFixed(2)
+  );
+
+  let currentUrl =
+    `${MASSIVE_API_ORIGIN}/v3/snapshot/options/` +
+    `${encodeURIComponent(symbol)}?${searchParams.toString()}`;
+
+  const allContracts: MassiveContract[] = [];
+  const visitedUrls = new Set<string>();
+
+  let pagesFetched = 0;
+  let nextUrl: string | undefined;
+  let massiveStatus = "UNKNOWN";
+
+  while (currentUrl && pagesFetched < maxPages) {
+    if (visitedUrls.has(currentUrl)) {
+      throw new Error(
+        "Massive pagination returned a repeated next_url"
+      );
+    }
+
+    visitedUrls.add(currentUrl);
+
+    const page = await fetchMassivePage(
+      currentUrl,
+      massiveKey
+    );
+
+    massiveStatus = page.status ?? massiveStatus;
+
+    if (Array.isArray(page.results)) {
+      allContracts.push(...page.results);
+    }
+
+    pagesFetched += 1;
+    nextUrl = page.next_url;
+
+    if (!nextUrl) {
+      currentUrl = "";
+      break;
+    }
+
+    currentUrl = normalizeNextUrl(
+      nextUrl,
+      massiveKey
+    );
+  }
+
+  return {
+    contracts: allContracts,
+    pagesFetched,
+    hasMorePages: Boolean(nextUrl),
+    massiveStatus,
+  };
+}
+
+async function fetchMassiveOptionPages(
+  symbol: string,
+  stockPrice: number,
+  massiveKey: string
+): Promise<MassivePagesResult> {
+  const [callsResult, putsResult] =
+    await Promise.all([
+      fetchMassiveOptionSidePages(
+        symbol,
+        "call",
+        stockPrice,
+        massiveKey
+      ),
+      fetchMassiveOptionSidePages(
+        symbol,
+        "put",
+        stockPrice,
+        massiveKey
+      ),
+    ]);
+
+  const statuses = new Set([
+    callsResult.massiveStatus,
+    putsResult.massiveStatus,
+  ]);
+
+  return {
+    contracts: [
+      ...callsResult.contracts,
+      ...putsResult.contracts,
+    ],
+    pagesFetched:
+      callsResult.pagesFetched +
+      putsResult.pagesFetched,
+    hasMorePages:
+      callsResult.hasMorePages ||
+      putsResult.hasMorePages,
+    massiveStatus:
+      statuses.size === 1
+        ? callsResult.massiveStatus
+        : Array.from(statuses).join(" / "),
+  };
+}
+
+function normalizeContract(
+  contract: MassiveContract
+): NormalizedContract | null {
+  const ticker = contract.details?.ticker ?? "";
+  const type = contract.details?.contract_type;
+  const expiration =
+    contract.details?.expiration_date ?? "";
+
+  const strike = safeNumber(
+    contract.details?.strike_price
+  );
+
+  if (
+    !ticker ||
+    (type !== "call" && type !== "put") ||
+    !expiration ||
+    strike <= 0
+  ) {
+    return null;
+  }
+
+  const bid = safeNumber(contract.last_quote?.bid);
+  const ask = safeNumber(contract.last_quote?.ask);
+
+  const suppliedMidpoint = safeNumber(
+    contract.last_quote?.midpoint
+  );
+
+  const midpoint = getMidpoint(
+    bid,
+    ask,
+    suppliedMidpoint
+  );
+
+  const rawSpreadPct = getSpreadPct(
+    bid,
+    ask,
+    midpoint
+  );
+
+  const volume = safeNumber(contract.day?.volume);
+
+  const openInterest = safeNumber(
+    contract.open_interest
+  );
+
+  return {
+    ticker,
+    type,
+    expiration,
+    strike,
+
+    bid: round(bid),
+    ask: round(ask),
+    midpoint: round(midpoint),
+
+    spreadPct:
+      rawSpreadPct === null
+        ? null
+        : round(rawSpreadPct),
+
+    volume,
+    openInterest,
+
+    volumeOiRatio:
+      openInterest > 0
+        ? round(volume / openInterest, 3)
+        : null,
+
+    delta: round(
+      safeNumber(contract.greeks?.delta),
+      4
+    ),
+
+    gamma: round(
+      safeNumber(contract.greeks?.gamma),
+      6
+    ),
+
+    theta: round(
+      safeNumber(contract.greeks?.theta),
+      4
+    ),
+
+    vega: round(
+      safeNumber(contract.greeks?.vega),
+      4
+    ),
+
+    iv: round(
+      safeNumber(contract.implied_volatility),
+      4
+    ),
+
+    lastTradePrice: round(
+      safeNumber(contract.last_trade?.price)
+    ),
+
+    lastTradeSize: safeNumber(
+      contract.last_trade?.size
+    ),
+
+    quoteTimeframe:
+      contract.last_quote?.timeframe ?? null,
+
+    tradeTimeframe:
+      contract.last_trade?.timeframe ?? null,
+  };
+}
+
+function deduplicateContracts(
+  contracts: NormalizedContract[]
+) {
+  const contractMap = new Map<
+    string,
+    NormalizedContract
+  >();
+
+  for (const contract of contracts) {
+    contractMap.set(contract.ticker, contract);
+  }
+
+  return Array.from(contractMap.values());
+}
+
+function daysUntilExpiration(expiration: string) {
+  const expirationDate = new Date(
+    `${expiration}T23:59:59Z`
+  );
+
+  if (Number.isNaN(expirationDate.getTime())) {
+    return -1;
+  }
+
+  const milliseconds =
+    expirationDate.getTime() - Date.now();
+
+  return Math.ceil(
+    milliseconds / (1000 * 60 * 60 * 24)
+  );
+}
+
+function getStrikeDistancePct(
+  contract: NormalizedContract,
+  stockPrice: number
+) {
+  if (stockPrice <= 0) return 100;
+
+  return (
+    (Math.abs(contract.strike - stockPrice) /
+      stockPrice) *
+    100
+  );
+}
+
+function calculateContractRankingScore(
+  contract: NormalizedContract,
+  stockPrice: number
+) {
+  const absoluteDelta = Math.abs(contract.delta);
+  const spreadPct = contract.spreadPct ?? 100;
+  const dte = daysUntilExpiration(
+    contract.expiration
+  );
+  const strikeDistancePct =
+    getStrikeDistancePct(contract, stockPrice);
+
+  /* جودة التنفيذ: 25 نقطة */
+  let spreadScore = 0;
+
+  if (spreadPct <= 4) spreadScore = 20;
+  else if (spreadPct <= 6) spreadScore = 18;
+  else if (spreadPct <= 8) spreadScore = 15;
+  else if (spreadPct <= 10) spreadScore = 12;
+  else if (spreadPct <= 12) spreadScore = 8;
+  else if (spreadPct <= 15) spreadScore = 4;
+
+  let lastTradeConsistencyScore = 0;
+
+  if (contract.lastTradePrice > 0) {
+    const lastTradeDistancePct =
+      (Math.abs(
+        contract.lastTradePrice - contract.midpoint
+      ) /
+        contract.midpoint) *
+      100;
+
+    if (lastTradeDistancePct <= 5) {
+      lastTradeConsistencyScore = 5;
+    } else if (lastTradeDistancePct <= 12) {
+      lastTradeConsistencyScore = 4;
+    } else if (lastTradeDistancePct <= 20) {
+      lastTradeConsistencyScore = 2;
+    }
+  }
+
+  /* السيولة: 35 نقطة */
+  const volumeScore = Math.min(
+    15,
+    Math.log10(contract.volume + 1) * 5
+  );
+
+  const openInterestScore = Math.min(
+    10,
+    Math.log10(contract.openInterest + 1) * 3
+  );
+
+  const volumeOiRatio =
+    contract.volumeOiRatio ?? 0;
+
+  let volumeOiScore = 0;
+
+  if (volumeOiRatio >= 1) volumeOiScore = 5;
+  else if (volumeOiRatio >= 0.5) volumeOiScore = 4;
+  else if (volumeOiRatio >= 0.25) volumeOiScore = 3;
+  else if (volumeOiRatio >= 0.1) volumeOiScore = 1;
+
+  const tradeSizeScore = Math.min(
+    5,
+    Math.log10(contract.lastTradeSize + 1) * 2.5
+  );
+
+  /* اليونانيات وكفاءة الاحتفاظ: 25 نقطة */
+  const deltaDistance = Math.abs(
+    absoluteDelta - 0.45
+  );
+
+  const deltaScore = Math.max(
+    0,
+    15 - deltaDistance * 75
+  );
+
+  const thetaDecayPct =
+    contract.midpoint > 0
+      ? (Math.abs(contract.theta) /
+          contract.midpoint) *
+        100
+      : 100;
+
+  let thetaScore = 0;
+
+  if (thetaDecayPct <= 1) thetaScore = 5;
+  else if (thetaDecayPct <= 2.5) thetaScore = 4;
+  else if (thetaDecayPct <= 4) thetaScore = 2;
+
+  let ivScore = 0;
+
+  if (contract.iv >= 0.15 && contract.iv <= 0.8) {
+    ivScore = 5;
+  } else if (
+    contract.iv >= 0.1 &&
+    contract.iv <= 1.2
+  ) {
+    ivScore = 3;
+  } else if (
+    contract.iv > 0 &&
+    contract.iv <= 1.5
+  ) {
+    ivScore = 1;
+  }
+
+  /* قرب السترايك والمدة: 15 نقطة */
+  let proximityScore = 0;
+
+  if (strikeDistancePct <= 1) proximityScore = 10;
+  else if (strikeDistancePct <= 3) proximityScore = 8;
+  else if (strikeDistancePct <= 5) proximityScore = 5;
+  else if (strikeDistancePct <= 8) proximityScore = 2;
+
+  let dteScore = 0;
+
+  if (dte >= 10 && dte <= 21) dteScore = 5;
+  else if (dte >= 7 && dte <= 30) dteScore = 4;
+  else if (dte >= 31 && dte <= 35) dteScore = 2;
+
+  const rawScore =
+    spreadScore +
+    lastTradeConsistencyScore +
+    volumeScore +
+    openInterestScore +
+    volumeOiScore +
+    tradeSizeScore +
+    deltaScore +
+    thetaScore +
+    ivScore +
+    proximityScore +
+    dteScore;
+
+  return Math.max(
+    0,
+    Math.min(100, round(rawScore, 2))
+  );
+}
+
+function getEligibleContracts(
+  contracts: NormalizedContract[],
+  stockPrice: number
+) {
+  return contracts
+    .filter((contract) => {
+      const absoluteDelta = Math.abs(contract.delta);
+      const dte = daysUntilExpiration(
+        contract.expiration
+      );
+      const strikeDistancePct =
+        getStrikeDistancePct(contract, stockPrice);
+
+      const validMarket =
+        contract.bid > 0 &&
+        contract.ask > 0 &&
+        contract.ask >= contract.bid &&
+        contract.midpoint >= CONTRACT_MIN_MIDPOINT &&
+        contract.midpoint <= CONTRACT_MAX_MIDPOINT;
+
+      const validLiquidity =
+        contract.volume >= CONTRACT_MIN_VOLUME &&
+        contract.openInterest >=
+          CONTRACT_MIN_OPEN_INTEREST;
+
+      const validGreeks =
+        absoluteDelta >= CONTRACT_MIN_DELTA &&
+        absoluteDelta <= CONTRACT_MAX_DELTA &&
+        contract.iv > 0;
+
+      const validExecution =
+        contract.spreadPct !== null &&
+        contract.spreadPct >= 0 &&
+        contract.spreadPct <=
+          CONTRACT_MAX_SPREAD_PCT;
+
+      const validStructure =
+        dte >= CONTRACT_MIN_DTE &&
+        dte <= CONTRACT_MAX_DTE &&
+        strikeDistancePct <=
+          CONTRACT_MAX_STRIKE_DISTANCE_PCT;
+
+      if (
+        !validMarket ||
+        !validLiquidity ||
+        !validGreeks ||
+        !validExecution ||
+        !validStructure
+      ) {
+        return false;
+      }
+
+      return (
+        calculateContractRankingScore(
+          contract,
+          stockPrice
+        ) >= CONTRACT_MIN_QUALITY_SCORE
+      );
+    })
+    .sort((a, b) => {
+      const scoreDifference =
+        calculateContractRankingScore(
+          b,
+          stockPrice
+        ) -
+        calculateContractRankingScore(
+          a,
+          stockPrice
+        );
+
+      if (scoreDifference !== 0) {
+        return scoreDifference;
+      }
+
+      const spreadDifference =
+        (a.spreadPct ?? 100) -
+        (b.spreadPct ?? 100);
+
+      if (spreadDifference !== 0) {
+        return spreadDifference;
+      }
+
+      if (b.volume !== a.volume) {
+        return b.volume - a.volume;
+      }
+
+      return b.openInterest - a.openInterest;
+    });
+}
+
+async function loadAnalysis(
+  cleanSymbol: string,
+  finnhubKey: string,
+  massiveKey: string
+): Promise<AnalysisPayload> {
+  const quoteResponse = await fetch(
+    `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(
+      cleanSymbol
+    )}&token=${encodeURIComponent(finnhubKey)}`,
+    {
+      cache: "no-store",
+    }
+  );
+
+  if (!quoteResponse.ok) {
+    throw new Error(
+      `Finnhub request failed with status ${quoteResponse.status}`
+    );
+  }
+
+  const quote =
+    (await quoteResponse.json()) as FinnhubQuote;
+
+  const stockPrice = safeNumber(quote.c);
+
+  if (stockPrice <= 0) {
+    throw new Error(
+      "لم يتم العثور على سعر صحيح لهذا الرمز"
+    );
+  }
+
+  const massiveResult =
+    await fetchMassiveOptionPages(
+      cleanSymbol,
+      stockPrice,
+      massiveKey
+    );
+
+  const normalizedContracts =
+    massiveResult.contracts
+      .map(normalizeContract)
+      .filter(
+        (
+          contract
+        ): contract is NormalizedContract =>
+          contract !== null
+      );
+
+  const contracts = deduplicateContracts(
+    normalizedContracts
+  );
+
+  const gammaStructure = buildGammaStructure(
+  contracts,
+  stockPrice
+);
+
+  const calls = contracts.filter(
+    (contract) => contract.type === "call"
+  );
+
+  const puts = contracts.filter(
+    (contract) => contract.type === "put"
+  );
+
+  const callVolume = calls.reduce(
+    (sum, contract) =>
+      sum + contract.volume,
+    0
+  );
+
+  const putVolume = puts.reduce(
+    (sum, contract) =>
+      sum + contract.volume,
+    0
+  );
+
+  const callOpenInterest = calls.reduce(
+    (sum, contract) =>
+      sum + contract.openInterest,
+    0
+  );
+
+  const putOpenInterest = puts.reduce(
+    (sum, contract) =>
+      sum + contract.openInterest,
+    0
+  );
+
+  const totalVolume =
+    callVolume + putVolume;
+
+  const callVolumePct =
+    totalVolume > 0
+      ? round(
+          (callVolume / totalVolume) * 100
+        )
+      : 0;
+
+  const putVolumePct =
+    totalVolume > 0
+      ? round(
+          (putVolume / totalVolume) * 100
+        )
+      : 0;
+
+  const volumeBias:
+    | "CALL"
+    | "PUT"
+    | "NEUTRAL" =
+    callVolumePct >= 60
+      ? "CALL"
+      : putVolumePct >= 60
+        ? "PUT"
+        : "NEUTRAL";
+
+  const estimatedNetGex =
+    contracts.reduce((sum, contract) => {
+      const direction =
+        contract.type === "call" ? 1 : -1;
+
+      return (
+        sum +
+        direction *
+          contract.gamma *
+          contract.openInterest *
+          100 *
+          stockPrice *
+          stockPrice *
+          0.01
+      );
+    }, 0);
+
+  const contractFilterDiagnostic = contracts.reduce(
+    (summary, contract) => {
+      const absoluteDelta = Math.abs(contract.delta);
+      const dte = daysUntilExpiration(contract.expiration);
+      const strikeDistancePct =
+        getStrikeDistancePct(contract, stockPrice);
+
+      const validMarket =
+        contract.bid > 0 &&
+        contract.ask > 0 &&
+        contract.ask >= contract.bid &&
+        contract.midpoint >= CONTRACT_MIN_MIDPOINT &&
+        contract.midpoint <= CONTRACT_MAX_MIDPOINT;
+
+      const validLiquidity =
+        contract.volume >= CONTRACT_MIN_VOLUME &&
+        contract.openInterest >= CONTRACT_MIN_OPEN_INTEREST;
+
+      const validGreeks =
+        absoluteDelta >= CONTRACT_MIN_DELTA &&
+        absoluteDelta <= CONTRACT_MAX_DELTA &&
+        contract.iv > 0;
+
+      const validExecution =
+        contract.spreadPct !== null &&
+        contract.spreadPct >= 0 &&
+        contract.spreadPct <= CONTRACT_MAX_SPREAD_PCT;
+
+      const validStructure =
+        dte >= CONTRACT_MIN_DTE &&
+        dte <= CONTRACT_MAX_DTE &&
+        strikeDistancePct <= CONTRACT_MAX_STRIKE_DISTANCE_PCT;
+
+      const qualityScore =
+        calculateContractRankingScore(contract, stockPrice);
+
+      summary.total += 1;
+
+      if (contract.type === "call") {
+        summary.calls += 1;
+      } else {
+        summary.puts += 1;
+      }
+
+      if (!validMarket) summary.invalidMarket += 1;
+      if (!validLiquidity) summary.invalidLiquidity += 1;
+      if (!validGreeks) summary.invalidGreeks += 1;
+      if (!validExecution) summary.invalidExecution += 1;
+      if (!validStructure) summary.invalidStructure += 1;
+      if (qualityScore < CONTRACT_MIN_QUALITY_SCORE) {
+        summary.lowQuality += 1;
+      }
+
+      if (
+        validMarket &&
+        validLiquidity &&
+        validGreeks &&
+        validExecution &&
+        validStructure &&
+        qualityScore >= CONTRACT_MIN_QUALITY_SCORE
+      ) {
+        summary.eligible += 1;
+
+        if (contract.ask <= 2.70) {
+          summary.eligibleAffordable += 1;
+        }
+      }
+
+      return summary;
+    },
+    {
+      total: 0,
+      calls: 0,
+      puts: 0,
+      invalidMarket: 0,
+      invalidLiquidity: 0,
+      invalidGreeks: 0,
+      invalidExecution: 0,
+      invalidStructure: 0,
+      lowQuality: 0,
+      eligible: 0,
+      eligibleAffordable: 0,
+    }
+  );
+
+  console.log(
+    `[ELIGIBLE_CONTRACT_DIAGNOSTIC] ${cleanSymbol} ` +
+      JSON.stringify(contractFilterDiagnostic)
+  );
+
+  const eligibleContracts =
+    getEligibleContracts(
+      contracts,
+      stockPrice
+    );
+
+  const eligibleCalls = eligibleContracts.filter(
+    (contract) => contract.type === "call"
+  );
+
+  const eligiblePuts = eligibleContracts.filter(
+    (contract) => contract.type === "put"
+  );
+
+  /*
+    نحافظ على أفضل 3 عقود حسب الجودة، ونضيف أفضل عقد
+    منخفض التكلفة إذا كان موجودًا خارج أول ثلاثة.
+    لا يتم تخفيف أي شرط من شروط الجودة.
+  */
+  const buildRecommendedContracts = (
+    contracts: NormalizedContract[]
+  ) => {
+    const topContracts = contracts.slice(0, 3);
+
+    const affordableContract = contracts.find(
+      (contract) =>
+        contract.ask > 0 &&
+        contract.ask <= 2.70
+    );
+
+    if (
+      affordableContract &&
+      !topContracts.some(
+        (contract) =>
+          contract.ticker === affordableContract.ticker
+      )
+    ) {
+      return [
+        ...topContracts,
+        affordableContract,
+      ];
+    }
+
+    return topContracts;
+  };
+
+  const recommendedCalls =
+    buildRecommendedContracts(eligibleCalls);
+
+  const recommendedPuts =
+    buildRecommendedContracts(eligiblePuts);
+
+  const bestCall = recommendedCalls[0] ?? null;
+  const bestPut = recommendedPuts[0] ?? null;
+
+  return {
+    symbol: cleanSymbol,
+
+    quote: {
+      price: round(stockPrice),
+
+      change: round(
+        safeNumber(quote.d)
+      ),
+
+      changePct: round(
+        safeNumber(quote.dp)
+      ),
+
+      open: round(
+        safeNumber(quote.o)
+      ),
+
+      high: round(
+        safeNumber(quote.h)
+      ),
+
+      low: round(
+        safeNumber(quote.l)
+      ),
+
+      previousClose: round(
+        safeNumber(quote.pc)
+      ),
+
+      timestamp: safeNumber(quote.t),
+    },
+
+    options: {
+      contractsReturned:
+        contracts.length,
+
+      pagesFetched:
+        massiveResult.pagesFetched,
+
+      chainIsPartial:
+        massiveResult.hasMorePages,
+
+      callsCount: calls.length,
+      putsCount: puts.length,
+
+      callVolume,
+      putVolume,
+      totalVolume,
+
+      callVolumePct,
+      putVolumePct,
+      volumeBias,
+
+      callOpenInterest,
+      putOpenInterest,
+
+      estimatedNetGex: round(
+  estimatedNetGex
+),
+
+gammaStructure,
+
+eligibleContractsCount: eligibleContracts.length,
+bestCall,
+bestPut,
+recommendedCalls,
+recommendedPuts,
+},
+    dataQuality: {
+      finnhubConnected: true,
+      massiveConnected: true,
+
+      massiveStatus:
+        massiveResult.massiveStatus,
+
+      pagesFetched:
+        massiveResult.pagesFetched,
+
+      chainComplete:
+        !massiveResult.hasMorePages,
+
+      note: massiveResult.hasMorePages
+        ? `تم تحليل ${contracts.length} عقدًا من ${massiveResult.pagesFetched} صفحات مفلترة، وتأهل ${eligibleContracts.length} عقدًا قويًا، وما زالت توجد صفحات إضافية.`
+        : `تم تحليل ${contracts.length} عقدًا من ${massiveResult.pagesFetched} صفحات مفلترة، وتأهل ${eligibleContracts.length} عقدًا قويًا.`,
+    },
+
+    capturedAt: new Date().toISOString(),
+  };
+}
+
+export async function GET(
+  _request: Request,
+  context: {
+    params: Promise<{
+      symbol: string;
+    }>;
+  }
+) {
+  const { symbol } = await context.params;
+
+  const cleanSymbol = symbol
+    .trim()
+    .toUpperCase();
+
+  if (!/^[A-Z.-]{1,10}$/.test(cleanSymbol)) {
+    return NextResponse.json(
+      {
+        error: "رمز السهم غير صالح",
+      },
+      {
+        status: 400,
+      }
+    );
+  }
+
+  const finnhubKey =
+    process.env.FINNHUB_API_KEY;
+
+  const massiveKey =
+    process.env.MASSIVE_API_KEY;
+
+  if (!finnhubKey || !massiveKey) {
+    return NextResponse.json(
+      {
+        error:
+          "مفاتيح Finnhub أو Massive غير موجودة",
+      },
+      {
+        status: 500,
+      }
+    );
+  }
+
+  try {
+    const maxPages =
+      getConfiguredMaxPages();
+
+    const cacheKey =
+      `market-analysis:v2:${cleanSymbol}:` +
+      `pages:${maxPages}`;
+
+    const analysis =
+      await getOrSetCache<AnalysisPayload>(
+        cacheKey,
+        {
+          ttlMs: ANALYSIS_CACHE_TTL_MS,
+          staleMs: ANALYSIS_CACHE_STALE_MS,
+        },
+        () =>
+          loadAnalysis(
+            cleanSymbol,
+            finnhubKey,
+            massiveKey
+          )
+      );
+
+    const typedAnalysis =
+      analysis as AnalysisResponse;
+
+    const marketAnalysis =
+      analyzeMarketData(
+        typedAnalysis
+      );
+
+    let tradePlan:
+      AnalysisTradePlan | null =
+      null;
+
+    try {
+      tradePlan =
+        await syncAnalysisTradePlan(
+          typedAnalysis,
+          marketAnalysis.decision.side,
+          marketAnalysis.decision.score
+        );
+    } catch (tradePlanError) {
+      console.error(
+        `Trade plan sync failed for ${cleanSymbol}:`,
+        tradePlanError
+      );
+    }
+
+    return NextResponse.json(
+      {
+        ...analysis,
+        tradePlan,
+      },
+      {
+      status: 200,
+      headers: {
+        /*
+          يمنع المتصفح والوسيط الخارجي من الاحتفاظ
+          بنسخة مستقلة؛ الكاش تتم إدارته مركزيًا هنا.
+        */
+        "Cache-Control":
+          "no-store, max-age=0",
+
+        "X-Market-Cache":
+          "memory-deduplicated",
+      },
+    }
+    );
+  } catch (error) {
+    console.error(
+      `Analysis API error for ${cleanSymbol}:`,
+      error
+    );
+
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Unknown analysis error";
+
+    return NextResponse.json(
+      {
+        error:
+          "حدث خطأ داخلي أثناء جلب وتحليل البيانات",
+
+        details:
+          process.env.NODE_ENV ===
+          "development"
+            ? message
+            : undefined,
+      },
+      {
+        status: 500,
+      }
+    );
+  }
+}

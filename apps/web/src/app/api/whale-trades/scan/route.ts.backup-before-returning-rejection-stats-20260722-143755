@@ -1684,7 +1684,6 @@ export async function GET(
         ? savedRows.length
         : uniqueRows.length,
     failures,
-    rejectionStats: whaleRejectStats,
     results: uniqueRows,
     capturedAt:
       new Date().toISOString(),

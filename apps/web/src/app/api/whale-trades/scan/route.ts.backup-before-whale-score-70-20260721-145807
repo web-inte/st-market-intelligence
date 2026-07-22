@@ -37,24 +37,11 @@ const SYMBOLS = [
   "XOM",
 ];
 
-const MIN_PREMIUM_VALUE = 250_000;
-const MIN_WHALE_SCORE = 70;
+const MIN_PREMIUM_VALUE = 1_000_000;
+const MIN_WHALE_SCORE = 80;
 const MAX_RESULTS_PER_SYMBOL = 180;
 const MAX_APPROVED_CONTRACT_PRICE = 3;
 const MAX_APPROVED_SPREAD_PCT = 15;
-
-const whaleRejectStats = {
-  invalidBasics: 0,
-  strikeOrDte: 0,
-  invalidExecutionData: 0,
-  premiumTooLow: 0,
-  whaleScoreTooLow: 0,
-  executionNotBuy: 0,
-  contractPriceRejected: 0,
-  spreadRejected: 0,
-  gammaDirectionRejected: 0,
-  compositeScoreTooLow: 0,
-};
 
 
 type MassiveContract = {
@@ -333,12 +320,12 @@ function detectExecutionSide(
       Math.round(position);
     reason =
       "التنفيذ قريب جدًا من Ask؛ شراء العقد مرجح بقوة";
-  } else if (position >= 55) {
+  } else if (position >= 65) {
     side = "BUY";
     confidence =
       Math.round(position);
     reason =
-      "التنفيذ يميل إلى Ask؛ شراء العقد مرجح";
+      "التنفيذ أقرب إلى Ask؛ شراء العقد مرجح";
   } else if (position <= 20) {
     side = "SELL";
     confidence =
@@ -827,7 +814,6 @@ function calculateCompositeWhaleScore(
   if (
     row.execution_side !== "BUY"
   ) {
-    whaleRejectStats.executionNotBuy++;
     return null;
   }
 
@@ -836,7 +822,6 @@ function calculateCompositeWhaleScore(
     row.contract_price >
       MAX_APPROVED_CONTRACT_PRICE
   ) {
-    whaleRejectStats.contractPriceRejected++;
     return null;
   }
 
@@ -845,7 +830,6 @@ function calculateCompositeWhaleScore(
     row.spread_pct >
       MAX_APPROVED_SPREAD_PCT
   ) {
-    whaleRejectStats.spreadRejected++;
     return null;
   }
 
@@ -970,7 +954,6 @@ function calculateCompositeWhaleScore(
     row.direction_status ===
     "عكس الاتجاه"
   ) {
-    whaleRejectStats.gammaDirectionRejected++;
     return null;
   }
 
@@ -1120,7 +1103,6 @@ function calculateCompositeWhaleScore(
     totalScore <
     MIN_WHALE_SCORE
   ) {
-    whaleRejectStats.compositeScoreTooLow++;
     return null;
   }
 
@@ -1241,7 +1223,6 @@ if (
   daysToExpiration < 1 ||
   daysToExpiration > 45
 ) {
-  whaleRejectStats.strikeOrDte++;
   return null;
 }
 
@@ -1252,7 +1233,6 @@ if (
     strike <= 0 ||
     stockPrice <= 0
   ) {
-    whaleRejectStats.invalidBasics++;
     return null;
   }
 
@@ -1305,7 +1285,6 @@ if (
     executionPrice <= 0 ||
     lastTradeSize <= 0
   ) {
-    whaleRejectStats.invalidExecutionData++;
     return null;
   }
 
@@ -1318,7 +1297,6 @@ if (
     premiumValue <
     MIN_PREMIUM_VALUE
   ) {
-    whaleRejectStats.premiumTooLow++;
     return null;
   }
 
@@ -1381,7 +1359,6 @@ if (
     whaleScore <
     MIN_WHALE_SCORE
   ) {
-    whaleRejectStats.whaleScoreTooLow++;
     return null;
   }
 
@@ -1684,7 +1661,6 @@ export async function GET(
         ? savedRows.length
         : uniqueRows.length,
     failures,
-    rejectionStats: whaleRejectStats,
     results: uniqueRows,
     capturedAt:
       new Date().toISOString(),

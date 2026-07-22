@@ -1,0 +1,528 @@
+import {
+  calculateGammaScore,
+  type AnalysisResponse,
+  type OptionContract,
+  type Side,
+} from "./analysis-engine";
+
+type DecisionSide = Exclude<Side, "NEUTRAL">;
+
+export type DecisionActiveTradeResult = {
+  qualifies: boolean;
+  symbol: string;
+  gexSide: Side;
+  radarSide: Side;
+  score: number;
+  baseScore: number;
+  gammaSupportBonus: number;
+  gammaSupportRatio: number;
+  entry: number | null;
+  stop: number | null;
+  selectedContract: OptionContract | null;
+  rejectionReasons: string[];
+};
+
+const MIN_SCORE = 6;
+const MIN_CONTRACT_PRICE = 1;
+const MAX_CONTRACT_PRICE = 2.7;
+const MAX_ENTRY_DISTANCE_PCT = 5;
+
+function round(value: number, digits = 2) {
+  const factor = 10 ** digits;
+  return Math.round(value * factor) / factor;
+}
+
+function clamp(value: number, minimum: number, maximum: number) {
+  return Math.min(Math.max(value, minimum), maximum);
+}
+
+function getGexSide(analysis: AnalysisResponse): Side {
+  const netGex =
+    Number(analysis.options.estimatedNetGex) || 0;
+
+  if (netGex > 0) return "CALL";
+  if (netGex < 0) return "PUT";
+
+  return "NEUTRAL";
+}
+
+function getRadarSide(analysis: AnalysisResponse): Side {
+  const side = analysis.options.volumeBias;
+
+  return side === "CALL" || side === "PUT"
+    ? side
+    : "NEUTRAL";
+}
+
+function buildAutoStop(
+  entry: number,
+  side: DecisionSide
+) {
+  if (side === "CALL") {
+    return round(entry * 0.985, 4);
+  }
+
+  return round(entry * 1.015, 4);
+}
+
+function calculateGammaSupportBonus(
+  analysis: AnalysisResponse,
+  side: DecisionSide
+) {
+  const gamma =
+    analysis.options.gammaStructure;
+
+  if (side === "CALL") {
+    const supports = [
+      gamma.nearestSupport,
+      gamma.strongestSupport,
+      gamma.putWall,
+    ]
+      .map((level) =>
+        Math.abs(Number(level?.totalGex) || 0)
+      )
+      .filter((value) => value > 0);
+
+    const resistance = Math.abs(
+      Number(
+        (
+          gamma.nearestResistance ||
+          gamma.strongestResistance ||
+          gamma.callWall
+        )?.totalGex
+      ) || 0
+    );
+
+    if (!supports.length || !resistance) {
+      return {
+        bonus: 0,
+        ratio: 0,
+      };
+    }
+
+    const ratio =
+      Math.max(...supports) / resistance;
+
+    if (ratio >= 10) {
+      return {
+        bonus: 2,
+        ratio,
+      };
+    }
+
+    if (ratio >= 5) {
+      return {
+        bonus: 1,
+        ratio,
+      };
+    }
+
+    return {
+      bonus: 0,
+      ratio,
+    };
+  }
+
+  const resistances = [
+    gamma.nearestResistance,
+    gamma.strongestResistance,
+    gamma.callWall,
+  ]
+    .map((level) =>
+      Math.abs(Number(level?.totalGex) || 0)
+    )
+    .filter((value) => value > 0);
+
+  const support = Math.abs(
+    Number(
+      (
+        gamma.nearestSupport ||
+        gamma.strongestSupport ||
+        gamma.putWall
+      )?.totalGex
+    ) || 0
+  );
+
+  if (!resistances.length || !support) {
+    return {
+      bonus: 0,
+      ratio: 0,
+    };
+  }
+
+  const ratio =
+    Math.max(...resistances) / support;
+
+  if (ratio >= 10) {
+    return {
+      bonus: 2,
+      ratio,
+    };
+  }
+
+  if (ratio >= 5) {
+    return {
+      bonus: 1,
+      ratio,
+    };
+  }
+
+  return {
+    bonus: 0,
+    ratio,
+  };
+}
+
+function getStrikeStep(price: number) {
+  if (price >= 1000) return 10;
+  if (price >= 500) return 5;
+  if (price >= 100) return 2.5;
+
+  return 1;
+}
+
+function getPreferredStrike(
+  entry: number,
+  side: DecisionSide
+) {
+  const step = getStrikeStep(entry);
+
+  if (side === "CALL") {
+    return Math.ceil(entry / step) * step;
+  }
+
+  return Math.floor(entry / step) * step;
+}
+
+/*
+  نفس طريقة نقاط عقد بوت القرار:
+  Volume + OI + Delta
+  - عقوبة بعد السترايك
+  - عقوبة السبريد.
+*/
+function scoreOptionContract(
+  contract: OptionContract,
+  preferredStrike: number,
+  side: DecisionSide
+) {
+  const distance = Math.abs(
+    Number(contract.strike) -
+      preferredStrike
+  );
+
+  const volumeScore = Math.min(
+    (Number(contract.volume) || 0) / 1000,
+    3
+  );
+
+  const oiScore = Math.min(
+    (Number(contract.openInterest) || 0) /
+      3000,
+    3
+  );
+
+  const delta =
+    Number(contract.delta);
+
+  let deltaScore = 0;
+
+  if (Number.isFinite(delta)) {
+    if (side === "CALL") {
+      if (delta >= 0.25 && delta <= 0.65) {
+        deltaScore = 3;
+      } else if (
+        delta >= 0.15 &&
+        delta <= 0.75
+      ) {
+        deltaScore = 1.5;
+      }
+    } else {
+      if (
+        delta <= -0.25 &&
+        delta >= -0.65
+      ) {
+        deltaScore = 3;
+      } else if (
+        delta <= -0.15 &&
+        delta >= -0.75
+      ) {
+        deltaScore = 1.5;
+      }
+    }
+  }
+
+  const bid = Number(contract.bid) || 0;
+  const ask = Number(contract.ask) || 0;
+  const spread = ask - bid;
+
+  const spreadPenalty =
+    bid > 0 && ask > 0
+      ? Math.min(spread / 0.2, 2)
+      : 0;
+
+  const distancePenalty =
+    distance * 0.1;
+
+  return (
+    volumeScore +
+    oiScore +
+    deltaScore -
+    distancePenalty -
+    spreadPenalty
+  );
+}
+
+function findBestOptionContract(
+  analysis: AnalysisResponse,
+  side: DecisionSide,
+  preferredStrike: number
+) {
+  const candidates =
+    side === "CALL"
+      ? analysis.options.recommendedCalls
+      : analysis.options.recommendedPuts;
+
+  return (
+    candidates
+      .filter((contract) => {
+        const mid =
+          Number(contract.midpoint) || 0;
+
+        return (
+          Boolean(contract.ticker) &&
+          mid >= MIN_CONTRACT_PRICE &&
+          mid <= MAX_CONTRACT_PRICE
+        );
+      })
+      .sort((first, second) => {
+        const scoreDifference =
+          scoreOptionContract(
+            second,
+            preferredStrike,
+            side
+          ) -
+          scoreOptionContract(
+            first,
+            preferredStrike,
+            side
+          );
+
+        if (scoreDifference !== 0) {
+          return scoreDifference;
+        }
+
+        return (
+          Math.abs(
+            first.strike -
+              preferredStrike
+          ) -
+          Math.abs(
+            second.strike -
+              preferredStrike
+          )
+        );
+      })[0] ?? null
+  );
+}
+
+export function evaluateDecisionActiveTrade(
+  analysis: AnalysisResponse
+): DecisionActiveTradeResult {
+  const rejectionReasons: string[] = [];
+
+  const symbol =
+    analysis.symbol
+      .trim()
+      .toUpperCase();
+
+  const gexSide =
+    getGexSide(analysis);
+
+  const radarSide =
+    getRadarSide(analysis);
+
+  if (
+    gexSide === "NEUTRAL" ||
+    radarSide === "NEUTRAL"
+  ) {
+    rejectionReasons.push(
+      gexSide === "NEUTRAL"
+        ? "القاما لا تعطي اتجاهًا واضحًا"
+        : "الرادار لا يعطي اتجاهًا واضحًا"
+    );
+
+    return {
+      qualifies: false,
+      symbol,
+      gexSide,
+      radarSide,
+      score: 0,
+      baseScore: 0,
+      gammaSupportBonus: 0,
+      gammaSupportRatio: 0,
+      entry: null,
+      stop: null,
+      selectedContract: null,
+      rejectionReasons,
+    };
+  }
+
+  if (gexSide !== radarSide) {
+    rejectionReasons.push(
+      `تعارض الاتجاه: GEX=${gexSide}, RADAR=${radarSide}`
+    );
+
+    return {
+      qualifies: false,
+      symbol,
+      gexSide,
+      radarSide,
+      score: 0,
+      baseScore: 0,
+      gammaSupportBonus: 0,
+      gammaSupportRatio: 0,
+      entry: null,
+      stop: null,
+      selectedContract: null,
+      rejectionReasons,
+    };
+  }
+
+  const side =
+    gexSide as DecisionSide;
+
+  /*
+    تحويل Gamma Score المتوفر في المنصة
+    من مقياس 100 إلى مقياس 10.
+  */
+  const gammaScore100 =
+    calculateGammaScore(
+      side,
+      Number(
+        analysis.options.estimatedNetGex
+      ) || 0
+    );
+
+  const baseScore =
+    round(gammaScore100 / 10, 2);
+
+  const gammaSupport =
+    calculateGammaSupportBonus(
+      analysis,
+      side
+    );
+
+  const score =
+    round(
+      clamp(
+        baseScore +
+          gammaSupport.bonus,
+        0,
+        10
+      ),
+      2
+    );
+
+  if (score < MIN_SCORE) {
+    rejectionReasons.push(
+      `Score ضعيف: ${score}/10`
+    );
+  }
+
+  /*
+    الفحص التلقائي يعادل Ready Now:
+    الدخول هو السعر الحالي، ولذلك مسافة
+    الدخول عن السعر الحالي تساوي صفرًا.
+  */
+  const entry =
+    Number(analysis.quote.price) || 0;
+
+  if (!entry) {
+    rejectionReasons.push(
+      "لا يوجد سعر حالي صالح للدخول"
+    );
+  }
+
+  const currentPrice =
+    Number(analysis.quote.price) || 0;
+
+  const distancePct =
+    entry > 0 && currentPrice > 0
+      ? Math.abs(
+          currentPrice - entry
+        ) /
+        currentPrice *
+        100
+      : 100;
+
+  if (
+    distancePct >
+    MAX_ENTRY_DISTANCE_PCT
+  ) {
+    rejectionReasons.push(
+      `الدخول بعيد عن السعر الحالي: ${round(
+        distancePct,
+        2
+      )}%`
+    );
+  }
+
+  const preferredStrike =
+    entry > 0
+      ? getPreferredStrike(
+          entry,
+          side
+        )
+      : 0;
+
+  const selectedContract =
+    preferredStrike > 0
+      ? findBestOptionContract(
+          analysis,
+          side,
+          preferredStrike
+        )
+      : null;
+
+  if (!selectedContract) {
+    rejectionReasons.push(
+      `لا يوجد عقد داخل النطاق ${MIN_CONTRACT_PRICE} - ${MAX_CONTRACT_PRICE}`
+    );
+  }
+
+  const stop =
+    entry > 0
+      ? buildAutoStop(
+          entry,
+          side
+        )
+      : null;
+
+  if (!stop) {
+    rejectionReasons.push(
+      "لا يوجد وقف ولا يمكن حساب وقف تلقائي"
+    );
+  }
+
+  return {
+    qualifies:
+      rejectionReasons.length === 0,
+    symbol,
+    gexSide,
+    radarSide,
+    score,
+    baseScore,
+    gammaSupportBonus:
+      gammaSupport.bonus,
+    gammaSupportRatio:
+      round(
+        gammaSupport.ratio,
+        2
+      ),
+    entry:
+      entry || null,
+    stop,
+    selectedContract,
+    rejectionReasons,
+  };
+}

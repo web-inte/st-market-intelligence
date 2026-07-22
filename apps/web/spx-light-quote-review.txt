@@ -1,0 +1,652 @@
+===== بداية مسار الصفقات =====
+import { NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
+type DataRecord = Record<string, unknown>;
+
+type SpxSignal = {
+  ok: boolean;
+  status: string;
+  message?: string;
+  market?: {
+    stockPrice?: number;
+  } | null;
+  gamma?: {
+    zeroGamma?: number;
+    callWall?: number;
+    putWall?: number;
+    magnet?: number;
+  } | null;
+  bestContract?: {
+    ticker: string;
+    side: "CALL" | "PUT";
+    strike: number;
+    expiration: string;
+    ask: number;
+    bid: number;
+    midpoint: number;
+    price: number;
+    finalScore: number;
+    quality: string;
+  } | null;
+};
+
+type SpxSignalWithExecution =
+  SpxSignal & {
+    executionContract?:
+      SpxSignal["bestContract"];
+  };
+
+
+function record(value: unknown): DataRecord {
+  return value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+    ? (value as DataRecord)
+    : {};
+}
+
+function numberValue(value: unknown, fallback = 0) {
+  const parsed = Number(value);
+
+  return Number.isFinite(parsed)
+    ? parsed
+    : fallback;
+}
+
+function textValue(value: unknown) {
+  return typeof value === "string"
+    ? value.trim()
+    : "";
+}
+
+function round(value: number, digits = 2) {
+  const factor = 10 ** digits;
+
+  return (
+    Math.round((value + Number.EPSILON) * factor) /
+    factor
+  );
+}
+
+
+function todayNewYork() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+
+function isSpxDailyWindowOpen() {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date());
+
+  const weekday =
+    parts.find(
+      (part) => part.type === "weekday"
+    )?.value || "";
+
+  const hour = Number(
+    parts.find(
+      (part) => part.type === "hour"
+    )?.value || 0
+  );
+
+  const minute = Number(
+    parts.find(
+      (part) => part.type === "minute"
+    )?.value || 0
+  );
+
+  const totalMinutes =
+    hour * 60 + minute;
+
+  const morningTradingDay =
+    ["Mon", "Tue", "Wed", "Thu", "Fri"].includes(
+      weekday
+    );
+
+  const eveningTradingDay =
+    ["Sun", "Mon", "Tue", "Wed", "Thu"].includes(
+      weekday
+    );
+
+  // جلسة GTH:
+  // 20:15 مساءً حتى 09:25 صباحًا بتوقيت نيويورك.
+  const globalSessionOpen =
+    (
+      eveningTradingDay &&
+      totalMinutes >= 20 * 60 + 15
+    ) ||
+    (
+      morningTradingDay &&
+      totalMinutes < 9 * 60 + 25
+    );
+
+  // جلسة RTH لعقد SPXW المنتهي في اليوم نفسه:
+  // 09:30 صباحًا حتى 16:00 مساءً بتوقيت نيويورك.
+  const regularZeroDteSessionOpen =
+    morningTradingDay &&
+    totalMinutes >= 9 * 60 + 30 &&
+    totalMinutes < 16 * 60;
+
+  return (
+    globalSessionOpen ||
+    regularZeroDteSessionOpen
+  );
+}
+
+function createAdminClient() {
+  const url =
+    process.env.SUPABASE_URL ||
+    process.env.NEXT_PUBLIC_SUPABASE_URL;
+
+  const secret =
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_SECRET_KEY;
+
+  if (!url || !secret) {
+    throw new Error(
+      "متغيرات Supabase الخاصة بالسيرفر غير مكتملة"
+    );
+  }
+
+  return createClient(url, secret, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  });
+}
+
+async function fetchSpxSignal(
+  request: Request
+): Promise<SpxSignalWithExecution> {
+  const requestOrigin =
+    new URL(request.url).origin;
+
+  const internalOrigin =
+    process.env.NODE_ENV === "development"
+      ? `http://127.0.0.1:${process.env.PORT || "3000"}`
+      : requestOrigin;
+
+  const response = await fetch(
+    `${internalOrigin}/api/spx-0dte`,
+    {
+      cache: "no-store",
+      headers: {
+        cookie:
+          request.headers.get("cookie") || "",
+      },
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      `تعذر جلب تحليل SPX: ${response.status}`
+    );
+  }
+
+  return response.json();
+}
+
+async function fetchContractSnapshot(
+  contractTicker: string,
+  apiKey: string
+) {
+  const normalizedTicker =
+    contractTicker.startsWith("O:")
+      ? contractTicker
+      : `O:${contractTicker}`;
+
+  const url =
+    `https://api.massive.com/v3/snapshot/options/` +
+    `I%3ASPX/${encodeURIComponent(normalizedTicker)}` +
+    `?apiKey=${encodeURIComponent(apiKey)}`;
+
+  const response = await fetch(url, {
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      `تعذر جلب سعر العقد: ${response.status}`
+    );
+  }
+
+  const payload = record(
+    await response.json()
+  );
+
+  const result = record(payload.results);
+  const quote = record(result.last_quote);
+  const trade = record(result.last_trade);
+
+  const bid = numberValue(quote.bid);
+  const ask = numberValue(quote.ask);
+
+  const midpoint =
+    numberValue(quote.midpoint) > 0
+===== دالة جلب سعر العقد =====
+189-        cookie:
+190-          request.headers.get("cookie") || "",
+191-      },
+192-    }
+193-  );
+194-
+195-  if (!response.ok) {
+196-    throw new Error(
+197-      `تعذر جلب تحليل SPX: ${response.status}`
+198-    );
+199-  }
+200-
+201-  return response.json();
+202-}
+203-
+204:async function fetchContractSnapshot(
+205-  contractTicker: string,
+206-  apiKey: string
+207-) {
+208-  const normalizedTicker =
+209-    contractTicker.startsWith("O:")
+210-      ? contractTicker
+211-      : `O:${contractTicker}`;
+212-
+213-  const url =
+214-    `https://api.massive.com/v3/snapshot/options/` +
+215-    `I%3ASPX/${encodeURIComponent(normalizedTicker)}` +
+216-    `?apiKey=${encodeURIComponent(apiKey)}`;
+217-
+218-  const response = await fetch(url, {
+219-    cache: "no-store",
+220-  });
+221-
+222-  if (!response.ok) {
+223-    throw new Error(
+224-      `تعذر جلب سعر العقد: ${response.status}`
+225-    );
+226-  }
+227-
+228-  const payload = record(
+229-    await response.json()
+230-  );
+231-
+232-  const result = record(payload.results);
+233-  const quote = record(result.last_quote);
+234-  const trade = record(result.last_trade);
+235-
+236-  const bid = numberValue(quote.bid);
+237-  const ask = numberValue(quote.ask);
+238-
+239-  const midpoint =
+240-    numberValue(quote.midpoint) > 0
+241-      ? numberValue(quote.midpoint)
+242-      : bid > 0 && ask > 0
+243-        ? (bid + ask) / 2
+244-        : 0;
+245-
+246-  const lastPrice =
+247-    numberValue(trade.price);
+248-
+249-  const currentPrice =
+250-    bid > 0
+251-      ? bid
+252-      : midpoint > 0
+253-        ? midpoint
+254-        : lastPrice;
+255-
+256-  if (currentPrice <= 0) {
+257-    throw new Error(
+258-      "لم يرجع Massive سعرًا صالحًا للعقد"
+259-    );
+260-  }
+261-
+262-  return {
+263-    bid: round(bid),
+264-    ask: round(ask),
+265-    midpoint: round(midpoint),
+266-    currentPrice: round(currentPrice),
+267-    quoteAt:
+268-      new Date().toISOString(),
+269-  };
+270-}
+271-
+272-function chooseInvalidationLevel(input: {
+273-  side: "CALL" | "PUT";
+274-  stockPrice: number;
+275-  gamma: NonNullable<SpxSignal["gamma"]>;
+276-}) {
+277-  const {
+278-    side,
+279-    stockPrice,
+280-    gamma,
+281-  } = input;
+282-
+283-  const candidates =
+284-    side === "CALL"
+285-      ? [
+286-          gamma.putWall,
+287-          gamma.zeroGamma,
+288-          gamma.magnet,
+289-        ]
+290-          .map(Number)
+291-          .filter(
+292-            (level) =>
+293-              Number.isFinite(level) &&
+294-              level > 0 &&
+295-              level < stockPrice
+296-          )
+297-          .sort((a, b) => b - a)
+298-      : [
+299-          gamma.callWall,
+300-          gamma.zeroGamma,
+301-          gamma.magnet,
+302-        ]
+303-          .map(Number)
+304-          .filter(
+===== بداية GET والتحقق =====
+          gamma.zeroGamma,
+          gamma.magnet,
+        ]
+          .map(Number)
+          .filter(
+            (level) =>
+              Number.isFinite(level) &&
+              level > stockPrice
+          )
+          .sort((a, b) => a - b);
+
+  return candidates[0] || 0;
+}
+
+export async function GET(
+  request: Request
+) {
+  try {
+    const massiveApiKey =
+      process.env.MASSIVE_API_KEY;
+
+    if (!massiveApiKey) {
+      throw new Error(
+        "متغير MASSIVE_API_KEY غير موجود"
+      );
+    }
+
+    const supabase =
+      createAdminClient();
+
+
+    const nowIso =
+      new Date().toISOString();
+
+
+    const today =
+      todayNewYork();
+
+    const stoppedCutoff =
+      new Date(
+        Date.now() -
+          30 * 60 * 1000
+      ).toISOString();
+
+    /*
+      تنظيف صفقات SPX القديمة:
+      1) عقود الأيام السابقة تختفي فورًا.
+      2) الصفقات التي ضربت الوقف تختفي بعد 30 دقيقة.
+    */
+    const {
+      error: expiredCleanupError,
+    } = await supabase
+      .from("spx_trade_setups")
+      .update({
+        status: "EXPIRED",
+        hidden_after: nowIso,
+        last_error:
+          "انتهى تاريخ عقد SPX",
+      })
+      .in("status", [
+        "WATCH",
+        "ACTIVE",
+      ])
+      .lt("expiration", today);
+
+    if (expiredCleanupError) {
+      throw expiredCleanupError;
+    }
+
+    const {
+      error: stoppedCleanupError,
+    } = await supabase
+      .from("spx_trade_setups")
+      .update({
+        hidden_after: nowIso,
+      })
+      .eq("status", "STOPPED")
+      .lt(
+        "stopped_at",
+        stoppedCutoff
+      );
+
+    if (stoppedCleanupError) {
+      throw stoppedCleanupError;
+    }
+
+
+    const {
+      data: visibleTrades,
+      error: visibleError,
+    } = await supabase
+      .from("spx_trade_setups")
+      .select("*")
+      .or(
+        `status.in.(WATCH,ACTIVE),and(status.eq.STOPPED,hidden_after.gt.${nowIso})`
+      )
+      .order("created_at", {
+        ascending: false,
+      })
+      .limit(20);
+
+    if (visibleError) {
+      throw visibleError;
+    }
+
+    const liveTrade =
+      (visibleTrades || []).find(
+        (row) =>
+          row.status === "WATCH" ||
+          row.status === "ACTIVE"
+      );
+
+    const sessionOrigin =
+      process.env.NODE_ENV === "development"
+        ? `http://127.0.0.1:${process.env.PORT || "3000"}`
+        : new URL(request.url).origin;
+
+    const sessionResponse =
+      await fetch(
+        `${sessionOrigin}/api/market-session`,
+        {
+          cache: "no-store",
+          headers: {
+            cookie:
+              request.headers.get("cookie") || "",
+          },
+        }
+      );
+
+    const session =
+      await sessionResponse.json();
+
+    const regularSessionOpen =
+      session?.isOpen === true &&
+      session?.phase === "REGULAR";
+
+    /*
+      نستمر في جلب التحليل خارج الجلسة الرسمية
+      لعرض Flow والقاما والمستويات فقط.
+
+      لكن بيانات أسعار العقود خارج REGULAR
+      لا تُستخدم لإصدار أو متابعة أي صفقة.
+    */
+    const signal =
+      await fetchSpxSignal(request);
+
+    if (!regularSessionOpen) {
+      /*
+        عند انتهاء الجلسة الرسمية:
+        - إغلاق جميع صفقات SPX المفتوحة.
+        - إخفاؤها فورًا من الصفحة.
+        - عدم إصدار أي صفقة جديدة حتى REGULAR التالية.
+      */
+      const {
+        error: sessionCloseError,
+      } = await supabase
+        .from("spx_trade_setups")
+        .update({
+          status: "EXPIRED",
+          hidden_after: nowIso,
+          last_error:
+            "انتهت الجلسة الرسمية وتم إغلاق المتابعة تلقائيًا",
+        })
+        .in("status", [
+          "ACTIVE",
+          "WATCH",
+        ]);
+
+      if (sessionCloseError) {
+        throw sessionCloseError;
+      }
+===== منطق التحديث في الصفحة =====
+
+        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+          <p className="text-xs font-bold text-slate-500">
+            وقت ضرب الوقف
+          </p>
+
+          <p className="mt-2 font-black">
+            {formatDate(
+              trade.stopped_at
+            )}
+          </p>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+export default function SpxWhalesPage() {
+  const [data, setData] =
+    useState<ApiData | null>(null);
+
+  const [loading, setLoading] =
+    useState(true);
+
+  const [refreshing, setRefreshing] =
+    useState(false);
+
+  const [error, setError] =
+    useState("");
+
+  const load = useCallback(
+    async (initial = false) => {
+      try {
+        initial
+          ? setLoading(true)
+          : setRefreshing(true);
+
+        setError("");
+
+        const response =
+          await fetch(
+            "/api/spx-active-trade",
+            {
+              cache: "no-store",
+            }
+          );
+
+        const payload =
+          (await response.json()) as ApiData;
+
+        if (
+          !response.ok ||
+          !payload.ok
+        ) {
+          throw new Error(
+            payload.error ||
+              "تعذر تحميل صفقات SPX"
+          );
+        }
+
+        setData(payload);
+      } catch (loadError) {
+        setError(
+          loadError instanceof Error
+            ? loadError.message
+            : "حدث خطأ غير معروف"
+        );
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    []
+  );
+
+  const hasTrackedTrade =
+    Boolean(
+      data?.activeTrade ||
+      data?.trades?.some(
+        (trade) =>
+          trade.status === "ACTIVE" ||
+          trade.status === "WATCH"
+      )
+    );
+
+  const regularSessionOpen =
+    data?.marketSession?.isOpen === true &&
+    data?.marketSession?.phase === "REGULAR";
+
+  useEffect(() => {
+    /*
+      أول تحميل يتم فورًا دون انتظار المؤقت.
+    */
+    if (!data) {
+      void load(true);
+    }
+
+    let timer:
+      number | undefined;
+
+    const startPolling = () => {
+      if (
+        document.hidden ||
+        !regularSessionOpen
+      ) {
+        return;
+      }
+
+      const refreshInterval =
+        hasTrackedTrade
+          ? 5_000
+          : 20_000;
+
+      timer =
+        window.setInterval(
+          () => void load(false),
+          refreshInterval
+        );
+    };
+
+    const stopPolling = () => {
