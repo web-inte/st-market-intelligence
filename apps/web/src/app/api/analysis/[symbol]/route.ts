@@ -402,8 +402,8 @@ const CONTRACT_MIN_QUALITY_SCORE = 65;
   إذا تعطل المزود مؤقتًا يمكن استخدام آخر نتيجة
   سليمة لمدة 5 دقائق.
 */
-const ANALYSIS_CACHE_TTL_MS = 5 * 60_000;
-const ANALYSIS_CACHE_STALE_MS = 15 * 60_000;
+const ANALYSIS_CACHE_TTL_MS = 60_000;
+const ANALYSIS_CACHE_STALE_MS = 5 * 60_000;
 
 function safeNumber(value: unknown, fallback = 0) {
   const parsed = Number(value);
@@ -477,98 +477,34 @@ async function fetchMassivePage(
   url: string,
   massiveKey: string
 ) {
-  const maximumAttempts = 2;
+  const controller = new AbortController();
 
-  for (
-    let attempt = 1;
-    attempt <= maximumAttempts;
-    attempt += 1
-  ) {
-    const controller = new AbortController();
+  const timeout = setTimeout(() => {
+    controller.abort();
+  }, 15_000);
 
-    const timeout = setTimeout(() => {
-      controller.abort();
-    }, 15_000);
+  try {
+    const response = await fetch(url, {
+      cache: "no-store",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${massiveKey}`,
+      },
+      signal: controller.signal,
+    });
 
-    try {
-      const response = await fetch(url, {
-        cache: "no-store",
-        headers: {
-          Accept: "application/json",
-          Authorization: `Bearer ${massiveKey}`,
-        },
-        signal: controller.signal,
-      });
-
-      if (response.ok) {
-        return (
-          await response.json()
-        ) as MassiveResponse;
-      }
-
+    if (!response.ok) {
       const details = await response.text();
 
-      const retryableStatus =
-        response.status === 429 ||
-        response.status === 500 ||
-        response.status === 502 ||
-        response.status === 503 ||
-        response.status === 504;
-
-      if (
-        !retryableStatus ||
-        attempt === maximumAttempts
-      ) {
-        throw new Error(
-          `Massive request failed (${response.status}): ${details}`
-        );
-      }
-
-      const retryAfterSeconds = Number(
-        response.headers.get("retry-after")
+      throw new Error(
+        `Massive request failed (${response.status}): ${details}`
       );
-
-      const retryDelay =
-        Number.isFinite(retryAfterSeconds) &&
-        retryAfterSeconds > 0
-          ? Math.min(
-              retryAfterSeconds * 1000,
-              5_000
-            )
-          : 1_000;
-
-      console.warn(
-        `Massive temporary failure (${response.status}); ` +
-          `retrying ${attempt + 1}/${maximumAttempts}.`
-      );
-
-      await wait(retryDelay);
-    } catch (error) {
-      const isAbortError =
-        error instanceof Error &&
-        error.name === "AbortError";
-
-      if (
-        !isAbortError ||
-        attempt === maximumAttempts
-      ) {
-        throw error;
-      }
-
-      console.warn(
-        `Massive request timed out; ` +
-          `retrying ${attempt + 1}/${maximumAttempts}.`
-      );
-
-      await wait(1_000);
-    } finally {
-      clearTimeout(timeout);
     }
-  }
 
-  throw new Error(
-    "Massive request failed after retry"
-  );
+    return (await response.json()) as MassiveResponse;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function formatUtcDate(date: Date) {
