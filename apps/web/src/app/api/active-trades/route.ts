@@ -653,12 +653,17 @@ async function fetchMassiveContractLivePrice(
       trade.price
     );
 
+  const calculatedMidpoint =
+    bid > 0 && ask > 0
+      ? (bid + ask) / 2
+      : midpoint;
+
   const currentPrice =
-    bid > 0
-      ? bid
-      : midpoint > 0
-        ? midpoint
-        : lastTradePrice;
+    calculatedMidpoint > 0
+      ? calculatedMidpoint
+      : lastTradePrice > 0
+        ? lastTradePrice
+        : bid;
 
   if (currentPrice <= 0) {
     throw new Error(
@@ -669,7 +674,8 @@ async function fetchMassiveContractLivePrice(
   return {
     bid,
     ask,
-    midpoint,
+    midpoint:
+      calculatedMidpoint,
     currentPrice,
     stockPrice:
       activeTradeNumber(
