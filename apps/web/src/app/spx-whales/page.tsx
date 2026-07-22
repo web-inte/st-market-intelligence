@@ -577,7 +577,7 @@ export default function SpxWhalesPage() {
 
       const refreshInterval =
         hasTrackedTrade
-          ? 5_000
+          ? 1_000
           : 20_000;
 
       timer =
