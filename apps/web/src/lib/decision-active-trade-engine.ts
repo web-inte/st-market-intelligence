@@ -6,6 +6,7 @@ import {
 } from "./analysis-engine";
 
 import {
+  buildStopPrice,
   buildTargets,
 } from "./analysis-trade-plan";
 
@@ -629,7 +630,11 @@ export async function syncDecisionActiveTrade(
   const entryPrice =
     Number(result.entry) || 0;
 
-  const stopPrice =
+  /*
+    أهداف محرك القرار تبقى على الوقف السابق.
+    الوقف المحفوظ فقط يستخدم المنطق الهيكلي الجديد.
+  */
+  const previousStopPrice =
     Number(result.stop) || null;
 
   const analysisScore =
@@ -640,7 +645,16 @@ export async function syncDecisionActiveTrade(
       analysis,
       side,
       entryPrice,
-      stopPrice ?? entryPrice,
+      previousStopPrice ??
+        entryPrice,
+      analysisScore
+    );
+
+  const stopPrice =
+    buildStopPrice(
+      analysis,
+      side,
+      entryPrice,
       analysisScore
     );
 

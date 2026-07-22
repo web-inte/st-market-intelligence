@@ -451,7 +451,7 @@ export function buildTargets(
   );
 }
 
-function buildStopPrice(
+function buildTargetReferenceStopPrice(
   analysis: AnalysisResponse,
   side: ActiveSide,
   entryPrice: number,
@@ -551,6 +551,259 @@ function buildStopPrice(
       (1 -
         (side === "PUT" ? -1 : 1) *
           (stopMove / 100)),
+    2
+  );
+}
+
+/*
+  وقف السهم المشترك بين المحركين.
+
+  الأولوية:
+  1) أقوى مستوى Gamma في جهة الوقف.
+  2) Gamma Flip في جهة الوقف.
+  3) Magnet في جهة الوقف.
+  4) وقف فني من قاع/قمة الجلسة.
+  5) مدى الجلسة الحقيقي True Range.
+
+  لا يستخدم نسبة وقف ثابتة.
+*/
+export function buildStopPrice(
+  analysis: AnalysisResponse,
+  side: ActiveSide,
+  entryPrice: number,
+  _score: number
+) {
+  const gamma =
+    analysis.options.gammaStructure;
+
+  const isCorrectDirection = (
+    price: number
+  ) =>
+    side === "CALL"
+      ? price < entryPrice
+      : price > entryPrice;
+
+  const distancePct = (
+    price: number
+  ) =>
+    entryPrice > 0
+      ? Math.abs(
+          ((price - entryPrice) /
+            entryPrice) *
+            100
+        )
+      : Number.POSITIVE_INFINITY;
+
+  /*
+    جميع مستويات القاما المتاحة في جهة الوقف.
+    نرتبها بالقوة المطلقة وليس بالقرب فقط.
+  */
+  const gammaCandidates =
+    [
+      gamma.nearestSupport,
+      gamma.strongestSupport,
+      gamma.putWall,
+      gamma.nearestResistance,
+      gamma.strongestResistance,
+      gamma.callWall,
+    ]
+      .filter(
+        (
+          level
+        ): level is NonNullable<
+          GammaLevel
+        > => Boolean(level)
+      )
+      .filter((level) => {
+        const price =
+          numberValue(level.strike);
+
+        return (
+          price > 0 &&
+          isCorrectDirection(price) &&
+          distancePct(price) <= 10
+        );
+      })
+      .sort((first, second) => {
+        const firstStrength =
+          Math.abs(
+            numberValue(
+              first.totalGex
+            )
+          );
+
+        const secondStrength =
+          Math.abs(
+            numberValue(
+              second.totalGex
+            )
+          );
+
+        if (
+          secondStrength !==
+          firstStrength
+        ) {
+          return (
+            secondStrength -
+            firstStrength
+          );
+        }
+
+        return (
+          distancePct(
+            numberValue(first.strike)
+          ) -
+          distancePct(
+            numberValue(second.strike)
+          )
+        );
+      });
+
+  const strongestGamma =
+    gammaCandidates[0];
+
+  if (strongestGamma) {
+    return round(
+      numberValue(
+        strongestGamma.strike
+      ),
+      2
+    );
+  }
+
+  /*
+    البديل الأول: Gamma Flip.
+  */
+  const flip =
+    numberValue(
+      gamma.estimatedFlip
+    );
+
+  if (
+    flip > 0 &&
+    isCorrectDirection(flip) &&
+    distancePct(flip) <= 10
+  ) {
+    return round(flip, 2);
+  }
+
+  /*
+    البديل الثاني: Magnet.
+  */
+  const magnet =
+    numberValue(
+      gamma.magnet?.strike
+    );
+
+  if (
+    magnet > 0 &&
+    isCorrectDirection(magnet) &&
+    distancePct(magnet) <= 10
+  ) {
+    return round(magnet, 2);
+  }
+
+  /*
+    البديل الفني:
+    CALL = قاع الجلسة إذا كان أسفل الدخول.
+    PUT  = قمة الجلسة إذا كانت أعلى الدخول.
+  */
+  const sessionLow =
+    numberValue(
+      analysis.quote.low
+    );
+
+  const sessionHigh =
+    numberValue(
+      analysis.quote.high
+    );
+
+  const previousClose =
+    numberValue(
+      analysis.quote.previousClose
+    );
+
+  if (
+    side === "CALL" &&
+    sessionLow > 0 &&
+    sessionLow < entryPrice
+  ) {
+    return round(
+      sessionLow,
+      2
+    );
+  }
+
+  if (
+    side === "PUT" &&
+    sessionHigh > entryPrice
+  ) {
+    return round(
+      sessionHigh,
+      2
+    );
+  }
+
+  /*
+    البديل الأخير المبني على البيانات:
+    مدى الجلسة الحقيقي True Range.
+  */
+  const trueRange =
+    Math.max(
+      sessionHigh > 0 &&
+      sessionLow > 0
+        ? sessionHigh -
+          sessionLow
+        : 0,
+      sessionHigh > 0 &&
+      previousClose > 0
+        ? Math.abs(
+            sessionHigh -
+              previousClose
+          )
+        : 0,
+      sessionLow > 0 &&
+      previousClose > 0
+        ? Math.abs(
+            sessionLow -
+              previousClose
+          )
+        : 0
+    );
+
+  if (trueRange > 0) {
+    return round(
+      side === "CALL"
+        ? entryPrice -
+            trueRange
+        : entryPrice +
+            trueRange,
+      2
+    );
+  }
+
+  /*
+    حماية أخيرة عند نقص البيانات:
+    نستخدم الإغلاق السابق فقط إذا كان في جهة الوقف.
+  */
+  if (
+    previousClose > 0 &&
+    isCorrectDirection(
+      previousClose
+    )
+  ) {
+    return round(
+      previousClose,
+      2
+    );
+  }
+
+  /*
+    حالة نادرة جدًا: لا توجد أي بيانات هيكلية أو سعرية صالحة.
+    نعيد سعر الدخول بدل اختراع نسبة عشوائية.
+  */
+  return round(
+    entryPrice,
     2
   );
 }
@@ -1091,12 +1344,23 @@ const nextBestPrice =
       score
     );
 
+  /*
+    نبقي حساب الأهداف كما كان قبل تعديل الوقف.
+  */
+  const targetReferenceStopPrice =
+    buildTargetReferenceStopPrice(
+      analysis,
+      activeSide,
+      currentPrice,
+      score
+    );
+
   const targets =
     buildTargets(
       analysis,
       activeSide,
       currentPrice,
-      stopPrice,
+      targetReferenceStopPrice,
       score
     );
 
