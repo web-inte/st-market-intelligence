@@ -337,6 +337,28 @@ export async function GET() {
           )
         : 0;
 
+    /*
+      حماية الربح السريعة:
+      إذا حقق العقد 100$ أو أكثر ثم تراجع
+      إلى خسارة 100$ أو أكثر، يغلق فورًا.
+    */
+    const profitProtectionStopped =
+      bestProfitDollars >= 100 &&
+      currentProfitDollars <= -100;
+
+    const stoppedAt =
+      profitProtectionStopped
+        ? new Date().toISOString()
+        : null;
+
+    const hiddenAfter =
+      profitProtectionStopped
+        ? new Date(
+            Date.now() +
+              30 * 60 * 1000
+          ).toISOString()
+        : null;
+
     const {
       data: updatedTrade,
       error: updateError,
@@ -380,6 +402,37 @@ export async function GET() {
 
         last_error:
           null,
+
+        ...(profitProtectionStopped
+          ? {
+              status:
+                "STOPPED",
+
+              stopped_at:
+                stoppedAt,
+
+              closed_at:
+                stoppedAt,
+
+              hidden_after:
+                hiddenAfter,
+
+              stop_contract_price:
+                currentPrice,
+
+              stop_profit_dollars:
+                currentProfitDollars,
+
+              stop_profit_pct:
+                currentProfitPct,
+
+              stop_reason:
+                "حقق العقد 100$ أو أكثر ثم تراجع إلى خسارة 100$ أو أكثر",
+
+              close_reason:
+                "PROFIT_PROTECTION_DRAWDOWN",
+            }
+          : {}),
       })
       .eq("id", liveTrade.id)
       /*
@@ -419,8 +472,20 @@ export async function GET() {
       {
         ok: true,
         activeTrade:
-          updatedTrade,
+          profitProtectionStopped
+            ? null
+            : updatedTrade,
+
+        stopped:
+          profitProtectionStopped,
+
         updated: true,
+
+        message:
+          profitProtectionStopped
+            ? "تم إغلاق العقد بعد تحقيق 100$ ثم التراجع إلى خسارة 100$."
+            : undefined,
+
         quoteAt:
           snapshot.quoteAt,
       },

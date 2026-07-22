@@ -622,7 +622,16 @@ export async function GET(
           liveTrade.side
         ).toUpperCase();
 
-      const stopped =
+      /*
+        أسباب إغلاق الصفقة:
+
+        1) كسر وقف SPX المعتاد.
+        2) بعد تحقيق ربح 100$ أو أكثر:
+           إذا رجع العقد إلى خسارة 100$ أو أكثر.
+        3) بعد تحقيق ربح 100$ أو أكثر:
+           إذا ظهرت فرصة مؤكدة في الاتجاه المعاكس.
+      */
+      const spxInvalidationStopped =
         invalidationLevel > 0 &&
         spxCurrentPrice > 0 &&
         (
@@ -637,6 +646,47 @@ export async function GET(
               invalidationLevel
           )
         );
+
+      const reachedProfitProtection =
+        bestProfitDollars >= 100;
+
+      const profitProtectionStopped =
+        reachedProfitProtection &&
+        currentProfitDollars <= -100;
+
+      const signalSide =
+        signal.status === "ACTIVE"
+          ? signal.bestContract?.side ||
+            null
+          : null;
+
+      const oppositeDirectionStopped =
+        reachedProfitProtection &&
+        signalSide !== null &&
+        signalSide !== side;
+
+      const stopped =
+        spxInvalidationStopped ||
+        profitProtectionStopped ||
+        oppositeDirectionStopped;
+
+      const stopReason =
+        spxInvalidationStopped
+          ? `كسر الوقف ${invalidationLevel}`
+          : profitProtectionStopped
+            ? "حقق العقد 100$ أو أكثر ثم تراجع إلى خسارة 100$ أو أكثر"
+            : oppositeDirectionStopped
+              ? `تغير الاتجاه المؤكد من ${side} إلى ${signalSide}`
+              : null;
+
+      const closeReason =
+        spxInvalidationStopped
+          ? "SPX_INVALIDATION"
+          : profitProtectionStopped
+            ? "PROFIT_PROTECTION_DRAWDOWN"
+            : oppositeDirectionStopped
+              ? "OPPOSITE_DIRECTION"
+              : null;
 
       const stoppedAt =
         stopped ? nowIso : null;
@@ -710,9 +760,9 @@ export async function GET(
               stop_profit_pct:
                 currentProfitPct,
               stop_reason:
-                `كسر الوقف ${invalidationLevel}`,
+                stopReason,
               close_reason:
-                "SPX_INVALIDATION",
+                closeReason,
             }
           : {
               status: "ACTIVE",
@@ -763,7 +813,8 @@ export async function GET(
 
           message:
             stopped
-              ? `ضرب وقف SPX عند مستوى ${invalidationLevel}`
+              ? stopReason ||
+                "تم إغلاق صفقة SPX"
               : "تم تحديث صفقة SPX",
 
           metadata: {
@@ -774,6 +825,11 @@ export async function GET(
             bestPrice,
             bestProfitDollars,
             bestProfitPct,
+            reachedProfitProtection,
+            profitProtectionStopped,
+            oppositeDirectionStopped,
+            signalSide,
+            closeReason,
           },
         });
 
@@ -795,27 +851,44 @@ export async function GET(
         throw latestError;
       }
 
-      return NextResponse.json(
-        {
-          ok: true,
-          created: false,
-          stopped,
-          activeTrade:
-            stopped
-              ? null
-              : updatedTrade,
-          trades:
-            latestTrades || [],
-          signal,
-          updatedAt: nowIso,
-        },
-        {
-          headers: {
-            "Cache-Control":
-              "private, no-store, max-age=0",
+      /*
+        عند تغير الاتجاه المؤكد:
+        لا نرجع هنا، بل نكمل إلى منطق إنشاء الصفقة
+        حتى يصدر العقد المعاكس مباشرة.
+
+        بقية الحالات ترجع بشكل طبيعي:
+        - تحديث عادي
+        - كسر وقف SPX
+        - حماية الربح بعد الهبوط إلى -100$
+      */
+      if (!oppositeDirectionStopped) {
+        return NextResponse.json(
+          {
+            ok: true,
+            created: false,
+            stopped,
+            activeTrade:
+              stopped
+                ? null
+                : updatedTrade,
+            trades:
+              latestTrades || [],
+            signal,
+            message:
+              stopped
+                ? stopReason ||
+                  "تم إغلاق صفقة SPX"
+                : undefined,
+            updatedAt: nowIso,
           },
-        }
-      );
+          {
+            headers: {
+              "Cache-Control":
+                "private, no-store, max-age=0",
+            },
+          }
+        );
+      }
     }
 
     if (
