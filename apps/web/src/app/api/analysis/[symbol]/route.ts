@@ -1048,28 +1048,187 @@ function getEligibleContracts(
     });
 }
 
+type CachedFinnhubQuote = {
+  quote: FinnhubQuote;
+  expiresAt: number;
+};
+
+const FINNHUB_CACHE_TTL_MS = 60_000;
+const FINNHUB_REQUEST_GAP_MS = 1_100;
+
+const finnhubQuoteCache =
+  new Map<string, CachedFinnhubQuote>();
+
+const finnhubPendingRequests =
+  new Map<string, Promise<FinnhubQuote>>();
+
+let finnhubRequestQueue:
+  Promise<void> = Promise.resolve();
+
+let lastFinnhubRequestAt = 0;
+
+function wait(milliseconds: number) {
+  return new Promise<void>((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
+}
+
+async function scheduleFinnhubRequest<T>(
+  request: () => Promise<T>
+): Promise<T> {
+  const previousQueue =
+    finnhubRequestQueue;
+
+  let releaseQueue:
+    (() => void) | undefined;
+
+  finnhubRequestQueue =
+    new Promise<void>((resolve) => {
+      releaseQueue = resolve;
+    });
+
+  await previousQueue;
+
+  try {
+    const elapsed =
+      Date.now() -
+      lastFinnhubRequestAt;
+
+    const waitTime =
+      Math.max(
+        0,
+        FINNHUB_REQUEST_GAP_MS -
+          elapsed
+      );
+
+    if (waitTime > 0) {
+      await wait(waitTime);
+    }
+
+    lastFinnhubRequestAt =
+      Date.now();
+
+    return await request();
+  } finally {
+    releaseQueue?.();
+  }
+}
+
+async function fetchFinnhubQuote(
+  cleanSymbol: string,
+  finnhubKey: string
+): Promise<FinnhubQuote> {
+  const symbol =
+    cleanSymbol.toUpperCase();
+
+  const cached =
+    finnhubQuoteCache.get(symbol);
+
+  if (
+    cached &&
+    cached.expiresAt > Date.now()
+  ) {
+    return cached.quote;
+  }
+
+  const pending =
+    finnhubPendingRequests.get(symbol);
+
+  if (pending) {
+    return pending;
+  }
+
+  const request =
+    scheduleFinnhubRequest(
+      async () => {
+        const url =
+          `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(
+            symbol
+          )}&token=${encodeURIComponent(
+            finnhubKey
+          )}`;
+
+        for (
+          let attempt = 1;
+          attempt <= 3;
+          attempt += 1
+        ) {
+          const response =
+            await fetch(url, {
+              cache: "no-store",
+            });
+
+          if (response.ok) {
+            const quote =
+              (await response.json()) as FinnhubQuote;
+
+            finnhubQuoteCache.set(
+              symbol,
+              {
+                quote,
+                expiresAt:
+                  Date.now() +
+                  FINNHUB_CACHE_TTL_MS,
+              }
+            );
+
+            return quote;
+          }
+
+          if (
+            response.status !== 429 ||
+            attempt === 3
+          ) {
+            throw new Error(
+              `Finnhub request failed with status ${response.status}`
+            );
+          }
+
+          const retryAfter =
+            Number(
+              response.headers.get(
+                "retry-after"
+              )
+            );
+
+          await wait(
+            Number.isFinite(retryAfter) &&
+              retryAfter > 0
+              ? retryAfter * 1000
+              : attempt * 2000
+          );
+        }
+
+        throw new Error(
+          "تعذر جلب سعر Finnhub"
+        );
+      }
+    );
+
+  finnhubPendingRequests.set(
+    symbol,
+    request
+  );
+
+  try {
+    return await request;
+  } finally {
+    finnhubPendingRequests.delete(
+      symbol
+    );
+  }
+}
+
 async function loadAnalysis(
   cleanSymbol: string,
   finnhubKey: string,
   massiveKey: string
 ): Promise<AnalysisPayload> {
-  const quoteResponse = await fetch(
-    `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(
-      cleanSymbol
-    )}&token=${encodeURIComponent(finnhubKey)}`,
-    {
-      cache: "no-store",
-    }
-  );
-
-  if (!quoteResponse.ok) {
-    throw new Error(
-      `Finnhub request failed with status ${quoteResponse.status}`
-    );
-  }
-
   const quote =
-    (await quoteResponse.json()) as FinnhubQuote;
+    await fetchFinnhubQuote(
+      cleanSymbol,
+      finnhubKey
+    );
 
   const stockPrice = safeNumber(quote.c);
 
