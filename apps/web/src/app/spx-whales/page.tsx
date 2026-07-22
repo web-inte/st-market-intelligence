@@ -4,6 +4,7 @@ import Link from "next/link";
 import {
   useCallback,
   useEffect,
+  useRef,
   useState,
 } from "react";
 
@@ -542,6 +543,86 @@ export default function SpxWhalesPage() {
     []
   );
 
+  const quoteRequestRunning =
+    useRef(false);
+
+  const loadQuote =
+    useCallback(async () => {
+      if (
+        quoteRequestRunning.current
+      ) {
+        return;
+      }
+
+      quoteRequestRunning.current =
+        true;
+
+      try {
+        const response =
+          await fetch(
+            "/api/spx-active-trade/quote",
+            {
+              cache: "no-store",
+            }
+          );
+
+        const payload =
+          (await response.json()) as {
+            ok: boolean;
+            activeTrade?:
+              SpxTrade | null;
+            error?: string;
+          };
+
+        if (
+          !response.ok ||
+          !payload.ok
+        ) {
+          throw new Error(
+            payload.error ||
+              "تعذر تحديث سعر عقد SPX"
+          );
+        }
+
+        const updatedTrade =
+          payload.activeTrade;
+
+        if (!updatedTrade) {
+          return;
+        }
+
+        setData((current) => {
+          if (!current) {
+            return current;
+          }
+
+          return {
+            ...current,
+
+            activeTrade:
+              updatedTrade,
+
+            trades:
+              (current.trades || [])
+                .map((trade) =>
+                  trade.id ===
+                  updatedTrade.id
+                    ? updatedTrade
+                    : trade
+                ),
+          };
+        });
+      } catch (quoteError) {
+        console.warn(
+          "تعذر تحديث سعر عقد SPX:",
+          quoteError
+        );
+      } finally {
+        quoteRequestRunning.current =
+          false;
+      }
+    }, []);
+
   const hasTrackedTrade =
     Boolean(
       data?.activeTrade ||
@@ -556,10 +637,12 @@ export default function SpxWhalesPage() {
     data?.marketSession?.isOpen === true &&
     data?.marketSession?.phase === "REGULAR";
 
+  /*
+    المسار الكامل:
+    تحليل القاما وFlow وإنشاء/إغلاق الصفقات.
+    يعمل كل 20 ثانية فقط.
+  */
   useEffect(() => {
-    /*
-      أول تحميل يتم فورًا دون انتظار المؤقت.
-    */
     if (!data) {
       void load(true);
     }
@@ -567,7 +650,7 @@ export default function SpxWhalesPage() {
     let timer:
       number | undefined;
 
-    const startPolling = () => {
+    const startFullPolling = () => {
       if (
         document.hidden ||
         !regularSessionOpen
@@ -575,19 +658,14 @@ export default function SpxWhalesPage() {
         return;
       }
 
-      const refreshInterval =
-        hasTrackedTrade
-          ? 1_000
-          : 20_000;
-
       timer =
         window.setInterval(
           () => void load(false),
-          refreshInterval
+          20_000
         );
     };
 
-    const stopPolling = () => {
+    const stopFullPolling = () => {
       if (timer !== undefined) {
         window.clearInterval(timer);
         timer = undefined;
@@ -595,20 +673,15 @@ export default function SpxWhalesPage() {
     };
 
     const handleVisibilityChange = () => {
-      stopPolling();
+      stopFullPolling();
 
       if (!document.hidden) {
-        /*
-          عند الرجوع إلى الصفحة:
-          تحديث فوري ثم استئناف المؤقت
-          حسب وجود صفقة وحالة الجلسة.
-        */
         void load(false);
-        startPolling();
+        startFullPolling();
       }
     };
 
-    startPolling();
+    startFullPolling();
 
     document.addEventListener(
       "visibilitychange",
@@ -616,7 +689,7 @@ export default function SpxWhalesPage() {
     );
 
     return () => {
-      stopPolling();
+      stopFullPolling();
 
       document.removeEventListener(
         "visibilitychange",
@@ -626,7 +699,72 @@ export default function SpxWhalesPage() {
   }, [
     load,
     data,
+    regularSessionOpen,
+  ]);
+
+  /*
+    المسار الخفيف:
+    يحدث سعر العقد النشط فقط كل ثانية.
+    لا يعيد تحليل القاما أو Flow.
+  */
+  useEffect(() => {
+    if (
+      !hasTrackedTrade ||
+      !regularSessionOpen
+    ) {
+      return;
+    }
+
+    let timer:
+      number | undefined;
+
+    const startQuotePolling = () => {
+      if (document.hidden) {
+        return;
+      }
+
+      void loadQuote();
+
+      timer =
+        window.setInterval(
+          () => void loadQuote(),
+          1_000
+        );
+    };
+
+    const stopQuotePolling = () => {
+      if (timer !== undefined) {
+        window.clearInterval(timer);
+        timer = undefined;
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      stopQuotePolling();
+
+      if (!document.hidden) {
+        startQuotePolling();
+      }
+    };
+
+    startQuotePolling();
+
+    document.addEventListener(
+      "visibilitychange",
+      handleVisibilityChange
+    );
+
+    return () => {
+      stopQuotePolling();
+
+      document.removeEventListener(
+        "visibilitychange",
+        handleVisibilityChange
+      );
+    };
+  }, [
     hasTrackedTrade,
+    loadQuote,
     regularSessionOpen,
   ]);
 
