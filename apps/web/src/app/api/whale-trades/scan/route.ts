@@ -47,7 +47,7 @@ const MAX_APPROVED_SPREAD_PCT = 15;
  * نجلب تداولات فعلية لعدد محدود جدًا من العقود
  * حتى لا نستهلك عددًا كبيرًا من طلبات Massive.
  */
-const MAX_TRADE_CANDIDATES_PER_SYMBOL = 2;
+const MAX_TRADE_CANDIDATES_PER_SYMBOL = 5;
 const TRADE_LOOKBACK_MINUTES = 10;
 const MAX_TRADES_PER_CONTRACT = 200;
 
