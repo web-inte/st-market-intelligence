@@ -1491,6 +1491,481 @@ async function findBestOptionContractExact(
   return normalized[0];
 }
 
+
+async function createBotDecisionAdminClient() {
+  const {
+    createClient,
+  } = await import(
+    "@supabase/supabase-js"
+  );
+
+  const url =
+    process.env.SUPABASE_URL ||
+    process.env
+      .NEXT_PUBLIC_SUPABASE_URL;
+
+  const secret =
+    process.env
+      .SUPABASE_SERVICE_ROLE_KEY ||
+    process.env
+      .SUPABASE_SECRET_KEY;
+
+  if (!url || !secret) {
+    throw new Error(
+      "متغيرات Supabase الخاصة بالسيرفر غير موجودة"
+    );
+  }
+
+  return createClient(
+    url,
+    secret,
+    {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+      },
+    }
+  );
+}
+
+async function saveBotDecisionWatchingSetup({
+  symbol,
+  decision,
+  contract,
+  mode,
+}: {
+  symbol: string;
+  decision: ReturnType<
+    typeof createDecision
+  >;
+  contract: BotDecisionContract;
+  mode: "AUTO" | "MANUAL";
+}) {
+  if (
+    !decision.qualifies ||
+    !["CALL", "PUT"].includes(
+      decision.side
+    )
+  ) {
+    return null;
+  }
+
+  const side =
+    decision.side as
+      | "CALL"
+      | "PUT";
+
+  const supabase =
+    await createBotDecisionAdminClient();
+
+  const now =
+    new Date();
+
+  const nowIso =
+    now.toISOString();
+
+  const expiresAt =
+    new Date(
+      now.getTime() +
+      3 * 60 * 60 * 1000
+    ).toISOString();
+
+  /*
+    إنهاء فرص المراقبة القديمة
+    التي تجاوزت مدة ثلاث ساعات.
+  */
+  await supabase
+    .from(
+      "stock_trade_setups"
+    )
+    .update({
+      status: "expired",
+      contract_status:
+        "EXPIRED",
+      invalidated_at:
+        nowIso,
+      invalidation_reason:
+        "انتهت مدة مراقبة الفرصة بدون تفعيل",
+    })
+    .eq(
+      "status",
+      "watching"
+    )
+    .lte(
+      "expires_at",
+      nowIso
+    );
+
+  /*
+    منع تكرار نفس الرمز ونفس الاتجاه
+    إذا كانت هناك فرصة مراقبة أو صفقة نشطة.
+  */
+  const {
+    data: existingRows,
+    error: existingError,
+  } = await supabase
+    .from(
+      "stock_trade_setups"
+    )
+    .select("*")
+    .eq(
+      "symbol",
+      symbol
+    )
+    .eq(
+      "side",
+      side
+    )
+    .in(
+      "status",
+      [
+        "watching",
+        "active",
+        "WATCHING",
+        "ACTIVE",
+      ]
+    )
+    .order(
+      "created_at",
+      {
+        ascending: false,
+      }
+    );
+
+  if (existingError) {
+    throw existingError;
+  }
+
+  const existingSetup =
+    (
+      existingRows || []
+    ).find((row) => {
+      const status =
+        String(
+          row.status || ""
+        ).toUpperCase();
+
+      const contractStatus =
+        String(
+          row.contract_status ||
+          ""
+        ).toUpperCase();
+
+      return (
+        ["WATCHING", "ACTIVE"].includes(
+          status
+        ) &&
+        ![
+          "STOPPED",
+          "EXPIRED",
+          "CLOSED",
+        ].includes(
+          contractStatus
+        )
+      );
+    });
+
+  if (existingSetup) {
+    await supabase
+      .from(
+        "stock_trade_setups"
+      )
+      .update({
+        last_seen_at:
+          nowIso,
+      })
+      .eq(
+        "id",
+        existingSetup.id
+      );
+
+    return {
+      created: false,
+      duplicate: true,
+      message:
+        "توجد فرصة مراقبة أو صفقة نشطة لنفس الرمز والاتجاه",
+      setup: {
+        ...existingSetup,
+        last_seen_at:
+          nowIso,
+      },
+    };
+  }
+
+  const targets = [
+    decision.tp1,
+    decision.tp2,
+    decision.tp3,
+  ]
+    .map(
+      (
+        price,
+        index
+      ) => ({
+        index:
+          index + 1,
+        price:
+          Number(price),
+      })
+    )
+    .filter(
+      (target) =>
+        Number.isFinite(
+          target.price
+        ) &&
+        target.price > 0
+    );
+
+  const preferredEntry =
+    Number(
+      decision.entry || 0
+    );
+
+  const optionPriceAtSelection =
+    Number(
+      contract.mid || 0
+    );
+
+  const {
+    data: insertedSetup,
+    error: insertError,
+  } = await supabase
+    .from(
+      "stock_trade_setups"
+    )
+    .insert({
+      symbol,
+      side,
+
+      contract_ticker:
+        contract.optionTicker,
+
+      contract_strike:
+        Number(
+          contract.strike
+        ) || null,
+
+      contract_expiration:
+        contract.expiration ||
+        decision.expiration ||
+        null,
+
+      /*
+        هذا مستوى تفعيل السهم،
+        وليس دخولًا فعليًا حتى الآن.
+      */
+      entry_price:
+        preferredEntry,
+
+      entry_score:
+        Math.round(
+          Number(
+            decision.score || 0
+          ) * 10
+        ),
+
+      stop_price:
+        Number(
+          decision.stop || 0
+        ) || null,
+
+      gamma_targets:
+        targets,
+
+      gamma_snapshot: {
+        source:
+          "BOT_DECISION",
+
+        sourceArabic:
+          "محرك قرار البوتات",
+
+        engine:
+          "BOT_DECISION",
+
+        stage:
+          "WATCHING",
+
+        stageArabic:
+          "مراقبة الدخول",
+
+        triggerMode:
+          mode,
+
+        triggerModeArabic:
+          mode === "AUTO"
+            ? "فحص تلقائي"
+            : "بحث يدوي",
+
+        capturedAt:
+          nowIso,
+
+        gexSide:
+          decision.gexSide,
+
+        radarSide:
+          decision.radarSide,
+
+        decisionScore:
+          decision.score,
+
+        baseScore:
+          decision.baseScore,
+
+        gammaSupportBonus:
+          decision
+            .gammaSupportBonus,
+
+        gammaSupportRatio:
+          decision
+            .gammaSupportRatio,
+
+        activationRule:
+          side === "CALL"
+            ? `اختراق ${preferredEntry} والثبات فوقه`
+            : `كسر ${preferredEntry} والثبات تحته`,
+
+        selectedTargets:
+          targets,
+
+        selectedContract: {
+          ticker:
+            contract.optionTicker,
+
+          type:
+            side,
+
+          expiration:
+            contract.expiration,
+
+          strike:
+            contract.strike,
+
+          bid:
+            contract.bid,
+
+          ask:
+            contract.ask,
+
+          midpoint:
+            contract.mid,
+
+          lastTradePrice:
+            contract.last,
+
+          volume:
+            contract.volume,
+
+          openInterest:
+            contract.oi,
+
+          delta:
+            contract.delta,
+
+          gamma:
+            contract.gamma,
+
+          decisionContractScore:
+            contract.selectionScore,
+
+          priceAtSelection:
+            optionPriceAtSelection,
+        },
+      },
+
+      /*
+        لا تظهر في الصفقات النشطة
+        ما دامت الحالة watching.
+      */
+      status:
+        "watching",
+
+      contract_status:
+        "WATCHING",
+
+      first_seen_at:
+        nowIso,
+
+      last_seen_at:
+        nowIso,
+
+      expires_at:
+        expiresAt,
+
+      activated_at:
+        null,
+
+      current_price:
+        null,
+
+      best_price:
+        null,
+
+      best_price_at:
+        null,
+
+      contract_entry_price:
+        null,
+
+      contract_current_price:
+        optionPriceAtSelection > 0
+          ? optionPriceAtSelection
+          : null,
+
+      contract_best_price:
+        null,
+
+      contract_best_price_at:
+        null,
+
+      contract_stop_price:
+        null,
+
+      contract_bid:
+        contract.bid,
+
+      contract_ask:
+        contract.ask,
+
+      contract_profit_dollars:
+        0,
+
+      contract_profit_pct:
+        0,
+
+      contract_quote_at:
+        nowIso,
+
+      invalidated_at:
+        null,
+
+      invalidation_reason:
+        null,
+    })
+    .select("*")
+    .single();
+
+  if (
+    insertError ||
+    !insertedSetup
+  ) {
+    throw (
+      insertError ||
+      new Error(
+        "تعذر حفظ فرصة المراقبة"
+      )
+    );
+  }
+
+  return {
+    created: true,
+    duplicate: false,
+    message:
+      "تم إنشاء فرصة مراقبة بنجاح",
+    setup:
+      insertedSetup,
+  };
+}
+
 export async function GET(
   request: NextRequest,
   context: RouteContext
@@ -1587,6 +2062,27 @@ export async function GET(
         radar
       );
 
+    const mode:
+      "AUTO" |
+      "MANUAL" =
+      request.nextUrl
+        .searchParams
+        .get("mode") ===
+      "auto"
+        ? "AUTO"
+        : "MANUAL";
+
+    /*
+      الفحص التلقائي يحفظ فرصة المراقبة تلقائيًا.
+      البحث اليدوي لا يحفظ إلا عند إرسال save=1.
+    */
+    const shouldSaveWatching =
+      mode === "AUTO" ||
+      request.nextUrl
+        .searchParams
+        .get("save") ===
+        "1";
+
     let selectedContract:
       BotDecisionContract |
       null = null;
@@ -1619,6 +2115,28 @@ export async function GET(
       }
     }
 
+    let watchingSetup:
+      Awaited<
+        ReturnType<
+          typeof saveBotDecisionWatchingSetup
+        >
+      > = null;
+
+    if (
+      decision.qualifies &&
+      selectedContract &&
+      shouldSaveWatching
+    ) {
+      watchingSetup =
+        await saveBotDecisionWatchingSetup({
+          symbol,
+          decision,
+          contract:
+            selectedContract,
+          mode,
+        });
+    }
+
     return NextResponse.json(
       {
         ok: true,
@@ -1626,19 +2144,38 @@ export async function GET(
         engine:
           "BOT_DECISION",
 
-        mode:
-          request.nextUrl
-            .searchParams
-            .get("mode") ===
-          "auto"
-            ? "AUTO"
-            : "MANUAL",
+        mode,
 
         symbol,
 
         decision,
 
         selectedContract,
+
+        watching: {
+          saveRequested:
+            shouldSaveWatching,
+
+          saved:
+            watchingSetup?.created ===
+            true,
+
+          duplicate:
+            watchingSetup?.duplicate ===
+            true,
+
+          message:
+            watchingSetup?.message ||
+            (
+              decision.qualifies
+                ? "تم التحليل ولم يُطلب حفظ فرصة المراقبة"
+                : "لم يتم إنشاء مراقبة لأن الفرصة غير مؤهلة"
+            ),
+
+          setup:
+            watchingSetup?.setup ||
+            null,
+        },
 
         parsed: {
           gamma,
