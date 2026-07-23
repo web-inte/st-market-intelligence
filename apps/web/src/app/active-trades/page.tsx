@@ -4,6 +4,7 @@ import Link from "next/link";
 import {
   useCallback,
   useEffect,
+  useRef,
   useState,
 } from "react";
 
@@ -65,7 +66,7 @@ type ActiveTradesResponse = {
   error?: string;
 };
 
-const REFRESH_INTERVAL_MS = 5_000;
+const REFRESH_INTERVAL_MS = 10_000;
 
 function numberText(
   value: number | null,
@@ -261,11 +262,20 @@ export default function ActiveTradesPage() {
   const [updatedAt, setUpdatedAt] =
     useState("");
 
+  const requestInFlightRef =
+    useRef(false);
+
   const loadTrades =
     useCallback(
       async (
         manualRefresh = false
       ) => {
+        if (requestInFlightRef.current) {
+          return;
+        }
+
+        requestInFlightRef.current = true;
+
         if (manualRefresh) {
           setRefreshing(true);
         }
@@ -317,6 +327,7 @@ export default function ActiveTradesPage() {
               : "تعذر تحميل الصفقات النشطة"
           );
         } finally {
+          requestInFlightRef.current = false;
           setLoading(false);
           setRefreshing(false);
         }
