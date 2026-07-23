@@ -1256,7 +1256,7 @@ ${url}`);
           >
             <p className="mb-3 text-sm text-slate-400">ابحث عن أي سهم</p>
 
-            <div className="flex gap-3">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
               <input
                 type="text"
                 value={symbol}
@@ -1266,13 +1266,13 @@ ${url}`);
                 autoComplete="off"
                 spellCheck={false}
                 maxLength={10}
-                className="min-w-0 flex-1 rounded-2xl border border-white/[0.08] bg-[#07111f] px-4 py-4 text-left text-lg font-semibold uppercase outline-none transition focus:border-cyan-400/40"
+                className="col-span-2 min-w-0 w-full rounded-2xl border border-white/[0.08] bg-[#07111f] px-4 py-4 text-left text-lg font-semibold uppercase outline-none transition focus:border-cyan-400/40 sm:col-span-1"
               />
 
               <button
                 type="submit"
                 disabled={!symbol.trim()}
-                className="rounded-2xl bg-gradient-to-l from-cyan-400 to-sky-500 px-6 py-4 font-black text-slate-950 shadow-lg shadow-cyan-500/15 transition hover:-translate-y-0.5 hover:shadow-cyan-500/30 disabled:cursor-not-allowed disabled:opacity-40"
+                className="w-full rounded-2xl bg-gradient-to-l from-cyan-400 to-sky-500 px-4 py-4 font-black text-slate-950 shadow-lg shadow-cyan-500/15 transition hover:-translate-y-0.5 hover:shadow-cyan-500/30 disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto sm:px-6"
               >
                 تحليل
               </button>
@@ -1287,7 +1287,7 @@ ${url}`);
                   onClick={() =>
                     void handleBotScan(false)
                   }
-                  className="rounded-2xl border border-violet-400/30 bg-violet-400/10 px-5 py-4 font-black text-violet-300 shadow-lg shadow-violet-950/20 transition hover:-translate-y-0.5 hover:border-violet-400/50 hover:bg-violet-400/15 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="w-full rounded-2xl border border-violet-400/30 bg-violet-400/10 px-4 py-4 font-black text-violet-300 shadow-lg shadow-violet-950/20 transition hover:-translate-y-0.5 hover:border-violet-400/50 hover:bg-violet-400/15 disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto sm:px-5"
                 >
                   {botScanLoading
                     ? "جاري الفحص..."
