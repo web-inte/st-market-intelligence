@@ -62,6 +62,10 @@ const whaleRejectStats = {
   spreadRejected: 0,
   gammaDirectionRejected: 0,
   compositeScoreTooLow: 0,
+  tradeCandidatesSelected: 0,
+  tradeRequestsSent: 0,
+  tradeResponsesWithResults: 0,
+  tradeResponsesEmpty: 0,
 };
 
 
@@ -1856,6 +1860,9 @@ export async function GET(
           contracts
         );
 
+      whaleRejectStats.tradeCandidatesSelected +=
+        candidates.length;
+
       const candidateRows =
         await Promise.all(
           candidates.map(
@@ -1868,11 +1875,19 @@ export async function GET(
                 return null;
               }
 
+              whaleRejectStats.tradeRequestsSent++;
+
               const trades =
                 await fetchRecentOptionTrades(
                   optionTicker,
                   massiveApiKey
                 );
+
+              if (trades.length > 0) {
+                whaleRejectStats.tradeResponsesWithResults++;
+              } else {
+                whaleRejectStats.tradeResponsesEmpty++;
+              }
 
               const largestTrade =
                 findLargestRecentTrade(
