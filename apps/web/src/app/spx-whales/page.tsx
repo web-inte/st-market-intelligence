@@ -842,10 +842,12 @@ export default function SpxWhalesPage() {
     لا يعيد تحليل القاما أو Flow.
   */
   useEffect(() => {
-    if (
-      !hasTrackedTrade ||
-      !regularSessionOpen
-    ) {
+    /*
+      طالما توجد صفقة تحت المتابعة، يستمر تحديث
+      سعر عقدها مباشرة. لا نعتمد هنا على حالة
+      جلسة السوق لأنها قد تصل بقيمة متأخرة.
+    */
+    if (!hasTrackedTrade) {
       return;
     }
 
@@ -952,7 +954,6 @@ export default function SpxWhalesPage() {
   }, [
     hasTrackedTrade,
     loadQuote,
-    regularSessionOpen,
   ]);
 
   const signal =
