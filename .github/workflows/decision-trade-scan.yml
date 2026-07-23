@@ -215,16 +215,29 @@ jobs:
           echo "Round: ${round_number}"
           echo "Symbols: ${#symbols[@]}"
 
+          # المحركان الأول والثاني يعملان على جميع الدوائر دائمًا.
+          #
+          # محرك قرار البوتات ينتقل بين الدوائر كل 15 دقيقة:
+          # دورة 1 → الدائرة الأولى
+          # دورة 2 → الدائرة الثانية
+          # دورة 3 → الدائرة الثالثة
+          #
+          # في التشغيل اليدوي، الدائرة المختارة تمر على المحركات الثلاثة.
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            bot_engine_round="${round_number}"
+          else
+            cycle_index=$(( $(date +%s) / 900 ))
+            bot_engine_round=$(( cycle_index % 3 + 1 ))
+          fi
+
+          echo "دائرة محرك قرار البوتات في هذه الدورة: ${bot_engine_round}"
+
           for symbol in "${symbols[@]}"; do
             echo "===== ${symbol} ====="
 
             response_file="/tmp/${symbol}.json"
 
-            if [ "${round_number}" = "3" ]; then
-              scan_url="${BASE_URL}/api/bot-decision/${symbol}?mode=auto"
-            else
-              scan_url="${BASE_URL}/api/analysis/${symbol}"
-            fi
+            echo "المحركان الأول والثاني: ${symbol}"
 
             http_code=$(
               curl \
@@ -236,19 +249,91 @@ jobs:
                 --output "${response_file}" \
                 --write-out "%{http_code}" \
                 --header "Authorization: Bearer ${DECISION_SCAN_SECRET}" \
-                "${scan_url}" \
+                "${BASE_URL}/api/analysis/${symbol}" \
                 || printf "000"
             )
 
             http_code="${http_code: -3}"
 
+            symbol_failed=0
+
             if [ "${http_code}" = "200" ]; then
-              echo "✅ ${symbol}"
-              successes=$((successes + 1))
+              echo "✅ ${symbol} — المحركان الأول والثاني"
             else
-              echo "⚠️ ${symbol}: HTTP ${http_code}"
+              echo "⚠️ ${symbol} — المحركان الأول والثاني: HTTP ${http_code}"
               head -c 500 "${response_file}" 2>/dev/null || true
               echo
+              symbol_failed=1
+            fi
+
+            if [ "${round_number}" = "${bot_engine_round}" ]; then
+              echo "محرك قرار البوتات: ${symbol}"
+
+              bot_response_file="/tmp/${symbol}-bot-decision.json"
+
+              bot_http_code=$(
+                curl \
+                  --silent \
+                  --show-error \
+                  --location \
+                  --connect-timeout 8 \
+                  --max-time 240 \
+                  --output "${bot_response_file}" \
+                  --write-out "%{http_code}" \
+                  --header "Authorization: Bearer ${DECISION_SCAN_SECRET}" \
+                  "${BASE_URL}/api/bot-decision/${symbol}?mode=auto" \
+                  || printf "000"
+              )
+
+              bot_http_code="${bot_http_code: -3}"
+
+              if [ "${bot_http_code}" = "200" ]; then
+                echo "✅ ${symbol} — محرك قرار البوتات"
+
+                python3 - "${bot_response_file}" <<'PYBOT'
+                import json
+                import sys
+                from pathlib import Path
+
+                result_path = Path(sys.argv[1])
+
+                try:
+                    data = json.loads(result_path.read_text())
+                except Exception as exc:
+                    print(f"تعذر قراءة نتيجة محرك البوتات: {exc}")
+                else:
+                    decision = data.get("decision") or {}
+                    watching = data.get("watching") or {}
+
+                    print(
+                        "نتيجة القرار:",
+                        "مؤهلة" if decision.get("qualifies") else "غير مؤهلة"
+                    )
+
+                    if decision.get("side"):
+                        print(f"الاتجاه: {decision.get('side')}")
+
+                    if decision.get("score") is not None:
+                        print(f"الدرجة: {decision.get('score')} / 10")
+
+                    print(
+                        "حالة المراقبة:",
+                        watching.get("message", "لا توجد")
+                    )
+                PYBOT
+              else
+                echo "⚠️ ${symbol} — محرك قرار البوتات: HTTP ${bot_http_code}"
+                head -c 700 "${bot_response_file}" 2>/dev/null || true
+                echo
+                symbol_failed=1
+              fi
+            else
+              echo "⏭️ ${symbol} — محرك قرار البوتات مخصص لدائرة ${bot_engine_round} في هذه الدورة"
+            fi
+
+            if [ "${symbol_failed}" -eq 0 ]; then
+              successes=$((successes + 1))
+            else
               failures=$((failures + 1))
             fi
 
