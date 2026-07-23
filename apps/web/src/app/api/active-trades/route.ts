@@ -762,17 +762,6 @@ if (!massiveApiKey) {
               row.contract_status || ""
             ).toUpperCase();
 
-          if (
-            savedStatus === "STOPPED" ||
-            savedContractStatus === "STOPPED"
-          ) {
-            return {
-              ...rawRow,
-              status: "stopped",
-              contract_status: "STOPPED",
-            };
-          }
-
         if (
           !id ||
           !symbol ||
@@ -965,11 +954,6 @@ if (!massiveApiKey) {
                   ? live.currentPrice
                   : row.contract_stop_price,
 
-              status:
-                stopped
-                  ? "stopped"
-                  : row.status,
-
               contract_status:
                 stopped
                   ? "STOPPED"
@@ -1026,9 +1010,34 @@ if (!massiveApiKey) {
         } catch (
           refreshError
         ) {
+          const errorRecord =
+            refreshError &&
+            typeof refreshError === "object"
+              ? (refreshError as Record<
+                  string,
+                  unknown
+                >)
+              : {};
+
+          const errorDetails = {
+            message:
+              refreshError instanceof Error
+                ? refreshError.message
+                : errorRecord.message,
+            details:
+              errorRecord.details,
+            hint:
+              errorRecord.hint,
+            code:
+              errorRecord.code,
+            status:
+              errorRecord.status,
+          };
+
           console.error(
-            `تعذر تحديث عقد ${contractTicker}:`,
-            refreshError
+            `تعذر تحديث عقد ${contractTicker}: ${JSON.stringify(
+              errorDetails
+            )}`
           );
 
           return rawRow;
