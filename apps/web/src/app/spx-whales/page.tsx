@@ -675,15 +675,9 @@ export default function SpxWhalesPage() {
       try {
         const response =
           await fetch(
-            `/api/spx-active-trade/quote?t=${Date.now()}`,
+            "/api/spx-active-trade/quote",
             {
               cache: "no-store",
-              credentials: "include",
-              headers: {
-                "Cache-Control":
-                  "no-cache, no-store, max-age=0",
-                Pragma: "no-cache",
-              },
             }
           );
 
