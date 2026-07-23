@@ -854,15 +854,58 @@ export default function SpxWhalesPage() {
       }
     };
 
-    const handleVisibilityChange = () => {
+    const resumeQuotePolling = () => {
+      if (document.hidden) {
+        return;
+      }
+
+      /*
+        عند الرجوع للصفحة على الجوال:
+        نحرر أي طلب قديم علِق أثناء تعليق Safari،
+        ثم نجلب السعر فورًا قبل إعادة المؤقت.
+      */
+      quoteRequestRunning.current =
+        false;
+
       stopQuotePolling();
 
-      if (!document.hidden) {
-        startQuotePolling();
+      void loadQuote();
+
+      timer =
+        window.setInterval(
+          () => void loadQuote(),
+          1_000
+        );
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        stopQuotePolling();
+        return;
       }
+
+      resumeQuotePolling();
+    };
+
+    const handleWindowFocus = () => {
+      resumeQuotePolling();
+    };
+
+    const handlePageShow = () => {
+      resumeQuotePolling();
     };
 
     startQuotePolling();
+
+    window.addEventListener(
+      "focus",
+      handleWindowFocus
+    );
+
+    window.addEventListener(
+      "pageshow",
+      handlePageShow
+    );
 
     document.addEventListener(
       "visibilitychange",
@@ -871,6 +914,16 @@ export default function SpxWhalesPage() {
 
     return () => {
       stopQuotePolling();
+
+      window.removeEventListener(
+        "focus",
+        handleWindowFocus
+      );
+
+      window.removeEventListener(
+        "pageshow",
+        handlePageShow
+      );
 
       document.removeEventListener(
         "visibilitychange",
