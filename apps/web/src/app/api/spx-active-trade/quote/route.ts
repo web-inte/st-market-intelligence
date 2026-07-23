@@ -138,9 +138,40 @@ async function fetchContractSnapshot(
   const lastPrice =
     numberValue(trade.price);
 
+  const quoteTimestamp =
+    nanosecondsToIso(
+      quote.last_updated
+    );
+
+  const tradeTimestamp =
+    nanosecondsToIso(
+      trade.sip_timestamp
+    );
+
+  const quoteTimeMs =
+    quoteTimestamp
+      ? new Date(
+          quoteTimestamp
+        ).getTime()
+      : 0;
+
+  const tradeTimeMs =
+    tradeTimestamp
+      ? new Date(
+          tradeTimestamp
+        ).getTime()
+      : 0;
+
   /*
-    نستخدم Bid كسعر خروج محافظ،
-    مثل منطق المسار الحالي.
+    currentPrice:
+    سعر محافظ للحسابات والحماية، ويظل مبنيًا
+    على Bid كما كان سابقًا.
+
+    displayPrice:
+    سعر لحظي للعرض فقط، يعتمد على أحدث مصدر:
+    - آخر صفقة إذا كانت أحدث من الـQuote.
+    - وإلا Midpoint.
+    - ثم Bid كحل احتياطي.
   */
   const currentPrice =
     bid > 0
@@ -149,19 +180,33 @@ async function fetchContractSnapshot(
         ? midpoint
         : lastPrice;
 
-  if (currentPrice <= 0) {
+  const tradeIsNewest =
+    lastPrice > 0 &&
+    tradeTimeMs > quoteTimeMs;
+
+  const displayPrice =
+    tradeIsNewest
+      ? lastPrice
+      : midpoint > 0
+        ? midpoint
+        : bid > 0
+          ? bid
+          : lastPrice;
+
+  if (
+    currentPrice <= 0 ||
+    displayPrice <= 0
+  ) {
     throw new Error(
       "لم يرجع Massive سعرًا صالحًا للعقد"
     );
   }
 
   const quoteAt =
-    nanosecondsToIso(
-      quote.last_updated
-    ) ||
-    nanosecondsToIso(
-      trade.sip_timestamp
-    );
+    tradeIsNewest
+      ? tradeTimestamp
+      : quoteTimestamp ||
+        tradeTimestamp;
 
   if (!quoteAt) {
     throw new Error(
@@ -173,8 +218,17 @@ async function fetchContractSnapshot(
     bid: round(bid),
     ask: round(ask),
     midpoint: round(midpoint),
+    lastPrice: round(lastPrice),
     currentPrice:
       round(currentPrice),
+    displayPrice:
+      round(displayPrice),
+    priceSource:
+      tradeIsNewest
+        ? "LAST_TRADE"
+        : midpoint > 0
+          ? "MIDPOINT"
+          : "BID",
     quoteAt,
   };
 }
@@ -256,7 +310,13 @@ export async function GET() {
       return NextResponse.json(
         {
           ok: true,
-          activeTrade: liveTrade,
+          activeTrade: {
+            ...liveTrade,
+            display_price:
+              snapshot.displayPrice,
+            display_price_source:
+              snapshot.priceSource,
+          },
           updated: false,
           stale: true,
           quoteAt:
@@ -474,7 +534,13 @@ export async function GET() {
         activeTrade:
           profitProtectionStopped
             ? null
-            : updatedTrade,
+            : {
+                ...updatedTrade,
+                display_price:
+                  snapshot.displayPrice,
+                display_price_source:
+                  snapshot.priceSource,
+              },
 
         stopped:
           profitProtectionStopped,

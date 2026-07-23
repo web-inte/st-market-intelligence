@@ -82,6 +82,14 @@ type SpxTrade = {
 
   entry_price: number;
   current_price: number | null;
+
+  /*
+    سعر لحظي للعرض فقط.
+    الحسابات والحماية تظل مبنية على current_price.
+  */
+  display_price?: number | null;
+  display_price_source?: string | null;
+
   current_bid: number | null;
   current_ask: number | null;
 
@@ -484,7 +492,10 @@ function TradeCard({
           }
           value={`$${formatNumber(
             active
-              ? trade.current_price
+              ? (
+                  trade.display_price ??
+                  trade.current_price
+                )
               : trade.stop_contract_price
           )}`}
         />
