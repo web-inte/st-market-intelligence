@@ -35,6 +35,29 @@ type GammaData = {
   strongestPutGammaValue: number;
 };
 
+type OpenInterestLevel = {
+  strike: number;
+  openInterest: number;
+};
+
+type OpenInterestData = {
+  direction:
+    | "CALL"
+    | "PUT"
+    | "NEUTRAL";
+
+  callTotal: number;
+  putTotal: number;
+  callPct: number;
+  putPct: number;
+
+  topCall:
+    OpenInterestLevel[];
+
+  topPut:
+    OpenInterestLevel[];
+};
+
 type SignalData = {
   ok: boolean;
   status:
@@ -45,6 +68,9 @@ type SignalData = {
   message?: string;
   market?: MarketData | null;
   gamma?: GammaData | null;
+
+  openInterest?:
+    OpenInterestData | null;
 };
 
 type SpxTrade = {
@@ -570,6 +596,9 @@ export default function SpxWhalesPage() {
   const [error, setError] =
     useState("");
 
+  const [openInterestOpen, setOpenInterestOpen] =
+    useState(false);
+
   const load = useCallback(
     async (initial = false) => {
       try {
@@ -842,6 +871,9 @@ export default function SpxWhalesPage() {
 
   const signal =
     data?.signal;
+
+  const openInterest =
+    signal?.openInterest;
 
   const marketSession =
     data?.marketSession;
@@ -1687,6 +1719,166 @@ export default function SpxWhalesPage() {
                     : "text-emerald-300"
                 }
               />
+            </section>
+
+            <section className="mt-5 overflow-hidden rounded-3xl border border-cyan-400/20 bg-slate-900/65">
+              <button
+                type="button"
+                onClick={() =>
+                  setOpenInterestOpen(
+                    (current) => !current
+                  )
+                }
+                aria-expanded={
+                  openInterestOpen
+                }
+                className="flex w-full items-center justify-between gap-4 p-5 text-right transition hover:bg-white/[0.03] sm:p-6"
+              >
+                <div>
+                  <p className="text-xs font-black tracking-[0.15em] text-cyan-400">
+                    OPTIONS POSITIONING
+                  </p>
+
+                  <h2 className="mt-2 text-xl font-black text-white">
+                    Open Interest
+                  </h2>
+                </div>
+
+                <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-cyan-400/25 bg-cyan-400/10 text-xl font-black text-cyan-300">
+                  {openInterestOpen
+                    ? "−"
+                    : "+"}
+                </span>
+              </button>
+
+              {openInterestOpen ? (
+                <div className="border-t border-white/10 p-5 sm:p-6">
+                  <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                    <p className="text-sm font-bold text-slate-400">
+                      اتجاه OI
+                    </p>
+
+                    <span
+                      className={`rounded-xl border px-4 py-2 text-sm font-black ${
+                        openInterest?.direction ===
+                        "CALL"
+                          ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-300"
+                          : openInterest?.direction ===
+                              "PUT"
+                            ? "border-rose-400/30 bg-rose-400/10 text-rose-300"
+                            : "border-amber-400/30 bg-amber-400/10 text-amber-300"
+                      }`}
+                    >
+                      {openInterest?.direction ||
+                        "NEUTRAL"}
+                    </span>
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/[0.05] p-4">
+                      <div className="mb-4 flex items-center justify-between gap-3">
+                        <h3 className="text-lg font-black text-emerald-300">
+                          CALL OI
+                        </h3>
+
+                        <span className="text-xs font-bold text-slate-500">
+                          {formatNumber(
+                            openInterest?.callPct,
+                            2
+                          )}
+                          %
+                        </span>
+                      </div>
+
+                      <div className="space-y-2">
+                        {(openInterest?.topCall ||
+                          []).length > 0 ? (
+                          (
+                            openInterest?.topCall ||
+                            []
+                          ).map(
+                            (level, index) => (
+                              <div
+                                key={`call-oi-${level.strike}-${index}`}
+                                className="flex items-center justify-between gap-4 rounded-xl border border-white/10 bg-slate-950/40 px-4 py-3"
+                              >
+                                <span className="font-black text-white">
+                                  {formatNumber(
+                                    level.strike,
+                                    0
+                                  )}
+                                </span>
+
+                                <span className="font-black text-emerald-300">
+                                  {formatNumber(
+                                    level.openInterest,
+                                    0
+                                  )}
+                                </span>
+                              </div>
+                            )
+                          )
+                        ) : (
+                          <p className="text-sm font-bold text-slate-500">
+                            لا توجد بيانات متاحة.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-rose-400/20 bg-rose-400/[0.05] p-4">
+                      <div className="mb-4 flex items-center justify-between gap-3">
+                        <h3 className="text-lg font-black text-rose-300">
+                          PUT OI
+                        </h3>
+
+                        <span className="text-xs font-bold text-slate-500">
+                          {formatNumber(
+                            openInterest?.putPct,
+                            2
+                          )}
+                          %
+                        </span>
+                      </div>
+
+                      <div className="space-y-2">
+                        {(openInterest?.topPut ||
+                          []).length > 0 ? (
+                          (
+                            openInterest?.topPut ||
+                            []
+                          ).map(
+                            (level, index) => (
+                              <div
+                                key={`put-oi-${level.strike}-${index}`}
+                                className="flex items-center justify-between gap-4 rounded-xl border border-white/10 bg-slate-950/40 px-4 py-3"
+                              >
+                                <span className="font-black text-white">
+                                  {formatNumber(
+                                    level.strike,
+                                    0
+                                  )}
+                                </span>
+
+                                <span className="font-black text-rose-300">
+                                  {formatNumber(
+                                    level.openInterest,
+                                    0
+                                  )}
+                                </span>
+                              </div>
+                            )
+                          )
+                        ) : (
+                          <p className="text-sm font-bold text-slate-500">
+                            لا توجد بيانات متاحة.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
             </section>
 
             <section className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-5">

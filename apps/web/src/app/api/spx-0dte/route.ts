@@ -796,6 +796,17 @@ export async function GET() {
         status: "NO_CONTRACTS",
         message: "لا توجد عقود SPXW منتهية اليوم حاليًا.",
         market: null,
+
+        openInterest: {
+          direction: "NEUTRAL",
+          callTotal: 0,
+          putTotal: 0,
+          callPct: 0,
+          putPct: 0,
+          topCall: [],
+          topPut: [],
+        },
+
         gamma: null,
         bestContract: null,
         contracts: [],
@@ -829,6 +840,173 @@ export async function GET() {
     } else if (putFlowPct >= 58) {
       flowDirection = "PUT";
     }
+
+    /*
+      بيانات Open Interest للعرض في الواجهة فقط.
+
+      مهم:
+      - لا تدخل في flowDirection.
+      - لا تدخل في تقييم العقد.
+      - لا تدخل في شروط الصفقة.
+      - لا تدخل في الوقف أو الإغلاق.
+    */
+    const callOiByStrike =
+      new Map<number, number>();
+
+    const putOiByStrike =
+      new Map<number, number>();
+
+    let callOiTotal = 0;
+    let putOiTotal = 0;
+
+    for (const contract of allContracts) {
+      const openInterest =
+        Math.max(
+          0,
+          numberValue(
+            contract.openInterest
+          )
+        );
+
+      if (contract.side === "CALL") {
+        callOiTotal += openInterest;
+
+        callOiByStrike.set(
+          contract.strike,
+          (
+            callOiByStrike.get(
+              contract.strike
+            ) || 0
+          ) + openInterest
+        );
+      } else {
+        putOiTotal += openInterest;
+
+        putOiByStrike.set(
+          contract.strike,
+          (
+            putOiByStrike.get(
+              contract.strike
+            ) || 0
+          ) + openInterest
+        );
+      }
+    }
+
+    const totalOpenInterest =
+      callOiTotal + putOiTotal;
+
+    const callOiPct =
+      totalOpenInterest > 0
+        ? (
+            callOiTotal /
+            totalOpenInterest
+          ) * 100
+        : 0;
+
+    const putOiPct =
+      totalOpenInterest > 0
+        ? (
+            putOiTotal /
+            totalOpenInterest
+          ) * 100
+        : 0;
+
+    /*
+      اتجاه OI معلومة عرض فقط:
+      55% أو أكثر = اتجاه واضح.
+      أقل من ذلك = NEUTRAL.
+    */
+    const oiDirection:
+      MarketDirection =
+        callOiPct >= 55
+          ? "CALL"
+          : putOiPct >= 55
+            ? "PUT"
+            : "NEUTRAL";
+
+    const topCallOi =
+      Array.from(
+        callOiByStrike.entries()
+      )
+        .map(
+          ([strike, openInterest]) => ({
+            strike: round(strike),
+            openInterest:
+              Math.round(openInterest),
+          })
+        )
+        .filter(
+          (row) =>
+            row.openInterest > 0
+        )
+        .sort(
+          (first, second) =>
+            second.openInterest -
+              first.openInterest ||
+            Math.abs(
+              first.strike -
+                stockPrice
+            ) -
+              Math.abs(
+                second.strike -
+                  stockPrice
+              )
+        )
+        .slice(0, 3);
+
+    const topPutOi =
+      Array.from(
+        putOiByStrike.entries()
+      )
+        .map(
+          ([strike, openInterest]) => ({
+            strike: round(strike),
+            openInterest:
+              Math.round(openInterest),
+          })
+        )
+        .filter(
+          (row) =>
+            row.openInterest > 0
+        )
+        .sort(
+          (first, second) =>
+            second.openInterest -
+              first.openInterest ||
+            Math.abs(
+              first.strike -
+                stockPrice
+            ) -
+              Math.abs(
+                second.strike -
+                  stockPrice
+              )
+        )
+        .slice(0, 3);
+
+    const openInterestDisplay = {
+      direction:
+        oiDirection,
+
+      callTotal:
+        Math.round(callOiTotal),
+
+      putTotal:
+        Math.round(putOiTotal),
+
+      callPct:
+        round(callOiPct),
+
+      putPct:
+        round(putOiPct),
+
+      topCall:
+        topCallOi,
+
+      topPut:
+        topPutOi,
+    };
 
     const gamma = calculateGammaFromContracts(allContracts, stockPrice);
 
@@ -1292,6 +1470,9 @@ export async function GET() {
           nearMagnet,
           magnetDistance: round(magnetDistance),
         },
+
+        openInterest:
+          openInterestDisplay,
 
         gamma: {
           netGex: round(gamma.netGex),
