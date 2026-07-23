@@ -13,6 +13,19 @@ jobs:
     steps:
       - name: Run whale scanner
         run: |
-          curl --fail --silent --show-error --max-time 240 \
-            -H "Authorization: Bearer ${{ secrets.WHALE_CRON_SECRET }}" \
-            "${{ secrets.WHALE_SCAN_URL }}"
+          response_file="$(mktemp)"
+          http_code="$(
+            curl --silent --show-error --location --max-time 240 \
+              --output "${response_file}" \
+              --write-out "%{http_code}" \
+              -H "Authorization: Bearer ${{ secrets.WHALE_CRON_SECRET }}" \
+              "${{ secrets.WHALE_SCAN_URL }}"
+          )"
+
+          echo "HTTP_STATUS=${http_code}"
+          cat "${response_file}"
+          echo
+
+          if [ "${http_code}" -lt 200 ] || [ "${http_code}" -ge 300 ]; then
+            exit 1
+          fi
