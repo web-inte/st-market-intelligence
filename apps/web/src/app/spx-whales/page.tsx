@@ -599,6 +599,9 @@ export default function SpxWhalesPage() {
   const [openInterestOpen, setOpenInterestOpen] =
     useState(false);
 
+  const [openInterestInfoOpen, setOpenInterestInfoOpen] =
+    useState(false);
+
   const load = useCallback(
     async (initial = false) => {
       try {
@@ -1739,9 +1742,52 @@ export default function SpxWhalesPage() {
                     OPTIONS POSITIONING
                   </p>
 
-                  <h2 className="mt-2 text-xl font-black text-white">
-                    Open Interest
-                  </h2>
+                  <div className="mt-2 flex items-center gap-2">
+                    <h2 className="text-xl font-black text-white">
+                      Open Interest
+                    </h2>
+
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      aria-label="توضيح نسب Open Interest"
+                      aria-expanded={openInterestInfoOpen}
+                      onClick={(event) => {
+                        event.stopPropagation();
+
+                        setOpenInterestInfoOpen(
+                          (current) => !current
+                        );
+                      }}
+                      onKeyDown={(event) => {
+                        if (
+                          event.key === "Enter" ||
+                          event.key === " "
+                        ) {
+                          event.preventDefault();
+                          event.stopPropagation();
+
+                          setOpenInterestInfoOpen(
+                            (current) => !current
+                          );
+                        }
+                      }}
+                      className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-full border border-cyan-400/30 bg-cyan-400/10 text-xs font-black text-cyan-300 transition hover:bg-cyan-400/20"
+                    >
+                      i
+                    </span>
+                  </div>
+
+                  {openInterestInfoOpen ? (
+                    <div
+                      onClick={(event) =>
+                        event.stopPropagation()
+                      }
+                      className="mt-3 max-w-sm rounded-xl border border-cyan-400/20 bg-slate-950/95 p-3 text-xs font-bold leading-6 text-slate-300 shadow-xl"
+                    >
+                      النسب تمثل إجمالي الـ Open Interest لعقود CALL وPUT، بينما المستويات المعروضة هي أعلى 3 مستويات قريبة من سعر SPX ضمن نطاق ±150 نقطة.
+                    </div>
+                  ) : null}
                 </div>
 
                 <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-cyan-400/25 bg-cyan-400/10 text-xl font-black text-cyan-300">
