@@ -92,6 +92,26 @@ export async function updateSession(
     }
   }
 
+  if (
+    pathname.startsWith("/api/analysis/")
+  ) {
+    const decisionScanSecret =
+      process.env.DECISION_SCAN_SECRET;
+
+    const authorization =
+      request.headers.get(
+        "authorization"
+      );
+
+    if (
+      decisionScanSecret &&
+      authorization ===
+        `Bearer ${decisionScanSecret}`
+    ) {
+      return response;
+    }
+  }
+
   // صفحات ومسارات عامة لا تتطلب تسجيل دخول أو اشتراكًا فعالًا.
   const PUBLIC_ROUTES = [
     "/",

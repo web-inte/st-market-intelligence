@@ -1,0 +1,237 @@
+name: Decision Trade Scanner
+
+on:
+  workflow_dispatch:
+    inputs:
+      round:
+        description: "Round 1, 2, or 3"
+        required: true
+        default: "1"
+
+  schedule:
+    - cron: "30,45 11 * * 1-5"
+    - cron: "0,15,30,45 12-19 * * 1-5"
+    - cron: "0,15 20 * * 1-5"
+
+    - cron: "35,50 11 * * 1-5"
+    - cron: "5,20,35,50 12-19 * * 1-5"
+    - cron: "5 20 * * 1-5"
+
+    - cron: "40,55 11 * * 1-5"
+    - cron: "10,25,40,55 12-19 * * 1-5"
+    - cron: "10 20 * * 1-5"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: decision-trade-scanner
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Scan selected round
+        env:
+          DECISION_SCAN_SECRET: ${{ secrets.DECISION_SCAN_SECRET }}
+          BASE_URL: https://www.st-market.com
+        shell: bash
+        run: |
+          set -uo pipefail
+
+          if [ -z "${DECISION_SCAN_SECRET:-}" ]; then
+            echo "CRON_SECRET is missing"
+            exit 1
+          fi
+
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            round_number="${{ github.event.inputs.round }}"
+          else
+            case "${{ github.event.schedule }}" in
+              "30,45 11 * * 1-5"|"0,15,30,45 12-19 * * 1-5"|"0,15 20 * * 1-5")
+                round_number=1
+                ;;
+              "35,50 11 * * 1-5"|"5,20,35,50 12-19 * * 1-5"|"5 20 * * 1-5")
+                round_number=2
+                ;;
+              *)
+                round_number=3
+                ;;
+            esac
+          fi
+
+          failures=0
+          successes=0
+
+          case "${round_number}" in
+            1)
+              symbols=(
+                "AMZN"
+                "AAPL"
+                "MSFT"
+                "QQQ"
+                "PLTR"
+                "ORCL"
+                "COIN"
+                "INTC"
+                "SMCI"
+                "DIS"
+                "BA"
+                "DDOG"
+                "ZS"
+                "ANET"
+                "RBLX"
+                "DECK"
+                "BKNG"
+                "GE"
+                "CMI"
+                "VRTX"
+                "ABBV"
+                "ADSK"
+                "CB"
+                "CME"
+                "MSCI"
+                "RSG"
+                "FAST"
+                "FERG"
+                "KLAC"
+                "CDNS"
+                "MCHP"
+                "HCA"
+                "HUM"
+                "GD"
+                "HON"
+                "ROK"
+                "DHI"
+                "LOW"
+                "ORLY"
+              )
+              ;;
+            2)
+              symbols=(
+                "NVDA"
+                "META"
+                "AVGO"
+                "SPY"
+                "NFLX"
+                "JPM"
+                "SHOP"
+                "QCOM"
+                "SNOW"
+                "PYPL"
+                "TTD"
+                "NET"
+                "MDB"
+                "APP"
+                "TTWO"
+                "ONON"
+                "DE"
+                "ETN"
+                "TT"
+                "REGN"
+                "ISRG"
+                "ADP"
+                "MMC"
+                "SPGI"
+                "AON"
+                "WM"
+                "ODFL"
+                "XYL"
+                "LRCX"
+                "SNPS"
+                "FICO"
+                "ELV"
+                "CNC"
+                "LMT"
+                "EMR"
+                "JCI"
+                "PHM"
+                "TJX"
+                "ROST"
+              )
+              ;;
+            3)
+              symbols=(
+                "AMD"
+                "MSTR"
+                "TSLA"
+                "GOOGL"
+                "CRM"
+                "BAC"
+                "MU"
+                "ARM"
+                "UBER"
+                "XOM"
+                "CRWD"
+                "PANW"
+                "TEAM"
+                "HOOD"
+                "EA"
+                "ABNB"
+                "CAT"
+                "PH"
+                "LULU"
+                "MRK"
+                "INTU"
+                "PAYX"
+                "ICE"
+                "MCO"
+                "AJG"
+                "URI"
+                "CPRT"
+                "VRT"
+                "APH"
+                "NXPI"
+                "AXON"
+                "CI"
+                "NOC"
+                "RTX"
+                "ITW"
+                "LEN"
+                "NVR"
+                "CMG"
+                "GWW"
+              )
+              ;;
+            *)
+              echo "Invalid round: ${round_number}"
+              exit 1
+              ;;
+          esac
+
+          echo "Round: ${round_number}"
+          echo "Symbols: ${#symbols[@]}"
+
+          for symbol in "${symbols[@]}"; do
+            echo "===== ${symbol} ====="
+
+            response_file="/tmp/${symbol}.json"
+
+            http_code=$(
+              curl                 --silent                 --show-error                 --location                 --connect-timeout 8                 --max-time 40                 --output "${response_file}"                 --write-out "%{http_code}"                 --header "Authorization: Bearer ${DECISION_SCAN_SECRET}"                 "${BASE_URL}/api/analysis/${symbol}"               || printf "000"
+            )
+
+            http_code="${http_code: -3}"
+
+            if [ "${http_code}" = "200" ]; then
+              echo "✅ ${symbol}"
+              successes=$((successes + 1))
+            else
+              echo "⚠️ ${symbol}: HTTP ${http_code}"
+              head -c 500 "${response_file}" 2>/dev/null || true
+              echo
+              failures=$((failures + 1))
+            fi
+
+            sleep 2
+          done
+
+          echo "Successes: ${successes}"
+          echo "Failures: ${failures}"
+
+          if [ "${failures}" -gt 8 ]; then
+            exit 1
+          fi
