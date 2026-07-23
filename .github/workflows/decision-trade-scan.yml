@@ -220,8 +220,24 @@ jobs:
 
             response_file="/tmp/${symbol}.json"
 
+            if [ "${round_number}" = "3" ]; then
+              scan_url="${BASE_URL}/api/bot-decision/${symbol}?mode=auto"
+            else
+              scan_url="${BASE_URL}/api/analysis/${symbol}"
+            fi
+
             http_code=$(
-              curl                 --silent                 --show-error                 --location                 --connect-timeout 8                 --max-time 40                 --output "${response_file}"                 --write-out "%{http_code}"                 --header "Authorization: Bearer ${DECISION_SCAN_SECRET}"                 "${BASE_URL}/api/analysis/${symbol}"               || printf "000"
+              curl \
+                --silent \
+                --show-error \
+                --location \
+                --connect-timeout 8 \
+                --max-time 240 \
+                --output "${response_file}" \
+                --write-out "%{http_code}" \
+                --header "Authorization: Bearer ${DECISION_SCAN_SECRET}" \
+                "${scan_url}" \
+                || printf "000"
             )
 
             http_code="${http_code: -3}"
@@ -241,6 +257,51 @@ jobs:
 
           echo "Successes: ${successes}"
           echo "Failures: ${failures}"
+
+          echo "===== متابعة فرص محرك قرار البوتات ====="
+
+          monitor_file="/tmp/bot-decision-monitor.json"
+
+          monitor_code=$(
+            curl \
+              --silent \
+              --show-error \
+              --location \
+              --connect-timeout 8 \
+              --max-time 240 \
+              --output "${monitor_file}" \
+              --write-out "%{http_code}" \
+              --header "Authorization: Bearer ${DECISION_SCAN_SECRET}" \
+              "${BASE_URL}/api/bot-decision/monitor" \
+              || printf "000"
+          )
+
+          monitor_code="${monitor_code: -3}"
+
+          if [ "${monitor_code}" = "200" ]; then
+            echo "✅ تمت متابعة فرص المراقبة"
+
+            python3 - <<'PYMONITOR'
+            import json
+            from pathlib import Path
+
+            result_path = Path("/tmp/bot-decision-monitor.json")
+
+            try:
+                data = json.loads(result_path.read_text())
+            except Exception as exc:
+                print(f"تعذر قراءة نتيجة المتابعة: {exc}")
+            else:
+                print(f"تم فحص: {data.get('checked', 0)}")
+                print(f"تم تفعيل: {data.get('activated', 0)}")
+                print(f"ما زالت تحت المراقبة: {data.get('watching', 0)}")
+                print(f"فشل: {data.get('failed', 0)}")
+            PYMONITOR
+          else
+            echo "⚠️ فشل مسار المتابعة: HTTP ${monitor_code}"
+            head -c 700 "${monitor_file}" 2>/dev/null || true
+            echo
+          fi
 
           if [ "${failures}" -gt 8 ]; then
             exit 1
