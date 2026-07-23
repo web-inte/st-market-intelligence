@@ -12,4 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Run whale scanner
-        run: curl --fail --silent --show-error "${{ secrets.WHALE_SCAN_URL }}"
+        run: |
+          curl --fail --silent --show-error --max-time 240 \
+            -H "Authorization: Bearer ${{ secrets.WHALE_CRON_SECRET }}" \
+            "${{ secrets.WHALE_SCAN_URL }}"
