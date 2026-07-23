@@ -73,6 +73,131 @@ function round(value: number, digits = 2) {
 }
 
 
+async function getLastCompletedSpxFiveMinuteCandle(
+  activatedAt: string
+) {
+  const apiKey =
+    process.env.MASSIVE_API_KEY ||
+    process.env.POLYGON_API_KEY ||
+    "";
+
+  if (!apiKey) {
+    return null;
+  }
+
+  const activatedAtMs =
+    new Date(activatedAt).getTime();
+
+  if (!Number.isFinite(activatedAtMs)) {
+    return null;
+  }
+
+  try {
+    const nowMs = Date.now();
+
+    /*
+      نطلب آخر عدد محدود من شموع 5 دقائق فقط،
+      بدل جلب بيانات دقائق متعددة الأيام.
+    */
+    const fromMs =
+      nowMs - 3 * 60 * 60 * 1000;
+
+    const massiveUrl =
+      "https://api.massive.com/v2/aggs/ticker/" +
+      "I%3ASPX/range/5/minute/" +
+      `${fromMs}/${nowMs}` +
+      "?adjusted=true&sort=desc&limit=50" +
+      `&apiKey=${encodeURIComponent(apiKey)}`;
+
+    const response = await fetch(
+      massiveUrl,
+      {
+        cache: "no-store",
+        headers: {
+          Accept: "application/json",
+        },
+      }
+    );
+
+    const payload =
+      await response.json();
+
+    if (!response.ok) {
+      console.error(
+        "SPX five-minute candle provider error:",
+        response.status,
+        payload?.error ||
+          payload?.message ||
+          "Unknown provider error"
+      );
+
+      return null;
+    }
+
+    const results =
+      Array.isArray(payload?.results)
+        ? payload.results
+        : [];
+
+    /*
+      bar.t هو بداية الشمعة.
+      لا نعتمد إلا شمعة:
+      - انتهت مدة الخمس دقائق كاملة.
+      - أغلقت بعد تفعيل الصفقة.
+      - لديها سعر إغلاق صالح.
+    */
+    const completedCandles =
+      results
+        .map((bar: Record<string, unknown>) => ({
+          time:
+            numberValue(bar.t),
+          close:
+            numberValue(bar.c),
+        }))
+        .filter(
+          (
+            bar: {
+              time: number;
+              close: number;
+            }
+          ) => {
+            const candleCloseMs =
+              bar.time + 5 * 60 * 1000;
+
+          return (
+            bar.time > 0 &&
+            bar.close > 0 &&
+            candleCloseMs <= nowMs &&
+            candleCloseMs > activatedAtMs
+          );
+          }
+        )
+        .sort(
+          (
+            left: {
+              time: number;
+              close: number;
+            },
+            right: {
+              time: number;
+              close: number;
+            }
+          ) =>
+            right.time - left.time
+        );
+
+    return completedCandles[0] || null;
+  } catch (error) {
+    console.error(
+      "SPX five-minute stop confirmation error:",
+      error
+    );
+
+    return null;
+  }
+}
+
+
 function todayNewYork() {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/New_York",
@@ -631,18 +756,49 @@ export async function GET(
         3) بعد تحقيق ربح 100$ أو أكثر:
            إذا ظهرت فرصة مؤكدة في الاتجاه المعاكس.
       */
+      /*
+        وقف SPX يعتمد على إغلاق شمعة 5 دقائق
+        مكتملة بعد تفعيل الصفقة، وليس على اللمس
+        أو على موقع السعر الحالي وقت التحديث.
+      */
+      const activatedAt =
+        textValue(
+          liveTrade.activated_at
+        ) ||
+        textValue(
+          liveTrade.created_at
+        );
+
+      const completedCandle =
+        invalidationLevel > 0 &&
+        activatedAt
+          ? await getLastCompletedSpxFiveMinuteCandle(
+              activatedAt
+            )
+          : null;
+
+      const invalidationConfirmationClose =
+        completedCandle
+          ? completedCandle.close
+          : null;
+
+      const invalidationConfirmationTime =
+        completedCandle
+          ? completedCandle.time
+          : null;
+
       const spxInvalidationStopped =
         invalidationLevel > 0 &&
-        spxCurrentPrice > 0 &&
+        completedCandle !== null &&
         (
           (
             side === "CALL" &&
-            spxCurrentPrice <=
+            completedCandle.close <=
               invalidationLevel
           ) ||
           (
             side === "PUT" &&
-            spxCurrentPrice >=
+            completedCandle.close >=
               invalidationLevel
           )
         );
@@ -672,7 +828,7 @@ export async function GET(
 
       const stopReason =
         spxInvalidationStopped
-          ? `كسر الوقف ${invalidationLevel}`
+          ? `تأكيد كسر الوقف ${invalidationLevel} بإغلاق شمعة 5 دقائق عند ${invalidationConfirmationClose}`
           : profitProtectionStopped
             ? "حقق العقد 100$ أو أكثر ثم تراجع إلى خسارة 100$ أو أكثر"
             : oppositeDirectionStopped

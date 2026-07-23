@@ -1724,6 +1724,115 @@ export default function SpxWhalesPage() {
               />
             </section>
 
+            
+
+            <section className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-5">
+              <Metric
+                label="Net GEX"
+                value={
+                  gamma
+                    ? compactNumber(
+                        gamma.netGex
+                      )
+                    : "—"
+                }
+              />
+
+              <Metric
+                label="Net GEX Flip"
+                value={
+                  gamma
+                    ? formatNumber(
+                        gamma.netGexFlip,
+                        0
+                      )
+                    : "—"
+                }
+                color="text-violet-300"
+              />
+
+              <Metric
+                label="Zero Gamma"
+                value={
+                  gamma?.zeroGamma != null
+                    ? formatNumber(
+                        gamma.zeroGamma,
+                        0
+                      )
+                    : "—"
+                }
+                color="text-cyan-300"
+              />
+
+              <Metric
+                label="Call Wall"
+                value={
+                  gamma
+                    ? formatNumber(
+                        gamma.callWall,
+                        0
+                      )
+                    : "—"
+                }
+              />
+
+              <Metric
+                label="Put Wall"
+                value={
+                  gamma
+                    ? formatNumber(
+                        gamma.putWall,
+                        0
+                      )
+                    : "—"
+                }
+              />
+
+              <Metric
+                label="Magnet"
+                value={
+                  gamma
+                    ? formatNumber(
+                        gamma.magnet,
+                        0
+                      )
+                    : "—"
+                }
+              />
+
+
+              <Metric
+                label="أقوى Gamma CALL"
+                value={
+                  gamma
+                    ? `\u2066${formatNumber(
+                        gamma.strongestCallGammaStrike,
+                        0
+                      )} — ${compactNumber(
+                        gamma.strongestCallGammaValue
+                      )}\u2069`
+                    : "—"
+                }
+                color="text-emerald-300"
+              />
+
+              <Metric
+                label="أقوى Gamma PUT"
+                value={
+                  gamma
+                    ? `\u2066${formatNumber(
+                        gamma.strongestPutGammaStrike,
+                        0
+                      )} — ${compactNumber(
+                        gamma.strongestPutGammaValue
+                      )}\u2069`
+                    : "—"
+                }
+                color="text-rose-300"
+              />
+            </section>
+
+
             <section className="mt-5 overflow-hidden rounded-3xl border border-cyan-400/20 bg-slate-900/65">
               <button
                 type="button"
@@ -1927,114 +2036,7 @@ export default function SpxWhalesPage() {
               ) : null}
             </section>
 
-            <section className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-5">
-              <Metric
-                label="Net GEX"
-                value={
-                  gamma
-                    ? compactNumber(
-                        gamma.netGex
-                      )
-                    : "—"
-                }
-              />
-
-              <Metric
-                label="Net GEX Flip"
-                value={
-                  gamma
-                    ? formatNumber(
-                        gamma.netGexFlip,
-                        0
-                      )
-                    : "—"
-                }
-                color="text-violet-300"
-              />
-
-              <Metric
-                label="Zero Gamma"
-                value={
-                  gamma?.zeroGamma != null
-                    ? formatNumber(
-                        gamma.zeroGamma,
-                        0
-                      )
-                    : "—"
-                }
-                color="text-cyan-300"
-              />
-
-              <Metric
-                label="Call Wall"
-                value={
-                  gamma
-                    ? formatNumber(
-                        gamma.callWall,
-                        0
-                      )
-                    : "—"
-                }
-              />
-
-              <Metric
-                label="Put Wall"
-                value={
-                  gamma
-                    ? formatNumber(
-                        gamma.putWall,
-                        0
-                      )
-                    : "—"
-                }
-              />
-
-              <Metric
-                label="Magnet"
-                value={
-                  gamma
-                    ? formatNumber(
-                        gamma.magnet,
-                        0
-                      )
-                    : "—"
-                }
-              />
-
-
-              <Metric
-                label="أقوى Gamma CALL"
-                value={
-                  gamma
-                    ? `\u2066${formatNumber(
-                        gamma.strongestCallGammaStrike,
-                        0
-                      )} — ${compactNumber(
-                        gamma.strongestCallGammaValue
-                      )}\u2069`
-                    : "—"
-                }
-                color="text-emerald-300"
-              />
-
-              <Metric
-                label="أقوى Gamma PUT"
-                value={
-                  gamma
-                    ? `\u2066${formatNumber(
-                        gamma.strongestPutGammaStrike,
-                        0
-                      )} — ${compactNumber(
-                        gamma.strongestPutGammaValue
-                      )}\u2069`
-                    : "—"
-                }
-                color="text-rose-300"
-              />
-            </section>
-
-
-            <section className="mt-6 rounded-3xl border border-cyan-400/20 bg-slate-900/70 p-5 sm:p-6">
+<section className="mt-6 rounded-3xl border border-cyan-400/20 bg-slate-900/70 p-5 sm:p-6">
               <div>
                 <p className="text-xs font-black text-cyan-300">
                   المرحلة الأولى
