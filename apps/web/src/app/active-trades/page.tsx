@@ -265,6 +265,12 @@ export default function ActiveTradesPage() {
   const requestInFlightRef =
     useRef(false);
 
+  const quoteRequestInFlightRef =
+    useRef(false);
+
+  const tradesRef =
+    useRef<ActiveTrade[]>([]);
+
   const loadTrades =
     useCallback(
       async (
@@ -303,17 +309,75 @@ export default function ActiveTradesPage() {
             );
           }
 
-          setTrades(
-            [...(payload.trades || [])].sort(
-              (first, second) =>
-                new Date(
-                  second.activatedAt
-                ).getTime() -
-                new Date(
-                  first.activatedAt
-                ).getTime()
-            )
-          );
+          setTrades((current) => {
+            const currentById =
+              new Map(
+                current.map((trade) => [
+                  trade.id,
+                  trade,
+                ])
+              );
+
+            const nextTrades =
+              [...(payload.trades || [])]
+                .map((trade) => {
+                  const live =
+                    currentById.get(
+                      trade.id
+                    );
+
+                  const liveTime =
+                    live?.contractQuoteAt
+                      ? new Date(
+                          live.contractQuoteAt
+                        ).getTime()
+                      : 0;
+
+                  const incomingTime =
+                    trade.contractQuoteAt
+                      ? new Date(
+                          trade.contractQuoteAt
+                        ).getTime()
+                      : 0;
+
+                  if (
+                    !live ||
+                    liveTime <= incomingTime
+                  ) {
+                    return trade;
+                  }
+
+                  return {
+                    ...trade,
+                    contractCurrentPrice:
+                      live.contractCurrentPrice,
+                    contractBid:
+                      live.contractBid,
+                    contractAsk:
+                      live.contractAsk,
+                    contractProfitDollars:
+                      live.contractProfitDollars,
+                    contractProfitPct:
+                      live.contractProfitPct,
+                    contractQuoteAt:
+                      live.contractQuoteAt,
+                  };
+                })
+                .sort(
+                  (first, second) =>
+                    new Date(
+                      second.activatedAt
+                    ).getTime() -
+                    new Date(
+                      first.activatedAt
+                    ).getTime()
+                );
+
+            tradesRef.current =
+              nextTrades;
+
+            return nextTrades;
+          });
 
           setUpdatedAt(
             payload.updatedAt || ""
@@ -335,6 +399,152 @@ export default function ActiveTradesPage() {
       []
     );
 
+  const loadLiveQuotes =
+    useCallback(async () => {
+      if (
+        quoteRequestInFlightRef.current
+      ) {
+        return;
+      }
+
+      const trackedTrades =
+        tradesRef.current.filter(
+          (trade) =>
+            Boolean(
+              trade.contractTicker
+            ) &&
+            !trade.closedAt &&
+            trade.contractStatus
+              .toUpperCase() !==
+              "STOPPED" &&
+            trade.contractStatus
+              .toUpperCase() !==
+              "EXPIRED"
+        );
+
+      if (
+        trackedTrades.length === 0
+      ) {
+        return;
+      }
+
+      quoteRequestInFlightRef.current =
+        true;
+
+      try {
+        const response =
+          await fetch(
+            `/api/active-trades/quotes?t=${Date.now()}`,
+            {
+              method: "POST",
+              cache: "no-store",
+              credentials: "include",
+              headers: {
+                "Content-Type":
+                  "application/json",
+                "Cache-Control":
+                  "no-cache, no-store, max-age=0",
+                Pragma: "no-cache",
+              },
+              body: JSON.stringify({
+                trades:
+                  trackedTrades.map(
+                    (trade) => ({
+                      id: trade.id,
+                      symbol:
+                        trade.symbol,
+                      contractTicker:
+                        trade.contractTicker,
+                      contractEntryPrice:
+                        trade.contractEntryPrice,
+                    })
+                  ),
+              }),
+            }
+          );
+
+        const payload =
+          (await response.json()) as {
+            ok: boolean;
+            quotes?: Array<{
+              id: string;
+              contractCurrentPrice:
+                number;
+              contractBid: number;
+              contractAsk: number;
+              contractProfitDollars:
+                number;
+              contractProfitPct:
+                number;
+              contractQuoteAt:
+                string;
+            }>;
+            error?: string;
+          };
+
+        if (
+          !response.ok ||
+          !payload.ok
+        ) {
+          throw new Error(
+            payload.error ||
+              "تعذر تحديث أسعار العقود"
+          );
+        }
+
+        const quoteById =
+          new Map(
+            (payload.quotes || [])
+              .map((quote) => [
+                quote.id,
+                quote,
+              ])
+          );
+
+        setTrades((current) => {
+          const next =
+            current.map((trade) => {
+              const quote =
+                quoteById.get(
+                  trade.id
+                );
+
+              if (!quote) {
+                return trade;
+              }
+
+              return {
+                ...trade,
+                contractCurrentPrice:
+                  quote.contractCurrentPrice,
+                contractBid:
+                  quote.contractBid,
+                contractAsk:
+                  quote.contractAsk,
+                contractProfitDollars:
+                  quote.contractProfitDollars,
+                contractProfitPct:
+                  quote.contractProfitPct,
+                contractQuoteAt:
+                  quote.contractQuoteAt,
+              };
+            });
+
+          tradesRef.current = next;
+
+          return next;
+        });
+      } catch (quoteError) {
+        console.warn(
+          "تعذر تحديث أسعار العقود:",
+          quoteError
+        );
+      } finally {
+        quoteRequestInFlightRef.current =
+          false;
+      }
+    }, []);
+
   useEffect(() => {
     void loadTrades();
 
@@ -349,6 +559,97 @@ export default function ActiveTradesPage() {
       );
     };
   }, [loadTrades]);
+
+  /*
+    تحديث أسعار العقود فقط كل ثانية.
+
+    لا يعيد حساب الوقف أو الأهداف،
+    ولا يكتب في Supabase.
+  */
+  useEffect(() => {
+    let timer:
+      number | undefined;
+
+    const stopPolling = () => {
+      if (timer !== undefined) {
+        window.clearInterval(timer);
+        timer = undefined;
+      }
+    };
+
+    const startPolling = () => {
+      if (document.hidden) {
+        return;
+      }
+
+      void loadLiveQuotes();
+
+      timer =
+        window.setInterval(
+          () =>
+            void loadLiveQuotes(),
+          3_000
+        );
+    };
+
+    const resumePolling = () => {
+      if (document.hidden) {
+        return;
+      }
+
+      quoteRequestInFlightRef.current =
+        false;
+
+      stopPolling();
+      startPolling();
+    };
+
+    const handleVisibilityChange =
+      () => {
+        if (document.hidden) {
+          stopPolling();
+          return;
+        }
+
+        resumePolling();
+      };
+
+    startPolling();
+
+    window.addEventListener(
+      "focus",
+      resumePolling
+    );
+
+    window.addEventListener(
+      "pageshow",
+      resumePolling
+    );
+
+    document.addEventListener(
+      "visibilitychange",
+      handleVisibilityChange
+    );
+
+    return () => {
+      stopPolling();
+
+      window.removeEventListener(
+        "focus",
+        resumePolling
+      );
+
+      window.removeEventListener(
+        "pageshow",
+        resumePolling
+      );
+
+      document.removeEventListener(
+        "visibilitychange",
+        handleVisibilityChange
+      );
+    };
+  }, [loadLiveQuotes]);
 
   return (
     <main
