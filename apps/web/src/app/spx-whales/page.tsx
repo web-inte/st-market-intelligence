@@ -75,6 +75,7 @@ type SpxTrade = {
   stop_profit_dollars: number | null;
   stop_profit_pct: number | null;
   stop_reason: string | null;
+  close_reason: string | null;
 
   score: number | null;
   quality: string | null;
@@ -251,7 +252,8 @@ function tradeStatusStyle(
 }
 
 function tradeStatusLabel(
-  status?: string
+  status?: string,
+  closeReason?: string | null
 ) {
   if (status === "ACTIVE") {
     return "قيد المتابعة";
@@ -262,7 +264,10 @@ function tradeStatusLabel(
   }
 
   if (status === "STOPPED") {
-    return "ضرب الوقف";
+    return closeReason ===
+      "SPX_INVALIDATION"
+      ? "ضرب الوقف"
+      : "تم إيقاف العقد";
   }
 
   if (status === "EXPIRED") {
@@ -272,14 +277,61 @@ function tradeStatusLabel(
   return status || "—";
 }
 
+function tradeCloseMessage(
+  trade: SpxTrade
+) {
+  if (
+    trade.close_reason ===
+    "OPPOSITE_DIRECTION"
+  ) {
+    return (
+      trade.stop_reason ||
+      "تم إيقاف العقد بسبب تحول اتجاه الفرصة إلى الاتجاه المعاكس."
+    );
+  }
+
+  if (
+    trade.close_reason ===
+    "PROFIT_PROTECTION_DRAWDOWN"
+  ) {
+    return (
+      trade.stop_reason ||
+      "تم إيقاف العقد بعد تراجع السعر وتفعيل حماية الربح."
+    );
+  }
+
+  if (
+    trade.close_reason ===
+    "SPX_INVALIDATION"
+  ) {
+    return `ضرب وقف SPX عند ${formatNumber(
+      trade.invalidation_level
+    )}. انتهت متابعة هذا العقد.`;
+  }
+
+  return (
+    trade.stop_reason ||
+    "تم إيقاف متابعة هذا العقد."
+  );
+}
+
 function TradeCard({
   trade,
+  onRefresh,
+  refreshing,
 }: {
   trade: SpxTrade;
+  onRefresh: () => void;
+  refreshing: boolean;
 }) {
   const active =
     trade.status === "ACTIVE" ||
     trade.status === "WATCH";
+
+  const stoppedBySpx =
+    trade.status === "STOPPED" &&
+    trade.close_reason ===
+      "SPX_INVALIDATION";
 
   const profit =
     active
@@ -355,24 +407,36 @@ function TradeCard({
           </p>
         </div>
 
-        <span
-          className={`rounded-xl border px-4 py-3 text-sm font-black ${tradeStatusStyle(
-            trade.status
-          )}`}
-        >
-          {tradeStatusLabel(
-            trade.status
-          )}
-        </span>
+        <div className="flex flex-wrap items-center gap-2">
+          <span
+            className={`rounded-xl border px-4 py-3 text-sm font-black ${tradeStatusStyle(
+              trade.status
+            )}`}
+          >
+            {tradeStatusLabel(
+              trade.status,
+              trade.close_reason
+            )}
+          </span>
+
+          {active ? (
+            <button
+              type="button"
+              onClick={onRefresh}
+              disabled={refreshing}
+              className="rounded-xl border border-fuchsia-400/30 bg-fuchsia-400/10 px-4 py-3 text-sm font-black text-fuchsia-200 transition hover:bg-fuchsia-400/20 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {refreshing
+                ? "جارٍ التحديث..."
+                : "تحديث"}
+            </button>
+          ) : null}
+        </div>
       </div>
 
       {trade.status === "STOPPED" ? (
-        <div className="mt-5 rounded-2xl border border-rose-400/25 bg-rose-400/10 p-4 font-black text-rose-200">
-          ضرب وقف SPX عند{" "}
-          {formatNumber(
-            trade.invalidation_level
-          )}
-          . انتهت متابعة هذا العقد.
+        <div className="mt-5 rounded-2xl border border-rose-400/25 bg-rose-400/10 p-4 font-black leading-7 text-rose-200">
+          {tradeCloseMessage(trade)}
         </div>
       ) : null}
 
@@ -388,7 +452,9 @@ function TradeCard({
           label={
             active
               ? "سعر العقد الحالي"
-              : "سعر العقد عند الوقف"
+              : stoppedBySpx
+                ? "سعر العقد عند الوقف"
+                : "سعر العقد عند الإيقاف"
           }
           value={`$${formatNumber(
             active
@@ -409,7 +475,9 @@ function TradeCard({
           label={
             active
               ? "الربح الحالي"
-              : "النتيجة عند الوقف"
+              : stoppedBySpx
+                ? "النتيجة عند الوقف"
+                : "النتيجة عند الإيقاف"
           }
           value={`${money(
             profit,
@@ -471,7 +539,11 @@ function TradeCard({
 
         <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
           <p className="text-xs font-bold text-slate-500">
-            وقت ضرب الوقف
+            {stoppedBySpx
+              ? "وقت ضرب الوقف"
+              : trade.status === "STOPPED"
+                ? "وقت إيقاف العقد"
+                : "وقت ضرب الوقف"}
           </p>
 
           <p className="mt-2 font-black">
@@ -2114,7 +2186,10 @@ export default function SpxWhalesPage() {
               {activeTrade ? (
                 <TradeCard
                   trade={activeTrade}
-                />
+                
+              onRefresh={() => void load(false)}
+              refreshing={refreshing}
+            />
               ) : (
                 <div className="rounded-3xl border border-dashed border-white/10 bg-slate-900/50 p-10 text-center font-bold text-slate-500">
                   {marketSession?.isOpen === false
@@ -2136,7 +2211,10 @@ export default function SpxWhalesPage() {
                       <TradeCard
                         key={trade.id}
                         trade={trade}
-                      />
+                      
+              onRefresh={() => void load(false)}
+              refreshing={refreshing}
+            />
                     )
                   )}
                 </div>
