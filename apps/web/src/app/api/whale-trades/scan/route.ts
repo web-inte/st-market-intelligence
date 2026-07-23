@@ -43,6 +43,14 @@ const MAX_RESULTS_PER_SYMBOL = 180;
 const MAX_APPROVED_CONTRACT_PRICE = 3;
 const MAX_APPROVED_SPREAD_PCT = 15;
 
+/*
+ * نجلب تداولات فعلية لعدد محدود جدًا من العقود
+ * حتى لا نستهلك عددًا كبيرًا من طلبات Massive.
+ */
+const MAX_TRADE_CANDIDATES_PER_SYMBOL = 2;
+const TRADE_LOOKBACK_MINUTES = 10;
+const MAX_TRADES_PER_CONTRACT = 200;
+
 const whaleRejectStats = {
   invalidBasics: 0,
   strikeOrDte: 0,
@@ -104,6 +112,21 @@ type MassiveContract = {
 
 type MassiveChainResponse = {
   results?: MassiveContract[];
+  next_url?: string;
+  status?: string;
+  error?: string;
+};
+
+type MassiveOptionTrade = {
+  price?: number;
+  size?: number;
+  sip_timestamp?: number | string;
+  sequence_number?: number;
+  conditions?: number[];
+};
+
+type MassiveTradesResponse = {
+  results?: MassiveOptionTrade[];
   next_url?: string;
   status?: string;
   error?: string;
@@ -748,6 +771,214 @@ async function fetchOptionChain(
 }
 
 
+function getContractCandidateScore(
+  contract: MassiveContract
+) {
+  const ticker =
+    contract.details?.ticker || "";
+
+  const expiration =
+    contract.details?.expiration_date || "";
+
+  const strike = safeNumber(
+    contract.details?.strike_price
+  );
+
+  const stockPrice = safeNumber(
+    contract.underlying_asset?.price
+  );
+
+  const bid = safeNumber(
+    contract.last_quote?.bid
+  );
+
+  const ask = safeNumber(
+    contract.last_quote?.ask
+  );
+
+  const midpoint =
+    bid > 0 && ask > 0
+      ? (bid + ask) / 2
+      : safeNumber(
+          contract.last_trade?.price
+        );
+
+  const spreadPct =
+    calculateSpreadPct(
+      bid,
+      ask
+    );
+
+  const volume = safeNumber(
+    contract.day?.volume
+  );
+
+  const openInterest =
+    safeNumber(
+      contract.open_interest
+    );
+
+  const expirationTime =
+    new Date(
+      `${expiration}T23:59:59Z`
+    ).getTime();
+
+  const daysToExpiration =
+    Number.isFinite(expirationTime)
+      ? Math.ceil(
+          (expirationTime - Date.now()) /
+            86_400_000
+        )
+      : -1;
+
+  const strikeDistancePct =
+    stockPrice > 0
+      ? (
+          Math.abs(
+            strike - stockPrice
+          ) /
+          stockPrice
+        ) * 100
+      : Number.POSITIVE_INFINITY;
+
+  const eligible =
+    Boolean(ticker) &&
+    strike > 0 &&
+    stockPrice > 0 &&
+    daysToExpiration >= 1 &&
+    daysToExpiration <= 45 &&
+    strikeDistancePct <= 12 &&
+    midpoint > 0 &&
+    midpoint <=
+      MAX_APPROVED_CONTRACT_PRICE &&
+    spreadPct !== null &&
+    spreadPct <=
+      MAX_APPROVED_SPREAD_PCT &&
+    volume > 0;
+
+  return {
+    eligible,
+    score:
+      volume * 10 +
+      openInterest -
+      strikeDistancePct * 100,
+  };
+}
+
+function selectTradeCandidates(
+  contracts: MassiveContract[]
+) {
+  return contracts
+    .map((contract) => ({
+      contract,
+      candidate:
+        getContractCandidateScore(
+          contract
+        ),
+    }))
+    .filter(
+      ({ candidate }) =>
+        candidate.eligible
+    )
+    .sort(
+      (a, b) =>
+        b.candidate.score -
+        a.candidate.score
+    )
+    .slice(
+      0,
+      MAX_TRADE_CANDIDATES_PER_SYMBOL
+    )
+    .map(({ contract }) => contract);
+}
+
+async function fetchRecentOptionTrades(
+  optionTicker: string,
+  apiKey: string
+) {
+  const lookbackMilliseconds =
+    Date.now() -
+    TRADE_LOOKBACK_MINUTES *
+      60_000;
+
+  /*
+   * Massive يقبل timestamp بالنانوثانية.
+   * نستخدم BigInt لتجنب فقدان الدقة.
+   */
+  const timestampGte =
+    (
+      BigInt(lookbackMilliseconds) *
+      BigInt(1_000_000)
+    ).toString();
+
+  const url =
+    `https://api.massive.com/v3/trades/${encodeURIComponent(
+      optionTicker
+    )}` +
+    `?timestamp.gte=${timestampGte}` +
+    `&sort=timestamp` +
+    `&order=desc` +
+    `&limit=${MAX_TRADES_PER_CONTRACT}` +
+    `&apiKey=${encodeURIComponent(
+      apiKey
+    )}`;
+
+  const response = await fetch(url, {
+    cache: "no-store",
+  });
+
+  const responseText =
+    await response.text();
+
+  if (!responseText.trim()) {
+    return [];
+  }
+
+  const data = JSON.parse(
+    responseText
+  ) as MassiveTradesResponse;
+
+  if (!response.ok) {
+    throw new Error(
+      data.error ||
+        `فشل جلب تداولات ${optionTicker}`
+    );
+  }
+
+  return data.results || [];
+}
+
+function findLargestRecentTrade(
+  trades: MassiveOptionTrade[]
+) {
+  return trades
+    .filter((trade) => {
+      const price =
+        safeNumber(trade.price);
+
+      const size =
+        safeNumber(trade.size);
+
+      return (
+        price > 0 &&
+        size > 0
+      );
+    })
+    .sort((a, b) => {
+      const premiumA =
+        safeNumber(a.price) *
+        safeNumber(a.size) *
+        100;
+
+      const premiumB =
+        safeNumber(b.price) *
+        safeNumber(b.size) *
+        100;
+
+      return premiumB - premiumA;
+    })[0] || null;
+}
+
 type CompositeMarketContext = {
   callVolume: number;
   putVolume: number;
@@ -1200,7 +1431,8 @@ function applyCompositeWhaleEngine(
 
 function analyzeContract(
   symbol: string,
-  contract: MassiveContract
+  contract: MassiveContract,
+  actualTrade?: MassiveOptionTrade
 ): WhaleTradeRow | null {
   const optionTicker =
     contract.details?.ticker || "";
@@ -1266,7 +1498,8 @@ if (
 
   const lastTradePrice =
     safeNumber(
-      contract.last_trade?.price
+      actualTrade?.price ??
+        contract.last_trade?.price
     );
 
   const midpoint =
@@ -1289,7 +1522,8 @@ if (
 
   const lastTradeSize =
     safeNumber(
-      contract.last_trade?.size
+      actualTrade?.size ??
+        contract.last_trade?.size
     );
 
   const volume = safeNumber(
@@ -1591,6 +1825,16 @@ export async function GET(
     });
   }
 
+  for (
+    const key of Object.keys(
+      whaleRejectStats
+    ) as Array<
+      keyof typeof whaleRejectStats
+    >
+  ) {
+    whaleRejectStats[key] = 0;
+  }
+
   const detectedRows: WhaleTradeRow[] =
     [];
 
@@ -1607,20 +1851,54 @@ export async function GET(
           massiveApiKey
         );
 
-      const rawSymbolRows =
-        contracts
-          .map((contract) =>
-            analyzeContract(
-              symbol,
-              contract
-            )
+      const candidates =
+        selectTradeCandidates(
+          contracts
+        );
+
+      const candidateRows =
+        await Promise.all(
+          candidates.map(
+            async (contract) => {
+              const optionTicker =
+                contract.details?.ticker ||
+                "";
+
+              if (!optionTicker) {
+                return null;
+              }
+
+              const trades =
+                await fetchRecentOptionTrades(
+                  optionTicker,
+                  massiveApiKey
+                );
+
+              const largestTrade =
+                findLargestRecentTrade(
+                  trades
+                );
+
+              if (!largestTrade) {
+                return null;
+              }
+
+              return analyzeContract(
+                symbol,
+                contract,
+                largestTrade
+              );
+            }
           )
-          .filter(
-            (
-              row
-            ): row is WhaleTradeRow =>
-              row !== null
-          );
+        );
+
+      const rawSymbolRows =
+        candidateRows.filter(
+          (
+            row
+          ): row is WhaleTradeRow =>
+            row !== null
+        );
 
       const symbolRows =
         applyCompositeWhaleEngine(
