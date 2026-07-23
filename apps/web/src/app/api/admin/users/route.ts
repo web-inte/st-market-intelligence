@@ -649,6 +649,310 @@ export async function PATCH(
       });
     }
 
+    if (action === "set_plan") {
+      const planCode = String(
+        body.planCode || ""
+      );
+
+      if (
+        planCode !== "platform" &&
+        planCode !== "plus"
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "الباقة المطلوبة غير صحيحة",
+          },
+          {
+            status: 400,
+          }
+        );
+      }
+
+      const {
+        data: plan,
+        error: planError,
+      } = await admin
+        .from("plans")
+        .select(
+          "id,code,name,is_trial"
+        )
+        .eq("code", planCode)
+        .maybeSingle();
+
+      if (
+        planError ||
+        !plan
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "لم يتم العثور على الباقة المطلوبة",
+          },
+          {
+            status: 404,
+          }
+        );
+      }
+
+      const {
+        data: subscription,
+        error: subscriptionError,
+      } = await admin
+        .from("subscriptions")
+        .select(
+          "id,plan_id,starts_at,ends_at,status"
+        )
+        .eq("user_id", userId)
+        .order("ends_at", {
+          ascending: false,
+        })
+        .limit(1)
+        .maybeSingle();
+
+      if (
+        subscriptionError ||
+        !subscription
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "لا يوجد اشتراك لهذا المستخدم",
+          },
+          {
+            status: 400,
+          }
+        );
+      }
+
+      if (
+        String(subscription.plan_id) ===
+        String(plan.id)
+      ) {
+        return NextResponse.json({
+          ok: true,
+          message:
+            planCode === "plus"
+              ? "المستخدم مشترك بالفعل في Plus"
+              : "المستخدم مشترك بالفعل في منصة",
+        });
+      }
+
+      const oldPlanId =
+        subscription.plan_id;
+
+      const {
+        error: updatePlanError,
+      } = await admin
+        .from("subscriptions")
+        .update({
+          plan_id: plan.id,
+          source: "admin",
+        })
+        .eq("id", subscription.id);
+
+      if (updatePlanError) {
+        throw updatePlanError;
+      }
+
+      const {
+        error: planEventError,
+      } = await admin
+        .from("subscription_events")
+        .insert({
+          subscription_id:
+            subscription.id,
+
+          user_id: userId,
+
+          event_type:
+            "subscription_plan_changed",
+
+          old_data: {
+            plan_id: oldPlanId,
+          },
+
+          new_data: {
+            plan_id: plan.id,
+            plan_code: plan.code,
+            plan_name: plan.name,
+          },
+
+          actor_user_id:
+            currentUser.id,
+
+          note:
+            planCode === "plus"
+              ? "تم تحويل الباقة إلى Plus"
+              : "تم تحويل الباقة إلى منصة",
+        });
+
+      if (planEventError) {
+        console.error(
+          "Plan change event error:",
+          planEventError
+        );
+      }
+
+      return NextResponse.json({
+        ok: true,
+
+        message:
+          planCode === "plus"
+            ? "تم تحويل الاشتراك إلى Plus"
+            : "تم تحويل الاشتراك إلى منصة",
+      });
+    }
+
+    if (action === "set_end_date") {
+      const endDate = String(
+        body.endDate || ""
+      ).trim();
+
+      if (
+        !/^\d{4}-\d{2}-\d{2}$/.test(
+          endDate
+        )
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "تاريخ نهاية الاشتراك غير صحيح",
+          },
+          {
+            status: 400,
+          }
+        );
+      }
+
+      const calculatedEnd =
+        new Date(
+          `${endDate}T23:59:59.999Z`
+        );
+
+      if (
+        Number.isNaN(
+          calculatedEnd.getTime()
+        )
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "تعذر قراءة تاريخ نهاية الاشتراك",
+          },
+          {
+            status: 400,
+          }
+        );
+      }
+
+      const {
+        data: subscription,
+        error: subscriptionError,
+      } = await admin
+        .from("subscriptions")
+        .select(
+          "id,ends_at,status"
+        )
+        .eq("user_id", userId)
+        .order("ends_at", {
+          ascending: false,
+        })
+        .limit(1)
+        .maybeSingle();
+
+      if (
+        subscriptionError ||
+        !subscription
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "لا يوجد اشتراك لهذا المستخدم",
+          },
+          {
+            status: 400,
+          }
+        );
+      }
+
+      const oldEnd = String(
+        subscription.ends_at
+      );
+
+      const expiresNow =
+        calculatedEnd.getTime() <=
+        Date.now();
+
+      const {
+        error: updateEndError,
+      } = await admin
+        .from("subscriptions")
+        .update({
+          ends_at:
+            calculatedEnd.toISOString(),
+
+          status: expiresNow
+            ? "expired"
+            : "active",
+
+          source: "admin",
+        })
+        .eq("id", subscription.id);
+
+      if (updateEndError) {
+        throw updateEndError;
+      }
+
+      const {
+        error: dateEventError,
+      } = await admin
+        .from("subscription_events")
+        .insert({
+          subscription_id:
+            subscription.id,
+
+          user_id: userId,
+
+          event_type:
+            "subscription_end_date_changed",
+
+          old_data: {
+            ends_at: oldEnd,
+          },
+
+          new_data: {
+            ends_at:
+              calculatedEnd.toISOString(),
+
+            status: expiresNow
+              ? "expired"
+              : "active",
+          },
+
+          actor_user_id:
+            currentUser.id,
+
+          note:
+            "تم تعديل تاريخ نهاية الاشتراك من لوحة المسؤول",
+        });
+
+      if (dateEventError) {
+        console.error(
+          "End date event error:",
+          dateEventError
+        );
+      }
+
+      return NextResponse.json({
+        ok: true,
+
+        message: expiresNow
+          ? "تم تعديل التاريخ وانتهى الاشتراك"
+          : "تم تعديل تاريخ نهاية الاشتراك",
+      });
+    }
+
     if (action === "adjust_days") {
       const days = safeInteger(
         body.days,

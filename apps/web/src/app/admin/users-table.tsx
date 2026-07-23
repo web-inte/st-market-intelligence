@@ -118,6 +118,13 @@ export default function AdminUsersTable() {
   const [message, setMessage] =
     useState("");
 
+  const [
+    endDateValues,
+    setEndDateValues,
+  ] = useState<Record<string, string>>(
+    {}
+  );
+
   const loadUsers = useCallback(
     async () => {
       setLoading(true);
@@ -400,6 +407,181 @@ export default function AdminUsersTable() {
                     </p>
                   </div>
                 </div>
+
+                {user.role !==
+                  "admin" &&
+                user.subscription ? (
+                  <div className="mt-5 rounded-2xl border border-white/10 bg-slate-950/70 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-black text-white">
+                          إدارة الباقة
+                        </p>
+
+                        <p className="mt-1 text-xs text-slate-500">
+                          تغيير الباقة لا يغيّر مدة الاشتراك.
+                        </p>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          disabled={
+                            working ||
+                            user.subscription
+                              .planCode ===
+                              "platform"
+                          }
+                          onClick={() => {
+                            if (
+                              window.confirm(
+                                "تحويل اشتراك هذا المستخدم إلى باقة منصة؟"
+                              )
+                            ) {
+                              void runAction(
+                                user.id,
+                                "set_plan",
+                                {
+                                  planCode:
+                                    "platform",
+                                }
+                              );
+                            }
+                          }}
+                          className={[
+                            "rounded-xl border px-4 py-2 text-sm font-black transition disabled:cursor-not-allowed",
+                            user.subscription
+                              .planCode ===
+                            "platform"
+                              ? "border-cyan-300 bg-cyan-400 text-slate-950 shadow-lg shadow-cyan-500/20"
+                              : "border-cyan-400/30 bg-cyan-400/10 text-cyan-300 hover:bg-cyan-400/20 disabled:opacity-100",
+                          ].join(" ")}
+                        >
+                          {user.subscription
+                            .planCode ===
+                          "platform"
+                            ? "✓ منصة"
+                            : "منصة"}
+                        </button>
+
+                        <button
+                          type="button"
+                          disabled={
+                            working ||
+                            user.subscription
+                              .planCode ===
+                              "plus"
+                          }
+                          onClick={() => {
+                            if (
+                              window.confirm(
+                                "تحويل اشتراك هذا المستخدم إلى باقة Plus؟"
+                              )
+                            ) {
+                              void runAction(
+                                user.id,
+                                "set_plan",
+                                {
+                                  planCode:
+                                    "plus",
+                                }
+                              );
+                            }
+                          }}
+                          className={[
+                            "rounded-xl border px-4 py-2 text-sm font-black transition disabled:cursor-not-allowed",
+                            user.subscription
+                              .planCode ===
+                            "plus"
+                              ? "border-violet-300 bg-violet-400 text-slate-950 shadow-lg shadow-violet-500/20"
+                              : "border-violet-400/30 bg-violet-400/10 text-violet-300 hover:bg-violet-400/20 disabled:opacity-100",
+                          ].join(" ")}
+                        >
+                          {user.subscription
+                            .planCode ===
+                          "plus"
+                            ? "✓ Plus"
+                            : "Plus"}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 border-t border-white/10 pt-4">
+                      <p className="text-sm font-black text-white">
+                        تاريخ نهاية الاشتراك
+                      </p>
+
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <input
+                          type="date"
+                          value={
+                            endDateValues[
+                              user.id
+                            ] ??
+                            user.subscription.endsAt.slice(
+                              0,
+                              10
+                            )
+                          }
+                          onChange={(event) =>
+                            setEndDateValues(
+                              (current) => ({
+                                ...current,
+                                [user.id]:
+                                  event.target
+                                    .value,
+                              })
+                            )
+                          }
+                          className="rounded-xl border border-white/10 bg-slate-900 px-4 py-2 text-sm text-white outline-none focus:border-cyan-400/50"
+                        />
+
+                        <button
+                          type="button"
+                          disabled={working}
+                          onClick={() => {
+                            const currentEndDate =
+                              user.subscription
+                                ?.endsAt.slice(
+                                  0,
+                                  10
+                                ) || "";
+
+                            const endDate =
+                              endDateValues[
+                                user.id
+                              ] ??
+                              currentEndDate;
+
+                            if (!endDate) {
+                              setError(
+                                "لا يوجد تاريخ نهاية صالح لهذا الاشتراك"
+                              );
+                              return;
+                            }
+
+                            if (
+                              window.confirm(
+                                `اعتماد نهاية الاشتراك بتاريخ ${endDate}؟`
+                              )
+                            ) {
+                              void runAction(
+                                user.id,
+                                "set_end_date",
+                                {
+                                  endDate,
+                                }
+                              );
+                            }
+                          }}
+                          className="rounded-xl border border-sky-400/30 bg-sky-400/10 px-4 py-2 text-sm font-bold text-sky-300 disabled:opacity-50"
+                        >
+                          حفظ التاريخ
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
 
                 <div className="mt-5 flex flex-wrap gap-2">
                   {user.role !==
