@@ -93,7 +93,8 @@ export async function updateSession(
   }
 
   if (
-    pathname.startsWith("/api/analysis/")
+    pathname.startsWith("/api/analysis/") ||
+    pathname.startsWith("/api/bot-decision/")
   ) {
     const decisionScanSecret =
       process.env.DECISION_SCAN_SECRET;
