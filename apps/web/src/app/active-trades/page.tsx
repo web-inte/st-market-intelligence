@@ -66,7 +66,7 @@ type ActiveTradesResponse = {
   error?: string;
 };
 
-const REFRESH_INTERVAL_MS = 10_000;
+const REFRESH_INTERVAL_MS = 5_000;
 
 function numberText(
   value: number | null,
