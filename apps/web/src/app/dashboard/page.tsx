@@ -9,6 +9,10 @@ import { useRouter } from "next/navigation";
 import SectorRadar from "../../components/sector-radar";
 
 import {
+  createClient,
+} from "../../lib/supabase/client";
+
+import {
   createOpportunity,
   type AnalysisResponse,
   type Opportunity,
@@ -527,6 +531,21 @@ export default function Home() {
 
   const [symbol, setSymbol] = useState("");
 
+  const [isAdmin, setIsAdmin] =
+    useState(false);
+
+  const [adminCheckLoading, setAdminCheckLoading] =
+    useState(true);
+
+  const [botScanLoading, setBotScanLoading] =
+    useState(false);
+
+  const [botScanError, setBotScanError] =
+    useState("");
+
+  const [botScanResult, setBotScanResult] =
+    useState<any>(null);
+
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [tickerOpportunities, setTickerOpportunities] = useState<Opportunity[]>([]);
 
@@ -539,13 +558,18 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  function handleSearch(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    const stock = symbol
+  function normalizeSearchSymbol() {
+    return symbol
       .trim()
       .toUpperCase()
       .replace(/[^A-Z.-]/g, "");
+  }
+
+  function handleSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const stock =
+      normalizeSearchSymbol();
 
     if (!stock) {
       return;
@@ -553,6 +577,124 @@ export default function Home() {
 
     router.push(`/stocks/${encodeURIComponent(stock)}`);
   }
+
+  async function handleBotScan(
+    saveToWatching = false
+  ) {
+    const stock =
+      normalizeSearchSymbol();
+
+    if (
+      !stock ||
+      !isAdmin ||
+      botScanLoading
+    ) {
+      return;
+    }
+
+    setBotScanLoading(true);
+    setBotScanError("");
+
+    if (!saveToWatching) {
+      setBotScanResult(null);
+    }
+
+    try {
+      const query =
+        saveToWatching
+          ? "mode=manual&save=1"
+          : "mode=manual";
+
+      const response =
+        await fetch(
+          `/api/bot-decision/${encodeURIComponent(stock)}?${query}`,
+          {
+            method: "GET",
+            cache: "no-store",
+            credentials: "include",
+          }
+        );
+
+      const payload =
+        await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          payload?.details ||
+          payload?.error ||
+          "تعذر تشغيل الفحص"
+        );
+      }
+
+      setBotScanResult(
+        payload
+      );
+    } catch (scanError) {
+      setBotScanError(
+        scanError instanceof Error
+          ? scanError.message
+          : "حدث خطأ أثناء تشغيل الفحص"
+      );
+    } finally {
+      setBotScanLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function checkAdminAccess() {
+      try {
+        const supabase =
+          createClient();
+
+        const {
+          data: {
+            user,
+          },
+        } =
+          await supabase.auth.getUser();
+
+        if (!user) {
+          if (!cancelled) {
+            setIsAdmin(false);
+          }
+
+          return;
+        }
+
+        const {
+          data: profile,
+        } =
+          await supabase
+            .from("profiles")
+            .select("role")
+            .eq("id", user.id)
+            .maybeSingle();
+
+        if (!cancelled) {
+          setIsAdmin(
+            profile?.role ===
+              "admin"
+          );
+        }
+      } catch {
+        if (!cancelled) {
+          setIsAdmin(false);
+        }
+      } finally {
+        if (!cancelled) {
+          setAdminCheckLoading(false);
+        }
+      }
+    }
+
+    void checkAdminAccess();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -1134,7 +1276,174 @@ ${url}`);
               >
                 تحليل
               </button>
+
+              {!adminCheckLoading && isAdmin ? (
+                <button
+                  type="button"
+                  disabled={
+                    !symbol.trim() ||
+                    botScanLoading
+                  }
+                  onClick={() =>
+                    void handleBotScan(false)
+                  }
+                  className="rounded-2xl border border-violet-400/30 bg-violet-400/10 px-5 py-4 font-black text-violet-300 shadow-lg shadow-violet-950/20 transition hover:-translate-y-0.5 hover:border-violet-400/50 hover:bg-violet-400/15 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {botScanLoading
+                    ? "جاري الفحص..."
+                    : "الفحص"}
+                </button>
+              ) : null}
             </div>
+
+            {!adminCheckLoading && isAdmin && botScanError ? (
+              <div className="mt-4 rounded-2xl border border-rose-400/20 bg-rose-400/[0.07] p-4 text-sm font-bold text-rose-300">
+                {botScanError}
+              </div>
+            ) : null}
+
+            {!adminCheckLoading && isAdmin && botScanResult ? (
+              <div className="mt-4 rounded-2xl border border-violet-400/20 bg-violet-400/[0.06] p-4 text-right">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-black text-violet-300">
+                      نتيجة محرك القاما والسيولة والقرار
+                    </p>
+
+                    <p className="mt-2 text-xl font-black text-white">
+                      {botScanResult?.symbol || normalizeSearchSymbol()}
+                    </p>
+                  </div>
+
+                  <span
+                    className={`rounded-xl border px-3 py-2 text-xs font-black ${
+                      botScanResult?.decision?.qualifies
+                        ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-300"
+                        : "border-rose-400/30 bg-rose-400/10 text-rose-300"
+                    }`}
+                  >
+                    {botScanResult?.decision?.qualifies
+                      ? "مؤهلة"
+                      : "غير مؤهلة"}
+                  </span>
+                </div>
+
+                <div className="mt-4 grid gap-2 text-sm sm:grid-cols-2">
+                  <p className="rounded-xl bg-slate-950/70 p-3 text-slate-300">
+                    الاتجاه:{" "}
+                    <span className="font-black text-white">
+                      {botScanResult?.decision?.side === "CALL"
+                        ? "كول"
+                        : botScanResult?.decision?.side === "PUT"
+                          ? "بوت"
+                          : "محايد"}
+                    </span>
+                  </p>
+
+                  <p className="rounded-xl bg-slate-950/70 p-3 text-slate-300">
+                    الدرجة:{" "}
+                    <span className="font-black text-white">
+                      {botScanResult?.decision?.score ?? 0} / 10
+                    </span>
+                  </p>
+
+                  <p className="rounded-xl bg-slate-950/70 p-3 text-slate-300">
+                    الدخول:{" "}
+                    <span className="font-black text-white">
+                      {botScanResult?.decision?.entry ?? "غير متوفر"}
+                    </span>
+                  </p>
+
+                  <p className="rounded-xl bg-slate-950/70 p-3 text-slate-300">
+                    الوقف:{" "}
+                    <span className="font-black text-white">
+                      {botScanResult?.decision?.stop ?? "غير متوفر"}
+                    </span>
+                  </p>
+
+                  <p className="rounded-xl bg-slate-950/70 p-3 text-slate-300">
+                    الهدف الأول:{" "}
+                    <span className="font-black text-white">
+                      {botScanResult?.decision?.tp1 ?? "غير متوفر"}
+                    </span>
+                  </p>
+
+                  <p className="rounded-xl bg-slate-950/70 p-3 text-slate-300">
+                    الهدف الثاني:{" "}
+                    <span className="font-black text-white">
+                      {botScanResult?.decision?.tp2 ?? "غير متوفر"}
+                    </span>
+                  </p>
+
+                  <p className="rounded-xl bg-slate-950/70 p-3 text-slate-300">
+                    الهدف الثالث:{" "}
+                    <span className="font-black text-white">
+                      {botScanResult?.decision?.tp3 ?? "غير متوفر"}
+                    </span>
+                  </p>
+
+                  <p className="rounded-xl bg-slate-950/70 p-3 text-slate-300">
+                    الانتهاء:{" "}
+                    <span className="font-black text-white">
+                      {botScanResult?.decision?.expiration ?? "غير متوفر"}
+                    </span>
+                  </p>
+                </div>
+
+                {botScanResult?.selectedContract ? (
+                  <div className="mt-3 rounded-xl border border-cyan-400/15 bg-cyan-400/[0.05] p-3 text-sm text-cyan-200">
+                    العقد المختار:{" "}
+                    <span dir="ltr" className="font-black">
+                      {botScanResult.selectedContract.optionTicker}
+                    </span>
+                    {" — "}
+                    سترايك {botScanResult.selectedContract.strike}
+                    {" — "}
+                    السعر {botScanResult.selectedContract.mid}
+                  </div>
+                ) : null}
+
+                {Array.isArray(
+                  botScanResult?.decision?.rejectionReasons
+                ) &&
+                botScanResult.decision.rejectionReasons.length > 0 ? (
+                  <div className="mt-3 rounded-xl border border-rose-400/15 bg-rose-400/[0.05] p-3">
+                    <p className="text-xs font-black text-rose-300">
+                      أسباب عدم التأهل
+                    </p>
+
+                    <div className="mt-2 space-y-1 text-xs leading-6 text-rose-200/80">
+                      {botScanResult.decision.rejectionReasons.map(
+                        (reason: string) => (
+                          <p key={reason}>
+                            • {reason}
+                          </p>
+                        )
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+
+                {botScanResult?.watching?.saved ? (
+                  <div className="mt-3 rounded-xl border border-emerald-400/20 bg-emerald-400/[0.07] p-3 text-sm font-black text-emerald-300">
+                    تم إضافة الفرصة إلى المراقبة.
+                  </div>
+                ) : botScanResult?.decision?.qualifies ? (
+                  <button
+                    type="button"
+                    disabled={botScanLoading}
+                    onClick={() =>
+                      void handleBotScan(true)
+                    }
+                    className="mt-4 w-full rounded-xl bg-gradient-to-l from-violet-400 to-fuchsia-500 px-4 py-3 font-black text-slate-950 transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {botScanLoading
+                      ? "جاري الإضافة..."
+                      : "إضافة إلى المراقبة"}
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
           </form>
 
           <button

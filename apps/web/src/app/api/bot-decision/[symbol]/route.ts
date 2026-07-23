@@ -3,6 +3,10 @@ import {
   NextResponse,
 } from "next/server";
 
+import {
+  createClient as createServerClient,
+} from "@/lib/supabase/server";
+
 export const dynamic =
   "force-dynamic";
 
@@ -99,26 +103,80 @@ function round(
   );
 }
 
-function isAuthorized(
+async function isAuthorized(
   request: NextRequest
 ) {
   const expectedSecret =
     process.env
       .DECISION_SCAN_SECRET;
 
-  if (!expectedSecret) {
-    return true;
-  }
-
   const authorization =
     request.headers.get(
       "authorization"
     ) || "";
 
-  return (
+  /*
+    الفحص التلقائي من GitHub Actions
+    يعمل بواسطة المفتاح السري.
+  */
+  if (
+    expectedSecret &&
     authorization ===
-    `Bearer ${expectedSecret}`
-  );
+      `Bearer ${expectedSecret}`
+  ) {
+    return true;
+  }
+
+  /*
+    البحث اليدوي من داخل المنصة
+    مسموح فقط لجلسة مسؤول.
+  */
+  try {
+    const supabase =
+      await createServerClient();
+
+    const {
+      data: {
+        user,
+      },
+    } =
+      await supabase.auth.getUser();
+
+    if (!user) {
+      return false;
+    }
+
+    const {
+      data: profile,
+      error,
+    } =
+      await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", user.id)
+        .maybeSingle();
+
+    if (error) {
+      console.error(
+        "تعذر التحقق من صلاحية المسؤول:",
+        error.message
+      );
+
+      return false;
+    }
+
+    return (
+      profile?.role ===
+      "admin"
+    );
+  } catch (error) {
+    console.error(
+      "خطأ التحقق من مسؤول المحرك الثالث:",
+      error
+    );
+
+    return false;
+  }
 }
 
 async function requestBotReport({
@@ -1971,7 +2029,7 @@ export async function GET(
   context: RouteContext
 ) {
   if (
-    !isAuthorized(request)
+    !(await isAuthorized(request))
   ) {
     return NextResponse.json(
       {
