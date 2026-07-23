@@ -1047,6 +1047,450 @@ function createDecision(
   };
 }
 
+
+type BotDecisionContract = {
+  optionTicker: string;
+  strike: number;
+  expiration: string;
+  contractType: string | null;
+
+  bid: number;
+  ask: number;
+  last: number;
+  mid: number;
+
+  volume: number | null;
+  oi: number | null;
+  delta: number | null;
+  gamma: number | null;
+
+  selectionScore: number;
+};
+
+const MIN_CONTRACT_PRICE =
+  Number(
+    process.env.MIN_CONTRACT_PRICE ||
+    1
+  );
+
+const MAX_CONTRACT_PRICE =
+  Number(
+    process.env.MAX_CONTRACT_PRICE ||
+    2.70
+  );
+
+function asRecord(
+  value: unknown
+): Record<string, unknown> {
+  return (
+    value !== null &&
+    typeof value === "object"
+  )
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function toFiniteNumber(
+  value: unknown,
+  fallback = 0
+) {
+  const numberValue =
+    Number(value);
+
+  return Number.isFinite(numberValue)
+    ? numberValue
+    : fallback;
+}
+
+function getOptionMidExact(
+  item: Record<string, unknown>
+) {
+  const quote =
+    asRecord(item.last_quote);
+
+  const trade =
+    asRecord(item.last_trade);
+
+  const day =
+    asRecord(item.day);
+
+  const bid =
+    toFiniteNumber(
+      quote.bid ??
+      quote.bp
+    );
+
+  const ask =
+    toFiniteNumber(
+      quote.ask ??
+      quote.ap
+    );
+
+  const last =
+    toFiniteNumber(
+      trade.price ??
+      trade.p ??
+      day.close
+    );
+
+  let mid = 0;
+
+  if (bid > 0 && ask > 0) {
+    mid = (bid + ask) / 2;
+  } else if (last > 0) {
+    mid = last;
+  } else if (ask > 0) {
+    mid = ask;
+  } else if (bid > 0) {
+    mid = bid;
+  }
+
+  return {
+    bid,
+    ask,
+    last,
+    mid: round(mid, 2),
+  };
+}
+
+async function getMassiveOptionChainExact(
+  symbol: string,
+  expiration: string,
+  side: "CALL" | "PUT"
+) {
+  const apiKey =
+    process.env.MASSIVE_API_KEY;
+
+  const baseUrl =
+    process.env.MASSIVE_BASE_URL ||
+    "https://api.massive.com";
+
+  if (!apiKey) {
+    throw new Error(
+      "MASSIVE_API_KEY_MISSING"
+    );
+  }
+
+  const contractType =
+    side === "CALL"
+      ? "call"
+      : "put";
+
+  let url =
+    `${baseUrl.replace(/\/+$/, "")}` +
+    `/v3/snapshot/options/${encodeURIComponent(symbol)}` +
+    `?expiration_date=${encodeURIComponent(expiration)}` +
+    `&contract_type=${encodeURIComponent(contractType)}` +
+    `&limit=250` +
+    `&apiKey=${encodeURIComponent(apiKey)}`;
+
+  const results:
+    Record<string, unknown>[] = [];
+
+  while (url) {
+    const response =
+      await fetch(
+        url,
+        {
+          cache: "no-store",
+          signal:
+            AbortSignal.timeout(
+              45_000
+            ),
+        }
+      );
+
+    if (!response.ok) {
+      throw new Error(
+        `MASSIVE_OPTION_CHAIN_HTTP_${response.status}`
+      );
+    }
+
+    const payload =
+      asRecord(
+        await response.json()
+      );
+
+    const pageResults =
+      Array.isArray(payload.results)
+        ? payload.results
+        : [];
+
+    for (const item of pageResults) {
+      results.push(
+        asRecord(item)
+      );
+    }
+
+    const nextUrl =
+      typeof payload.next_url === "string"
+        ? payload.next_url
+        : "";
+
+    if (!nextUrl) {
+      url = "";
+      continue;
+    }
+
+    url =
+      nextUrl.includes("apiKey=")
+        ? nextUrl
+        : `${nextUrl}&apiKey=${encodeURIComponent(apiKey)}`;
+  }
+
+  return results;
+}
+
+/*
+  هذه نفس معادلة scoreOptionContract
+  الموجودة في بوت القرار الأصلي.
+*/
+function scoreOptionContractExact(
+  contract: BotDecisionContract,
+  preferredStrike: number,
+  side: "CALL" | "PUT"
+) {
+  const distance =
+    Math.abs(
+      contract.strike -
+      preferredStrike
+    );
+
+  const volumeScore =
+    Math.min(
+      Number(
+        contract.volume || 0
+      ) / 1000,
+      3
+    );
+
+  const oiScore =
+    Math.min(
+      Number(
+        contract.oi || 0
+      ) / 3000,
+      3
+    );
+
+  let deltaScore = 0;
+
+  const delta =
+    Number(contract.delta);
+
+  if (!Number.isNaN(delta)) {
+    if (side === "CALL") {
+      if (
+        delta >= 0.25 &&
+        delta <= 0.65
+      ) {
+        deltaScore = 3;
+      } else if (
+        delta >= 0.15 &&
+        delta <= 0.75
+      ) {
+        deltaScore = 1.5;
+      }
+    }
+
+    if (side === "PUT") {
+      if (
+        delta <= -0.25 &&
+        delta >= -0.65
+      ) {
+        deltaScore = 3;
+      } else if (
+        delta <= -0.15 &&
+        delta >= -0.75
+      ) {
+        deltaScore = 1.5;
+      }
+    }
+  }
+
+  const spread =
+    Number(contract.ask || 0) -
+    Number(contract.bid || 0);
+
+  let spreadPenalty = 0;
+
+  if (
+    contract.bid > 0 &&
+    contract.ask > 0
+  ) {
+    spreadPenalty =
+      Math.min(
+        spread / 0.20,
+        2
+      );
+  }
+
+  const distancePenalty =
+    distance * 0.10;
+
+  return (
+    volumeScore +
+    oiScore +
+    deltaScore -
+    distancePenalty -
+    spreadPenalty
+  );
+}
+
+async function findBestOptionContractExact(
+  symbol: string,
+  expiration: string,
+  side: "CALL" | "PUT",
+  preferredStrike: number
+): Promise<BotDecisionContract | null> {
+  if (
+    !preferredStrike ||
+    !expiration
+  ) {
+    return null;
+  }
+
+  const chain =
+    await getMassiveOptionChainExact(
+      symbol,
+      expiration,
+      side
+    );
+
+  const normalized =
+    chain
+      .map((item) => {
+        const details =
+          asRecord(item.details);
+
+        const day =
+          asRecord(item.day);
+
+        const greeks =
+          asRecord(item.greeks);
+
+        const optionData =
+          getOptionMidExact(item);
+
+        const contract: BotDecisionContract = {
+          optionTicker:
+            String(
+              details.ticker ||
+              item.ticker ||
+              ""
+            ),
+
+          strike:
+            toFiniteNumber(
+              details.strike_price ??
+              item.strike_price
+            ),
+
+          expiration:
+            String(
+              details.expiration_date ||
+              expiration
+            ),
+
+          contractType:
+            details.contract_type
+              ? String(
+                  details.contract_type
+                )
+              : null,
+
+          bid:
+            optionData.bid,
+
+          ask:
+            optionData.ask,
+
+          last:
+            optionData.last,
+
+          mid:
+            optionData.mid,
+
+          volume:
+            toFiniteNumber(
+              day.volume ??
+              day.v,
+              0
+            ),
+
+          oi:
+            toFiniteNumber(
+              item.open_interest,
+              0
+            ),
+
+          delta:
+            Number.isFinite(
+              Number(greeks.delta)
+            )
+              ? Number(greeks.delta)
+              : null,
+
+          gamma:
+            Number.isFinite(
+              Number(greeks.gamma)
+            )
+              ? Number(greeks.gamma)
+              : null,
+
+          selectionScore: 0,
+        };
+
+        contract.selectionScore =
+          scoreOptionContractExact(
+            contract,
+            preferredStrike,
+            side
+          );
+
+        return contract;
+      })
+      .filter(
+        (contract) =>
+          contract.optionTicker &&
+          contract.strike > 0 &&
+          contract.mid >=
+            MIN_CONTRACT_PRICE &&
+          contract.mid <=
+            MAX_CONTRACT_PRICE
+      );
+
+  if (!normalized.length) {
+    return null;
+  }
+
+  normalized.sort(
+    (first, second) => {
+      if (
+        second.selectionScore !==
+        first.selectionScore
+      ) {
+        return (
+          second.selectionScore -
+          first.selectionScore
+        );
+      }
+
+      return (
+        Math.abs(
+          first.strike -
+          preferredStrike
+        ) -
+        Math.abs(
+          second.strike -
+          preferredStrike
+        )
+      );
+    }
+  );
+
+  return normalized[0];
+}
+
 export async function GET(
   request: NextRequest,
   context: RouteContext
@@ -1143,6 +1587,38 @@ export async function GET(
         radar
       );
 
+    let selectedContract:
+      BotDecisionContract |
+      null = null;
+
+    if (
+      decision.qualifies &&
+      ["CALL", "PUT"].includes(
+        decision.side
+      ) &&
+      decision.expiration &&
+      decision.strike
+    ) {
+      selectedContract =
+        await findBestOptionContractExact(
+          symbol,
+          decision.expiration,
+          decision.side as
+            "CALL" |
+            "PUT",
+          decision.strike
+        );
+
+      if (!selectedContract) {
+        decision.qualifies =
+          false;
+
+        decision.rejectionReasons.push(
+          `لا يوجد عقد داخل النطاق ${MIN_CONTRACT_PRICE} - ${MAX_CONTRACT_PRICE}`
+        );
+      }
+    }
+
     return NextResponse.json(
       {
         ok: true,
@@ -1161,6 +1637,8 @@ export async function GET(
         symbol,
 
         decision,
+
+        selectedContract,
 
         parsed: {
           gamma,
