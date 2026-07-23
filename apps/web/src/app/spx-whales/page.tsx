@@ -1916,9 +1916,15 @@ export default function SpxWhalesPage() {
                   </p>
 
                   <div className="mt-2 flex items-center gap-2">
-                    <h2 className="text-xl font-black text-white">
-                      Open Interest
-                    </h2>
+                    <div>
+                      <h2 className="text-xl font-black text-white">
+                        Open Interest
+                      </h2>
+
+                      <p className="mt-1 text-[11px] font-bold text-slate-500">
+                        آخر تحديث متاح
+                      </p>
+                    </div>
 
                     <span
                       role="button"
@@ -1992,6 +1998,10 @@ export default function SpxWhalesPage() {
                         "NEUTRAL"}
                     </span>
                   </div>
+
+                  <p className="mt-3 text-center text-[11px] font-bold leading-5 text-slate-500">
+                    بيانات OI تتحدث دوريًا وليست لحظية مثل السعر والحجم.
+                  </p>
 
                   <div className="grid gap-4 md:grid-cols-2">
                     <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/[0.05] p-4">
