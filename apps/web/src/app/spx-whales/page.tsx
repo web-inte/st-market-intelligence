@@ -824,12 +824,9 @@ export default function SpxWhalesPage() {
   ]);
 
   /*
-    تحديث سعر العقد — حلقة موحدة للجوال والكمبيوتر.
-
-    - لا توجد أكثر من حلقة تحديث.
-    - يبدأ الطلب التالي بعد انتهاء السابق.
-    - عند الرجوع للتبويب يحدث السعر فورًا.
-    - يعمل مع focus وpageshow وvisibilitychange وonline.
+    المسار الخفيف:
+    يحدث سعر العقد النشط فقط كل ثانية.
+    لا يعيد تحليل القاما أو Flow.
   */
   useEffect(() => {
     if (
@@ -839,109 +836,81 @@ export default function SpxWhalesPage() {
       return;
     }
 
-    let cancelled = false;
-
-    let pollTimer:
+    let timer:
       number | undefined;
 
-    let resumeTimer:
-      number | undefined;
-
-    const clearTimers = () => {
-      if (pollTimer !== undefined) {
-        window.clearTimeout(
-          pollTimer
-        );
-
-        pollTimer = undefined;
-      }
-
-      if (resumeTimer !== undefined) {
-        window.clearTimeout(
-          resumeTimer
-        );
-
-        resumeTimer = undefined;
-      }
-    };
-
-    const pollQuote = async () => {
-      if (
-        cancelled ||
-        document.hidden
-      ) {
+    const startQuotePolling = () => {
+      if (document.hidden) {
         return;
       }
 
-      await loadQuote();
+      void loadQuote();
 
-      if (
-        !cancelled &&
-        !document.hidden
-      ) {
-        pollTimer =
-          window.setTimeout(
-            () => void pollQuote(),
-            1_000
-          );
+      timer =
+        window.setInterval(
+          () => void loadQuote(),
+          1_000
+        );
+    };
+
+    const stopQuotePolling = () => {
+      if (timer !== undefined) {
+        window.clearInterval(timer);
+        timer = undefined;
       }
     };
 
-    /*
-      بعض متصفحات الكمبيوتر تطلق focus وpageshow
-      وvisibilitychange معًا عند الرجوع.
-
-      نستخدم تأخيرًا قصيرًا لتجميعها في إعادة تشغيل
-      واحدة فقط بدل إطلاق عدة طلبات متعارضة.
-    */
-    const restartPolling = () => {
-      if (
-        cancelled ||
-        document.hidden
-      ) {
+    const resumeQuotePolling = () => {
+      if (document.hidden) {
         return;
       }
 
-      clearTimers();
-
+      /*
+        عند الرجوع للصفحة على الجوال:
+        نحرر أي طلب قديم علِق أثناء تعليق Safari،
+        ثم نجلب السعر فورًا قبل إعادة المؤقت.
+      */
       quoteRequestRunning.current =
         false;
 
-      resumeTimer =
-        window.setTimeout(
-          () => void pollQuote(),
-          100
+      stopQuotePolling();
+
+      void loadQuote();
+
+      timer =
+        window.setInterval(
+          () => void loadQuote(),
+          1_000
         );
     };
 
     const handleVisibilityChange = () => {
       if (document.hidden) {
-        clearTimers();
+        stopQuotePolling();
         return;
       }
 
-      restartPolling();
+      resumeQuotePolling();
     };
 
-    const handleResume = () => {
-      restartPolling();
+    const handleWindowFocus = () => {
+      resumeQuotePolling();
     };
 
-    restartPolling();
+    const handlePageShow = () => {
+      resumeQuotePolling();
+    };
+
+    startQuotePolling();
 
     window.addEventListener(
       "focus",
-      handleResume
+      handleWindowFocus
     );
 
     window.addEventListener(
       "pageshow",
-      handleResume
-    );
-
-    window.addEventListener(
-      "online",
-      handleResume
+      handlePageShow
     );
 
     document.addEventListener(
@@ -950,23 +919,16 @@ export default function SpxWhalesPage() {
     );
 
     return () => {
-      cancelled = true;
-
-      clearTimers();
+      stopQuotePolling();
 
       window.removeEventListener(
         "focus",
-        handleResume
+        handleWindowFocus
       );
 
       window.removeEventListener(
         "pageshow",
-        handleResume
-      );
-
-      window.removeEventListener(
-        "online",
-        handleResume
+        handlePageShow
       );
 
       document.removeEventListener(
@@ -978,6 +940,116 @@ export default function SpxWhalesPage() {
     hasTrackedTrade,
     loadQuote,
     regularSessionOpen,
+  ]);
+
+  /*
+    استئناف قوي للتحديث عند الرجوع للصفحة:
+
+    بعض متصفحات الكمبيوتر توقف المؤقتات عند
+    الانتقال إلى تبويب آخر أو تصغير النافذة.
+
+    لذلك نحدث الجلسة والتحليل وسعر العقد فورًا
+    عند العودة، بدون انتظار المؤقت الدوري.
+  */
+  useEffect(() => {
+    let resumeRunning = false;
+
+    const resumeAllUpdates =
+      async () => {
+        if (
+          document.hidden ||
+          resumeRunning
+        ) {
+          return;
+        }
+
+        resumeRunning = true;
+
+        /*
+          تحرير مانع الطلب في حال علّق المتصفح
+          الطلب السابق أثناء وجود الصفحة بالخلفية.
+        */
+        quoteRequestRunning.current =
+          false;
+
+        try {
+          /*
+            يحدث marketSession أولًا حتى لا تبقى
+            regularSessionOpen على قيمة قديمة.
+          */
+          await load(false);
+
+          if (hasTrackedTrade) {
+            await loadQuote();
+          }
+        } finally {
+          resumeRunning = false;
+        }
+      };
+
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        void resumeAllUpdates();
+      }
+    };
+
+    const handleFocus = () => {
+      void resumeAllUpdates();
+    };
+
+    const handlePageShow = () => {
+      void resumeAllUpdates();
+    };
+
+    const handleOnline = () => {
+      void resumeAllUpdates();
+    };
+
+    window.addEventListener(
+      "focus",
+      handleFocus
+    );
+
+    window.addEventListener(
+      "pageshow",
+      handlePageShow
+    );
+
+    window.addEventListener(
+      "online",
+      handleOnline
+    );
+
+    document.addEventListener(
+      "visibilitychange",
+      handleVisibilityChange
+    );
+
+    return () => {
+      window.removeEventListener(
+        "focus",
+        handleFocus
+      );
+
+      window.removeEventListener(
+        "pageshow",
+        handlePageShow
+      );
+
+      window.removeEventListener(
+        "online",
+        handleOnline
+      );
+
+      document.removeEventListener(
+        "visibilitychange",
+        handleVisibilityChange
+      );
+    };
+  }, [
+    hasTrackedTrade,
+    load,
+    loadQuote,
   ]);
 
   const signal =
