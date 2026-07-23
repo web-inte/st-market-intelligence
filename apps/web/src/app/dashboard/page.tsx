@@ -574,7 +574,7 @@ export default function Home() {
 
           البحث اليدوي عن أي رمز لا يتأثر بهذا الحد.
         */
-        const DASHBOARD_SCAN_LIMIT = 0;
+        const DASHBOARD_SCAN_LIMIT = 10;
         const BATCH_SIZE = 2;
         const BATCH_DELAY_MS = 1_500;
 
