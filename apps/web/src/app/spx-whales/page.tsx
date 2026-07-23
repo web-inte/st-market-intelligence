@@ -607,6 +607,13 @@ export default function SpxWhalesPage() {
   const [error, setError] =
     useState("");
 
+  /*
+    آخر تحديث حي للعقد منفصل عن نتيجة التحليل الكامل،
+    حتى لا يعيد طلب التحليل كتابة السعر بقيمة أقدم.
+  */
+  const [liveTrade, setLiveTrade] =
+    useState<SpxTrade | null>(null);
+
   const [openInterestOpen, setOpenInterestOpen] =
     useState(false);
 
@@ -711,6 +718,12 @@ export default function SpxWhalesPage() {
         if (!updatedTrade) {
           return;
         }
+
+        /*
+          هذا هو المصدر المباشر لعرض سعر العقد.
+          يبقى مستقلًا عن تحديث التحليل الكامل.
+        */
+        setLiveTrade(updatedTrade);
 
         setData((current) => {
           if (!current) {
@@ -960,7 +973,7 @@ export default function SpxWhalesPage() {
   const trades =
     data?.trades || [];
 
-  const activeTrade =
+  const storedActiveTrade =
     data?.activeTrade ||
     trades.find(
       (trade) =>
@@ -968,6 +981,43 @@ export default function SpxWhalesPage() {
         trade.status === "WATCH"
     ) ||
     null;
+
+  /*
+    بيانات quote الحية لها الأولوية في العرض،
+    بينما تبقى بقية معلومات الصفقة من التحليل الكامل.
+  */
+  const activeTrade =
+    storedActiveTrade &&
+    liveTrade?.id === storedActiveTrade.id
+      ? {
+          ...storedActiveTrade,
+          ...liveTrade,
+        }
+      : storedActiveTrade;
+
+  useEffect(() => {
+    if (
+      !liveTrade ||
+      !storedActiveTrade ||
+      liveTrade.id !== storedActiveTrade.id
+    ) {
+      if (liveTrade && !storedActiveTrade) {
+        setLiveTrade(null);
+      }
+
+      return;
+    }
+
+    if (
+      storedActiveTrade.status !== "ACTIVE" &&
+      storedActiveTrade.status !== "WATCH"
+    ) {
+      setLiveTrade(null);
+    }
+  }, [
+    liveTrade,
+    storedActiveTrade,
+  ]);
 
   const stoppedTrades =
     trades.filter(
