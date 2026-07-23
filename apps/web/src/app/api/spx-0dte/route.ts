@@ -929,6 +929,17 @@ export async function GET() {
       Array.from(
         callOiByStrike.entries()
       )
+        /*
+          مستويات OI المعروضة فقط:
+          نعرض المستويات الواقعة ضمن 150 نقطة
+          من سعر SPX الحالي لتجنب المستويات البعيدة.
+        */
+        .filter(
+          ([strike]) =>
+            Math.abs(
+              strike - stockPrice
+            ) <= 150
+        )
         .map(
           ([strike, openInterest]) => ({
             strike: round(strike),
@@ -959,6 +970,17 @@ export async function GET() {
       Array.from(
         putOiByStrike.entries()
       )
+        /*
+          مستويات OI المعروضة فقط:
+          نعرض المستويات الواقعة ضمن 150 نقطة
+          من سعر SPX الحالي لتجنب المستويات البعيدة.
+        */
+        .filter(
+          ([strike]) =>
+            Math.abs(
+              strike - stockPrice
+            ) <= 150
+        )
         .map(
           ([strike, openInterest]) => ({
             strike: round(strike),
