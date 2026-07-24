@@ -619,10 +619,22 @@ export default function Home() {
         await response.json();
 
       if (!response.ok) {
-        throw new Error(
+        const rawError =
           payload?.details ||
           payload?.error ||
-          "تعذر تشغيل الفحص"
+          "تعذر تشغيل الفحص";
+
+        const readableError =
+          typeof rawError === "string"
+            ? rawError
+            : JSON.stringify(
+                rawError,
+                null,
+                2
+              );
+
+        throw new Error(
+          readableError
         );
       }
 

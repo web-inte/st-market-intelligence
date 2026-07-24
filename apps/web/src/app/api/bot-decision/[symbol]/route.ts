@@ -2006,11 +2006,23 @@ async function saveBotDecisionWatchingSetup({
     insertError ||
     !insertedSetup
   ) {
-    throw (
-      insertError ||
-      new Error(
-        "تعذر حفظ فرصة المراقبة"
-      )
+    if (insertError) {
+      const errorParts = [
+        insertError.message,
+        insertError.details,
+        insertError.hint,
+        insertError.code,
+      ].filter(Boolean);
+
+      throw new Error(
+        errorParts.length > 0
+          ? errorParts.join(" | ")
+          : "تعذر حفظ فرصة المراقبة"
+      );
+    }
+
+    throw new Error(
+      "تعذر حفظ فرصة المراقبة"
     );
   }
 
