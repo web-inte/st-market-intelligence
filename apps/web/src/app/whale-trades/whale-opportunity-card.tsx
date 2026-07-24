@@ -147,6 +147,71 @@ function getExecutionLabel(
   }
 }
 
+function getFlowTypeLabel(
+  trade: WhaleOpportunity,
+) {
+  if (trade.is_sweep) {
+    return "تنفيذ سريع ومتجزئ";
+  }
+
+  if (trade.is_block) {
+    return "صفقة مجمعة";
+  }
+
+  return "غير مصنف";
+}
+
+function getExecutionSideLabel(
+  value?: string | null,
+) {
+  const normalized = String(
+    value || "",
+  )
+    .trim()
+    .toUpperCase();
+
+  switch (normalized) {
+    case "BUY":
+      return "شراء";
+
+    case "SELL":
+      return "بيع";
+
+    default:
+      return "غير محسوم";
+  }
+}
+
+function getExecutionLocationLabel(
+  value?: string | null,
+) {
+  const normalized = String(
+    value || "",
+  )
+    .trim()
+    .toUpperCase();
+
+  switch (normalized) {
+    case "ASK":
+    case "AT_ASK":
+    case "ABOVE_ASK":
+      return "عند سعر الطلب";
+
+    case "BID":
+    case "AT_BID":
+    case "BELOW_BID":
+      return "عند سعر العرض";
+
+    case "MID":
+    case "BETWEEN":
+    case "BETWEEN_BID_ASK":
+      return "بين العرض والطلب";
+
+    default:
+      return "غير مصنف";
+  }
+}
+
 function getMarketBiasLabel(
   value?: string | null,
 ) {
@@ -506,11 +571,9 @@ export default function WhaleOpportunityCard({
                 </p>
 
                 <p className="mt-1 font-black">
-                  {trade.is_sweep
-                    ? "SWEEP"
-                    : trade.is_block
-                      ? "BLOCK"
-                      : "—"}
+                  {getFlowTypeLabel(
+                    trade,
+                  )}
                 </p>
               </div>
 
@@ -520,9 +583,9 @@ export default function WhaleOpportunityCard({
                 </p>
 
                 <p className="mt-1 font-black">
-                  {String(
-                    trade.estimated_side || "—",
-                  ).toUpperCase()}
+                  {getExecutionSideLabel(
+                    trade.estimated_side,
+                  )}
                 </p>
               </div>
 
@@ -532,9 +595,9 @@ export default function WhaleOpportunityCard({
                 </p>
 
                 <p className="mt-1 font-black">
-                  {String(
-                    trade.execution_location || "—",
-                  ).toUpperCase()}
+                  {getExecutionLocationLabel(
+                    trade.execution_location,
+                  )}
                 </p>
               </div>
 
