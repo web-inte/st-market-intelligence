@@ -28,6 +28,11 @@ export type WhaleOpportunity = {
 
   execution_location?: string | null;
   estimated_side?: string | null;
+  execution_confidence?: NumericValue;
+  market_bias?: string | null;
+  classification?: string | null;
+  execution_reason?: string | null;
+  sweep_count?: NumericValue;
 
   delta?: NumericValue;
   gamma?: NumericValue;
@@ -455,6 +460,110 @@ export default function WhaleOpportunityCard({
           </summary>
 
           <div className="border-t border-white/10 p-4">
+            <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <div className="rounded-xl border border-cyan-400/20 bg-cyan-400/[0.05] p-3">
+                <p className="text-xs text-slate-500">
+                  السترايك الأقوى
+                </p>
+
+                <p className="mt-1 font-black text-cyan-300">
+                  {formatNumber(
+                    trade.strike,
+                    0,
+                  )}
+                </p>
+              </div>
+
+              <div className="rounded-xl bg-white/[0.035] p-3">
+                <p className="text-xs text-slate-500">
+                  نوع النشاط
+                </p>
+
+                <p className="mt-1 font-black">
+                  {trade.is_sweep
+                    ? "SWEEP"
+                    : trade.is_block
+                      ? "BLOCK"
+                      : "—"}
+                </p>
+              </div>
+
+              <div className="rounded-xl bg-white/[0.035] p-3">
+                <p className="text-xs text-slate-500">
+                  جهة التنفيذ
+                </p>
+
+                <p className="mt-1 font-black">
+                  {String(
+                    trade.estimated_side || "—",
+                  ).toUpperCase()}
+                </p>
+              </div>
+
+              <div className="rounded-xl bg-white/[0.035] p-3">
+                <p className="text-xs text-slate-500">
+                  موضع التنفيذ
+                </p>
+
+                <p className="mt-1 font-black">
+                  {String(
+                    trade.execution_location || "—",
+                  ).toUpperCase()}
+                </p>
+              </div>
+
+              <div className="rounded-xl bg-white/[0.035] p-3">
+                <p className="text-xs text-slate-500">
+                  اتجاه الصفقة
+                </p>
+
+                <p className="mt-1 font-black">
+                  {String(
+                    trade.market_bias || "—",
+                  ).toUpperCase()}
+                </p>
+              </div>
+
+              <div className="rounded-xl bg-white/[0.035] p-3">
+                <p className="text-xs text-slate-500">
+                  ثقة تحديد الجهة
+                </p>
+
+                <p className="mt-1 font-black">
+                  {formatNumber(
+                    trade.execution_confidence,
+                    0,
+                  )}%
+                </p>
+              </div>
+
+              <div className="rounded-xl bg-white/[0.035] p-3">
+                <p className="text-xs text-slate-500">
+                  عدد التنفيذات
+                </p>
+
+                <p className="mt-1 font-black">
+                  {formatInteger(
+                    trade.sweep_count ||
+                    trade.repeat_count,
+                  )}
+                </p>
+              </div>
+
+              <div className="rounded-xl bg-white/[0.035] p-3">
+                <p className="text-xs text-slate-500">
+                  تقييم الحوت
+                </p>
+
+                <p className="mt-1 font-black text-cyan-300">
+                  {formatNumber(
+                    trade.whale_score,
+                    0,
+                  )}%
+                </p>
+              </div>
+            </div>
+
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               <div className="rounded-xl bg-white/[0.035] p-3">
                 <p className="text-xs text-slate-500">
@@ -494,7 +603,20 @@ export default function WhaleOpportunityCard({
 
               <div className="rounded-xl bg-white/[0.035] p-3">
                 <p className="text-xs text-slate-500">
-                  سعر العقد المرصود
+                  سعر السهم
+                </p>
+
+                <p className="mt-1 font-black">
+                  $
+                  {formatNumber(
+                    trade.stock_price,
+                  )}
+                </p>
+              </div>
+
+              <div className="rounded-xl bg-white/[0.035] p-3">
+                <p className="text-xs text-slate-500">
+                  سعر العقد
                 </p>
 
                 <p className="mt-1 font-black">
