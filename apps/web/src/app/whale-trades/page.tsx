@@ -400,10 +400,51 @@ async function getWhaleTrades(): Promise<WhaleTrade[]> {
       );
 
     return whaleTrades.filter(
-      (trade) =>
-        eligibleTradeIds.has(
-          String(trade.id),
-        ),
+      (trade) => {
+        const tradeId =
+          String(trade.id);
+
+        /*
+         * صفقات النظام القديم تستمر بالاعتماد
+         * على وجود Setup مؤهل.
+         */
+        const hasEligibleSetup =
+          eligibleTradeIds.has(
+            tradeId,
+          );
+
+        /*
+         * فرص V2 المؤسسية تظهر مباشرة لأنها
+         * اجتازت أصلًا:
+         * Sweep/Block + ASK + Opening + Score.
+         */
+        const score =
+          safeNumber(
+            trade.whale_score,
+          );
+
+        const isInstitutionalV2 =
+          Boolean(
+            trade.is_sweep ||
+            trade.is_block,
+          ) &&
+          String(
+            trade.estimated_side ||
+            "",
+          ).toUpperCase() ===
+            "BUY" &&
+          String(
+            trade.execution_location ||
+            "",
+          ).toUpperCase() ===
+            "ASK" &&
+          score >= 75;
+
+        return (
+          hasEligibleSetup ||
+          isInstitutionalV2
+        );
+      },
     );
   } catch (error) {
     console.error("Whale trades request failed:", error);
