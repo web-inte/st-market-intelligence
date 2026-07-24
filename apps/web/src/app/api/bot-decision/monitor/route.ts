@@ -858,6 +858,52 @@ export async function GET(
       const row =
         asRecord(rawRow);
 
+      const gammaSnapshot =
+        asRecord(
+          row.gamma_snapshot
+        );
+
+      const setupEngine =
+        String(
+          gammaSnapshot.engine ||
+          gammaSnapshot.source ||
+          ""
+        ).toUpperCase();
+
+      /*
+        سجلات المحرك الثالث يديرها بوت القرار وحده:
+        - BOT_DECISION: السجلات القديمة
+        - ST_DECISION_BOT: المزامنة الجديدة
+
+        لا يراقبها هذا المسار ولا يفعّلها.
+        بقية المحركات تستمر دون تغيير.
+      */
+      if (
+        [
+          "BOT_DECISION",
+          "ST_DECISION_BOT",
+        ].includes(
+          setupEngine
+        )
+      ) {
+        results.push({
+          id:
+            String(
+              row.id || ""
+            ),
+          symbol:
+            String(
+              row.symbol || ""
+            ).toUpperCase(),
+          status:
+            "تحت إدارة بوت القرار",
+          engine:
+            setupEngine,
+        });
+
+        continue;
+      }
+
       const id =
         String(
           row.id || ""

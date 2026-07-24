@@ -2098,8 +2098,20 @@ export async function GET(
       ? "AUTO"
       : "MANUAL";
 
+  const manualSaveRequested =
+    request.nextUrl
+      .searchParams
+      .get("save") ===
+    "1";
+
+  /*
+    الفحص اليدوي الأول صامت.
+    طلب الحفظ اليدوي يبقى غير صامت مؤقتًا
+    حتى يرسل إلى تيليجرام كما كان سابقًا.
+  */
   const silentBotReports =
-    mode === "MANUAL";
+    mode === "MANUAL" &&
+    !manualSaveRequested;
 
   try {
     const [
@@ -2167,15 +2179,15 @@ export async function GET(
         : "MANUAL";
 
     /*
-      الفحص التلقائي يحفظ فرصة المراقبة تلقائيًا.
-      البحث اليدوي لا يحفظ إلا عند إرسال save=1.
+      تم تعطيل إنشاء WATCHING من محرك الموقع الثالث القديم.
+
+      بوت القرار الخارجي ST Decision هو المصدر الوحيد
+      لإنشاء WATCHING وتحويلها إلى ACTIVE للمحرك الثالث.
+
+      لا يؤثر هذا على المحرك الأول أو المحرك الثاني.
     */
     const shouldSaveWatching =
-      mode === "AUTO" ||
-      request.nextUrl
-        .searchParams
-        .get("save") ===
-        "1";
+      false;
 
     let selectedContract:
       BotDecisionContract |
