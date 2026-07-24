@@ -6,11 +6,9 @@ import {
   type AnalysisTradePlan,
 } from "../../../../lib/analysis-engine";
 import {
-  syncAnalysisTradePlan,
 } from "../../../../lib/analysis-trade-plan";
 import {
   evaluateDecisionActiveTrade,
-  syncDecisionActiveTrade,
 } from "../../../../lib/decision-active-trade-engine";
 import { getOrSetCache } from "../../../../lib/market-cache";
 
@@ -1565,12 +1563,7 @@ export async function GET(
       null;
 
     try {
-      tradePlan =
-        await syncAnalysisTradePlan(
-          typedAnalysis,
-          marketAnalysis.decision.side,
-          marketAnalysis.decision.score
-        );
+      tradePlan = null;
     } catch (tradePlanError) {
       console.error(
         `Trade plan sync failed for ${cleanSymbol}:`,
@@ -1589,11 +1582,7 @@ export async function GET(
       decisionEnginePreview.qualifies
     ) {
       try {
-        decisionTrade =
-          await syncDecisionActiveTrade(
-            typedAnalysis,
-            decisionEnginePreview
-          );
+        decisionTrade = null;
       } catch (
         decisionTradeError
       ) {

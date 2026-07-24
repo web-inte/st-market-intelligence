@@ -219,35 +219,10 @@ jobs:
 
             response_file="/tmp/${symbol}.json"
 
-            echo "المحركان الأول والثاني: ${symbol}"
-
-            http_code=$(
-              curl \
-                --silent \
-                --show-error \
-                --location \
-                --connect-timeout 8 \
-                --max-time 240 \
-                --output "${response_file}" \
-                --write-out "%{http_code}" \
-                --header "Authorization: Bearer ${DECISION_SCAN_SECRET}" \
-                "${BASE_URL}/api/analysis/${symbol}" \
-                || printf "000"
-            )
-
-            http_code="${http_code: -3}"
-
             symbol_failed=0
 
-            if [ "${http_code}" = "200" ]; then
-              echo "✅ ${symbol} — المحركان الأول والثاني"
-            else
-              echo "⚠️ ${symbol} — المحركان الأول والثاني: HTTP ${http_code}"
-              head -c 500 "${response_file}" 2>/dev/null || true
-              echo
-              symbol_failed=1
-            fi
-
+            # تم إيقاف المحركين A و D.
+            # يعمل محرك C فقط من خلال Bot Decision.
             if [ "${round_number}" = "${bot_engine_round}" ]; then
               echo "محرك قرار البوتات: ${symbol}"
 
