@@ -18,6 +18,7 @@ import {
   type Opportunity,
   type Side,
 } from "../../lib/analysis-engine";
+import DecisionScannerControl from "../admin/DecisionScannerControl";
 
 const WATCHLIST = [
   "AMZN",
@@ -533,6 +534,11 @@ export default function Home() {
 
   const [isAdmin, setIsAdmin] =
     useState(false);
+
+  const [
+    decisionScannerOpen,
+    setDecisionScannerOpen,
+  ] = useState(false);
 
   const [adminCheckLoading, setAdminCheckLoading] =
     useState(true);
@@ -1228,7 +1234,51 @@ ${url}`);
             >
               الاشتراكات
             </Link>
+
+            {!adminCheckLoading && isAdmin ? (
+              <button
+                type="button"
+                onClick={() =>
+                  setDecisionScannerOpen(true)
+                }
+                className="inline-flex min-h-12 items-center justify-center rounded-2xl border border-violet-400/30 bg-slate-950/95 px-4 py-3 text-sm font-black text-violet-300 shadow-xl shadow-black/30 backdrop-blur-xl transition hover:border-violet-300 hover:bg-violet-400/10"
+              >
+                بحث القرار
+              </button>
+            ) : null}
           </div>
+
+          {!adminCheckLoading &&
+          isAdmin &&
+          decisionScannerOpen ? (
+            <div
+              dir="rtl"
+              className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-md"
+              onClick={() =>
+                setDecisionScannerOpen(false)
+              }
+            >
+              <div
+                className="relative max-h-[90vh] w-full max-w-3xl overflow-y-auto"
+                onClick={(event) =>
+                  event.stopPropagation()
+                }
+              >
+                <button
+                  type="button"
+                  onClick={() =>
+                    setDecisionScannerOpen(false)
+                  }
+                  className="absolute left-4 top-4 z-10 flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-slate-950 text-xl font-black text-slate-300 transition hover:border-rose-400/40 hover:text-rose-300"
+                  aria-label="إغلاق"
+                >
+                  ×
+                </button>
+
+                <DecisionScannerControl />
+              </div>
+            </div>
+          ) : null}
 
           <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-cyan-400/15 bg-cyan-400/[0.06] px-4 py-2 text-xs font-medium text-cyan-300 backdrop-blur">
             <span className="h-1.5 w-1.5 rounded-full bg-cyan-300" />
