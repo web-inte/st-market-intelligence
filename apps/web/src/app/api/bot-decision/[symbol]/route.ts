@@ -185,6 +185,7 @@ async function requestBotReport({
   secret,
   path,
   symbol,
+  silent = false,
 }: {
   name: string;
   baseUrl:
@@ -195,6 +196,7 @@ async function requestBotReport({
     | undefined;
   path: string;
   symbol: string;
+  silent?: boolean;
 }) {
   if (!baseUrl) {
     throw new Error(
@@ -224,6 +226,13 @@ async function requestBotReport({
     "symbol",
     symbol
   );
+
+  if (silent) {
+    url.searchParams.set(
+      "silent",
+      "1"
+    );
+  }
 
   const response =
     await fetch(
@@ -2081,6 +2090,17 @@ export async function GET(
   const startedAt =
     Date.now();
 
+  const mode =
+    request.nextUrl
+      .searchParams
+      .get("mode") ===
+    "auto"
+      ? "AUTO"
+      : "MANUAL";
+
+  const silentBotReports =
+    mode === "MANUAL";
+
   try {
     const [
       gammaReport,
@@ -2098,6 +2118,8 @@ export async function GET(
         path:
           "/api/gamma",
         symbol,
+        silent:
+          silentBotReports,
       }),
 
       requestBotReport({
@@ -2112,6 +2134,8 @@ export async function GET(
         path:
           "/api/radar",
         symbol,
+        silent:
+          silentBotReports,
       }),
     ]);
 
