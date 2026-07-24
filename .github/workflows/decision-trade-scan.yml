@@ -321,7 +321,6 @@ jobs:
                   watching.get("message", "لا توجد")
               )
           PYBOT
-                PYBOT
               else
                 echo "⚠️ ${symbol} — محرك قرار البوتات: HTTP ${bot_http_code}"
                 head -c 700 "${bot_response_file}" 2>/dev/null || true
@@ -398,7 +397,6 @@ jobs:
                   f"فشل: {data.get('failed', 0)}"
               )
           PYMONITOR
-            PYMONITOR
           else
             echo "⚠️ فشل مسار المتابعة: HTTP ${monitor_code}"
             head -c 700 "${monitor_file}" 2>/dev/null || true
