@@ -2015,6 +2015,12 @@ export async function GET(
   const institutionalV2Results:
     InstitutionalFlowResult[] = [];
 
+  /*
+   * نتائج V2 المؤهلة للحفظ والعرض في صفحة صفقات الحيتان.
+   */
+  const institutionalV2Rows:
+    WhaleTradeRow[] = [];
+
   const institutionalV2Stats = {
     contractsAnalyzed: 0,
     sweepsDetected: 0,
@@ -2249,6 +2255,200 @@ export async function GET(
                     institutionalV2Stats
                       .qualifiedScore75++;
                   }
+
+                  /*
+                   * شروط العرض الجديدة:
+                   * Sweep أو Block عند ASK
+                   * مع فتح مركز مرجح
+                   * وتقييم 75 فأعلى.
+                   */
+                  if (
+                    result.score >= 75 &&
+                    result.executionSide ===
+                      "ASK" &&
+                    result.openingStatus !==
+                      "UNCLEAR"
+                  ) {
+                    const contractType =
+                      contract.details
+                        ?.contract_type ||
+                      "call";
+
+                    const strike =
+                      safeNumber(
+                        contract.details
+                          ?.strike_price
+                      );
+
+                    const expiration =
+                      contract.details
+                        ?.expiration_date ||
+                      "";
+
+                    const stockPrice =
+                      safeNumber(
+                        contract
+                          .underlying_asset
+                          ?.price
+                      );
+
+                    const volume =
+                      safeNumber(
+                        contract.day?.volume
+                      );
+
+                    const openInterest =
+                      safeNumber(
+                        contract.open_interest
+                      );
+
+                    const delta =
+                      safeNumber(
+                        contract.greeks?.delta
+                      );
+
+                    const gamma =
+                      safeNumber(
+                        contract.greeks?.gamma
+                      );
+
+                    const theta =
+                      safeNumber(
+                        contract.greeks?.theta
+                      );
+
+                    const vega =
+                      safeNumber(
+                        contract.greeks?.vega
+                      );
+
+                    const iv =
+                      safeNumber(
+                        contract
+                          .implied_volatility
+                      );
+
+                    const moneyPosition =
+                      getMoneyPosition(
+                        contractType,
+                        strike,
+                        stockPrice
+                      );
+
+                    const directionStatus =
+                      getDirectionStatus(
+                        contractType,
+                        delta,
+                        gamma
+                      );
+
+                    const gammaStatus =
+                      getGammaStatus(
+                        gamma
+                      );
+
+                    const activityLabel =
+                      result.activityType ===
+                      "SWEEP"
+                        ? "Sweep مؤسسي"
+                        : "Block مؤسسي";
+
+                    const openingLabel =
+                      result.openingStatus ===
+                      "STRONG_OPENING_LIKELY"
+                        ? "فتح مركز مرجح بقوة"
+                        : "فتح مركز مرجح";
+
+                    institutionalV2Rows.push({
+                      symbol,
+                      option_ticker:
+                        optionTicker,
+                      contract_type:
+                        contractType,
+                      strike,
+                      expiration,
+
+                      stock_price:
+                        stockPrice,
+                      contract_price:
+                        result.averagePrice,
+
+                      premium_value:
+                        result.totalPremium,
+                      volume,
+                      open_interest:
+                        openInterest,
+                      volume_change:
+                        result.totalSize,
+
+                      bid,
+                      ask,
+                      spread_pct:
+                        spreadPct,
+
+                      trade_price:
+                        result.averagePrice,
+
+                      execution_side:
+                        "BUY",
+                      execution_confidence:
+                        100,
+                      execution_position_pct:
+                        100,
+
+                      market_bias:
+                        contractType === "call"
+                          ? "BULLISH"
+                          : "BEARISH",
+
+                      execution_reason:
+                        `${activityLabel} عند Ask`,
+
+                      delta,
+                      gamma,
+                      theta,
+                      vega,
+                      iv,
+
+                      whale_score:
+                        result.score,
+
+                      classification:
+                        `${activityLabel} — ${openingLabel}`,
+
+                      money_position:
+                        moneyPosition,
+                      direction_status:
+                        directionStatus,
+                      gamma_status:
+                        gammaStatus,
+
+                      reason:
+                        [
+                          activityLabel,
+                          "التنفيذ عند Ask",
+                          openingLabel,
+                          `القيمة المجمعة $${Math.round(
+                            result.totalPremium
+                          ).toLocaleString(
+                            "en-US"
+                          )}`,
+                          `الكمية ${Math.round(
+                            result.totalSize
+                          ).toLocaleString(
+                            "en-US"
+                          )}`,
+                          `عدد التنفيذات ${result.tradeCount}`,
+                          `التقييم ${result.score}%`,
+                          ...result.reasons,
+                        ].join(" • "),
+
+                      last_seen_at:
+                        new Date()
+                          .toISOString(),
+                      is_active: true,
+                    });
+                  }
                 }
               }
 
@@ -2298,12 +2498,18 @@ export async function GET(
     }
   }
 
+  /*
+   * الإنتاج الآن يعتمد على V2 فقط.
+   * نتائج V1 لا يتم حفظها أو عرضها.
+   */
   const uniqueRows = Array.from(
     new Map(
-      detectedRows.map((row) => [
-        row.option_ticker,
-        row,
-      ])
+      institutionalV2Rows.map(
+        (row) => [
+          row.option_ticker,
+          row,
+        ]
+      )
     ).values()
   )
     .sort(
@@ -2343,8 +2549,8 @@ export async function GET(
     rejectionStats: whaleRejectStats,
 
     /*
-     * تشخيص محرك النشاط المؤسسي V2.
-     * لا تمثل هذه النتائج صفقات محفوظة أو ظاهرة للمستخدم.
+     * محرك النشاط المؤسسي V2.
+     * النتائج المؤهلة منه تُحفظ وتظهر في صفحة صفقات الحيتان.
      */
     institutionalV2: {
       stats: institutionalV2Stats,
