@@ -162,23 +162,26 @@ function getFlowTypeLabel(
 }
 
 function getExecutionSideLabel(
-  value?: string | null,
+  trade: WhaleOpportunity,
 ) {
   const normalized = String(
-    value || "",
+    trade.estimated_side || "",
   )
     .trim()
     .toUpperCase();
 
+  const contractType =
+    getContractType(trade).toUpperCase();
+
   switch (normalized) {
     case "BUY":
-      return "شراء";
+      return `شراء عقد ${contractType}`;
 
     case "SELL":
-      return "بيع";
+      return `بيع عقد ${contractType}`;
 
     default:
-      return "غير محسوم";
+      return "عملية العقد غير محسومة";
   }
 }
 
@@ -579,13 +582,17 @@ export default function WhaleOpportunityCard({
 
               <div className="rounded-xl bg-white/[0.035] p-3">
                 <p className="text-xs text-slate-500">
-                  جهة التنفيذ
+                  عملية العقد
                 </p>
 
                 <p className="mt-1 font-black">
                   {getExecutionSideLabel(
-                    trade.estimated_side,
+                    trade,
                   )}
+                </p>
+
+                <p className="mt-1 text-[10px] leading-5 text-slate-500">
+                  المقصود شراء أو بيع العقد، وليس اتجاه السهم.
                 </p>
               </div>
 
