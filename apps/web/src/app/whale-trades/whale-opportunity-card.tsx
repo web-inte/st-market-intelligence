@@ -151,11 +151,11 @@ function getFlowTypeLabel(
   trade: WhaleOpportunity,
 ) {
   if (trade.is_sweep) {
-    return "تنفيذ سريع ومتجزئ";
+    return "تنفيذ سريع ومتجزئ — SWEEP";
   }
 
   if (trade.is_block) {
-    return "صفقة مجمعة";
+    return "صفقة مجمعة — BLOCK";
   }
 
   return "غير مصنف";
