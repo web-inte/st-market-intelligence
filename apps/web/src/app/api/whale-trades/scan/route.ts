@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import {
+  detectInstitutionalFlow,
+  type InstitutionalFlowResult,
+  type InstitutionalTrade,
+} from "@/lib/institutional-flow-engine";
+
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
@@ -127,6 +133,7 @@ type MassiveOptionTrade = {
   sip_timestamp?: number | string;
   sequence_number?: number;
   conditions?: number[];
+  exchange?: number;
 };
 
 type MassiveTradesResponse = {
@@ -1842,6 +1849,23 @@ export async function GET(
   const detectedRows: WhaleTradeRow[] =
     [];
 
+  /*
+   * نتائج محرك النشاط المؤسسي V2.
+   * تشخيصية فقط ولا يتم حفظها في قاعدة البيانات.
+   */
+  const institutionalV2Results:
+    InstitutionalFlowResult[] = [];
+
+  const institutionalV2Stats = {
+    contractsAnalyzed: 0,
+    sweepsDetected: 0,
+    blocksDetected: 0,
+    askSideDetected: 0,
+    openingLikelyDetected: 0,
+    qualifiedScore65: 0,
+    qualifiedScore75: 0,
+  };
+
   const failures: Array<{
     symbol: string;
     error: string;
@@ -1887,6 +1911,168 @@ export async function GET(
                 whaleRejectStats.tradeResponsesWithResults++;
               } else {
                 whaleRejectStats.tradeResponsesEmpty++;
+              }
+
+              /*
+               * تشغيل V2 للتشخيص فقط.
+               * لا يحفظ أي فرصة ولا يغيّر نتائج المحرك الحالي.
+               */
+              const institutionalTrades:
+                InstitutionalTrade[] = [];
+
+              for (const trade of trades) {
+                const price =
+                  safeNumber(
+                    trade.price
+                  );
+
+                const size =
+                  safeNumber(
+                    trade.size
+                  );
+
+                const rawTimestamp =
+                  trade.sip_timestamp;
+
+                if (
+                  price <= 0 ||
+                  size <= 0 ||
+                  rawTimestamp ===
+                    undefined ||
+                  rawTimestamp === null
+                ) {
+                  continue;
+                }
+
+                try {
+                  institutionalTrades.push({
+                    price,
+                    size,
+                    timestampNs:
+                      BigInt(
+                        String(
+                          rawTimestamp
+                        )
+                      ),
+                    exchange:
+                      Number.isFinite(
+                        Number(
+                          trade.exchange
+                        )
+                      )
+                        ? Number(
+                            trade.exchange
+                          )
+                        : undefined,
+                  });
+                } catch {
+                  continue;
+                }
+              }
+
+              if (
+                institutionalTrades.length >
+                0
+              ) {
+                const bid =
+                  safeNumber(
+                    contract.last_quote?.bid
+                  );
+
+                const ask =
+                  safeNumber(
+                    contract.last_quote?.ask
+                  );
+
+                const spreadPct =
+                  calculateSpreadPct(
+                    bid,
+                    ask
+                  );
+
+                const v2Results =
+                  detectInstitutionalFlow(
+                    institutionalTrades,
+                    {
+                      optionTicker,
+                      contractType:
+                        contract.details
+                          ?.contract_type ||
+                        "call",
+                      bid,
+                      ask,
+                      dayVolume:
+                        safeNumber(
+                          contract.day?.volume
+                        ),
+                      openInterest:
+                        safeNumber(
+                          contract.open_interest
+                        ),
+                      gamma:
+                        safeNumber(
+                          contract.greeks?.gamma
+                        ),
+                      spreadPct,
+                    }
+                  );
+
+                institutionalV2Stats
+                  .contractsAnalyzed++;
+
+                for (
+                  const result of v2Results
+                ) {
+                  institutionalV2Results.push(
+                    result
+                  );
+
+                  if (
+                    result.activityType ===
+                    "SWEEP"
+                  ) {
+                    institutionalV2Stats
+                      .sweepsDetected++;
+                  }
+
+                  if (
+                    result.activityType ===
+                    "BLOCK"
+                  ) {
+                    institutionalV2Stats
+                      .blocksDetected++;
+                  }
+
+                  if (
+                    result.executionSide ===
+                    "ASK"
+                  ) {
+                    institutionalV2Stats
+                      .askSideDetected++;
+                  }
+
+                  if (
+                    result.openingStatus !==
+                    "UNCLEAR"
+                  ) {
+                    institutionalV2Stats
+                      .openingLikelyDetected++;
+                  }
+
+                  if (
+                    result.score >= 65
+                  ) {
+                    institutionalV2Stats
+                      .qualifiedScore65++;
+                  }
+
+                  if (
+                    result.score >= 75
+                  ) {
+                    institutionalV2Stats
+                      .qualifiedScore75++;
+                  }
+                }
               }
 
               const largestTrade =
@@ -1978,6 +2164,26 @@ export async function GET(
         : uniqueRows.length,
     failures,
     rejectionStats: whaleRejectStats,
+
+    /*
+     * تشخيص محرك النشاط المؤسسي V2.
+     * لا تمثل هذه النتائج صفقات محفوظة أو ظاهرة للمستخدم.
+     */
+    institutionalV2: {
+      stats: institutionalV2Stats,
+      detected:
+        institutionalV2Results.length,
+      topResults:
+        [...institutionalV2Results]
+          .sort(
+            (a, b) =>
+              b.score - a.score ||
+              b.totalPremium -
+                a.totalPremium
+          )
+          .slice(0, 20),
+    },
+
     results: uniqueRows,
     capturedAt:
       new Date().toISOString(),
