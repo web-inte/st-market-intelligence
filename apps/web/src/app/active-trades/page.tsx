@@ -30,6 +30,11 @@ closedAt: string | null;
 closeReason: string | null;
 
   symbol: string;
+  engineCode:
+    | "A"
+    | "B"
+    | "C"
+    | "D";
   side: "CALL" | "PUT";
   sideLabel: string;
 
@@ -80,6 +85,42 @@ function numberText(
   }
 
   return value.toFixed(digits);
+}
+
+function engineTitle(
+  code: ActiveTrade["engineCode"]
+) {
+  if (code === "A") {
+    return "محرك تحليل القاما";
+  }
+
+  if (code === "D") {
+    return "محرك القرار";
+  }
+
+  if (code === "B") {
+    return "محرك البوتات";
+  }
+
+  return "المصدر غير معروف";
+}
+
+function engineClass(
+  code: ActiveTrade["engineCode"]
+) {
+  if (code === "A") {
+    return "border-cyan-400/30 bg-cyan-400/10 text-cyan-300";
+  }
+
+  if (code === "D") {
+    return "border-violet-400/30 bg-violet-400/10 text-violet-300";
+  }
+
+  if (code === "B") {
+    return "border-amber-400/30 bg-amber-400/10 text-amber-300";
+  }
+
+  return "border-slate-400/30 bg-slate-400/10 text-slate-300";
 }
 
 function percentText(value: number) {
@@ -851,8 +892,26 @@ export default function ActiveTradesPage() {
                             )}
                           </td>
 
-                          <td className="px-4 py-5 text-lg font-black text-white">
-                            {trade.symbol}
+                          <td className="px-4 py-5">
+                            <div className="flex items-center gap-2">
+                              <span className="text-lg font-black text-white">
+                                {trade.symbol}
+                              </span>
+
+                              <span
+                                title={engineTitle(
+                                  trade.engineCode
+                                )}
+                                className={[
+                                  "inline-flex h-7 min-w-7 items-center justify-center rounded-lg border px-2 text-xs font-black",
+                                  engineClass(
+                                    trade.engineCode
+                                  ),
+                                ].join(" ")}
+                              >
+                                {trade.engineCode}
+                              </span>
+                            </div>
                           </td>
 
                 <td className="px-4 py-5 whitespace-nowrap">
@@ -1066,6 +1125,20 @@ export default function ActiveTradesPage() {
                               trade.symbol
                             }
                           </h2>
+
+                          <span
+                            title={engineTitle(
+                              trade.engineCode
+                            )}
+                            className={[
+                              "inline-flex h-7 min-w-7 items-center justify-center rounded-lg border px-2 text-xs font-black",
+                              engineClass(
+                                trade.engineCode
+                              ),
+                            ].join(" ")}
+                          >
+                            {trade.engineCode}
+                          </span>
 
                           <span
                             className={[

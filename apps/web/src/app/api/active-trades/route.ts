@@ -337,6 +337,68 @@ function statusLabel(
   return "نشط";
 }
 
+type EngineCode =
+  | "A"
+  | "B"
+  | "C"
+  | "D";
+
+function getEngineCode(
+  gammaSnapshot: unknown
+): EngineCode {
+  if (
+    !gammaSnapshot ||
+    typeof gammaSnapshot !== "object" ||
+    Array.isArray(gammaSnapshot)
+  ) {
+    return "C";
+  }
+
+  const snapshot =
+    gammaSnapshot as Record<
+      string,
+      unknown
+    >;
+
+  const source =
+    String(
+      snapshot.source ||
+      snapshot.engine ||
+      ""
+    )
+      .trim()
+      .toLowerCase();
+
+  if (
+    source.includes(
+      "analysis.gammastructure"
+    )
+  ) {
+    return "A";
+  }
+
+  if (
+    source.includes(
+      "decision.activetradeengine"
+    )
+  ) {
+    return "D";
+  }
+
+  if (
+    source.includes(
+      "bot_decision"
+    ) ||
+    source.includes(
+      "bot.decision"
+    )
+  ) {
+    return "B";
+  }
+
+  return "C";
+}
+
 function mapTrade(
   row: SetupRow
 ) {
@@ -431,6 +493,11 @@ function mapTrade(
 
     symbol:
       row.symbol,
+
+    engineCode:
+      getEngineCode(
+        row.gamma_snapshot
+      ),
 
     side:
       row.side,
