@@ -1,0 +1,1197 @@
+===== نوع الصفقة =====
+30-  putWall: number;
+31-  magnet: number;
+32-  strongestCallGammaStrike: number;
+33-  strongestCallGammaValue: number;
+34-  strongestPutGammaStrike: number;
+35-  strongestPutGammaValue: number;
+36-};
+37-
+38-type SignalData = {
+39-  ok: boolean;
+40-  status:
+41-    | "ACTIVE"
+42-    | "WATCH"
+43-    | "NO_TRADE"
+44-    | "NO_CONTRACTS";
+45-  message?: string;
+46-  market?: MarketData | null;
+47-  gamma?: GammaData | null;
+48-};
+49-
+50:type SpxTrade = {
+51-  id: string;
+52-  option_ticker: string;
+53-  side: "CALL" | "PUT";
+54-  strike: number;
+55-  expiration: string;
+56-
+57-  entry_price: number;
+58-  current_price: number | null;
+59-  current_bid: number | null;
+60-  current_ask: number | null;
+61-
+62-  best_price: number | null;
+63-  lowest_price: number | null;
+64-  best_profit_dollars: number | null;
+65-  best_profit_pct: number | null;
+66-
+67-  current_profit_dollars: number | null;
+68-  current_profit_pct: number | null;
+69-
+70-  spx_entry_price: number | null;
+71-  spx_current_price: number | null;
+72-  invalidation_level: number | null;
+73-
+74-  stop_contract_price: number | null;
+75-  stop_profit_dollars: number | null;
+76-  stop_profit_pct: number | null;
+77-  stop_reason: string | null;
+78-
+79-  score: number | null;
+80-  quality: string | null;
+81-
+82-  status:
+83-    | "WATCH"
+84-    | "ACTIVE"
+85-    | "STOPPED"
+86-    | "EXPIRED"
+87-    | "ERROR";
+88-
+89-  activated_at: string | null;
+90-  stopped_at: string | null;
+91-  hidden_after: string | null;
+92-};
+93-
+94-type ApiData = {
+95-  ok: boolean;
+96-  created?: boolean;
+97-  stopped?: boolean;
+98-  message?: string;
+99-  activeTrade?: SpxTrade | null;
+100-  trades?: SpxTrade[];
+101-  signal?: SignalData;
+102-
+103-  marketSession?: {
+104-    isOpen: boolean;
+105-    phase?: string;
+106-    label?: string;
+107-  };
+108-
+109-  error?: string;
+110-  updatedAt?: string;
+111-};
+112-
+113-function formatNumber(
+114-  value: unknown,
+115-  digits = 2
+116-) {
+117-  const parsed = Number(value);
+118-
+119-  if (!Number.isFinite(parsed)) {
+120-    return "—";
+121-  }
+122-
+123-  return parsed.toLocaleString("en-US", {
+124-    minimumFractionDigits: digits,
+125-    maximumFractionDigits: digits,
+126-  });
+127-}
+128-
+129-function money(
+130-  value: unknown,
+131-  showSign = false
+132-) {
+133-  const parsed = Number(value);
+134-
+135-  if (!Number.isFinite(parsed)) {
+136-    return "—";
+137-  }
+138-
+139-  const sign =
+140-    showSign && parsed > 0
+141-      ? "+"
+142-      : "";
+143-
+144-  return `${sign}$${formatNumber(parsed)}`;
+145-}
+146-
+147-function compactNumber(value: unknown) {
+148-  const parsed = Number(value);
+149-
+150-  if (!Number.isFinite(parsed)) {
+===== شارة قيد المتابعة =====
+207-  color = "text-white",
+208-  valueClassName,
+209-}: {
+210-  label: string;
+211-  value: string;
+212-  color?: string;
+213-  valueClassName?: string;
+214-}) {
+215-  return (
+216-    <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+217-      <p className="text-xs font-bold text-slate-500">
+218-        {label}
+219-      </p>
+220-
+221-      <p
+222-        dir={
+223-          valueClassName?.includes("force-ltr")
+224-            ? "ltr"
+225-            : undefined
+226-        }
+227-        className={`mt-2 break-words font-black ${valueClassName || "text-lg sm:text-xl"} ${color}`}
+228-      >
+229-        {value}
+230-      </p>
+231-    </div>
+232-  );
+233-}
+234-
+235-function tradeStatusStyle(
+236-  status?: string
+237-) {
+238-  if (status === "ACTIVE") {
+239-    return "border-emerald-400/30 bg-emerald-400/10 text-emerald-300";
+240-  }
+241-
+242-  if (status === "WATCH") {
+243-    return "border-amber-400/30 bg-amber-400/10 text-amber-300";
+244-  }
+245-
+246-  if (status === "STOPPED") {
+247-    return "border-rose-400/30 bg-rose-400/10 text-rose-300";
+248-  }
+249-
+250-  return "border-slate-400/20 bg-slate-400/10 text-slate-300";
+251-}
+252-
+253-function tradeStatusLabel(
+254-  status?: string
+255-) {
+256-  if (status === "ACTIVE") {
+257:    return "قيد المتابعة";
+258-  }
+259-
+260-  if (status === "WATCH") {
+261-    return "تحت المراقبة";
+262-  }
+263-
+264-  if (status === "STOPPED") {
+265-    return "ضرب الوقف";
+266-  }
+267-
+268-  if (status === "EXPIRED") {
+269-    return "منتهي";
+270-  }
+271-
+272-  return status || "—";
+273-}
+274-
+275-function TradeCard({
+276-  trade,
+277-}: {
+278-  trade: SpxTrade;
+279-}) {
+280-  const active =
+281-    trade.status === "ACTIVE" ||
+282-    trade.status === "WATCH";
+283-
+284-  const profit =
+285-    active
+286-      ? Number(
+287-          trade.current_profit_dollars
+288-        )
+289-      : Number(
+290-          trade.stop_profit_dollars
+291-        );
+292-
+293-  const profitPct =
+294-    active
+295-      ? Number(
+296-          trade.current_profit_pct
+297-        )
+298-      : Number(
+299-          trade.stop_profit_pct
+300-        );
+301-
+302-  const profitColor =
+303-    profit > 0
+304-      ? "text-emerald-300"
+305-      : profit < 0
+306-        ? "text-rose-300"
+307-        : "text-white";
+308-
+309-  return (
+310-    <article
+311-      className={`rounded-3xl border p-5 sm:p-7 ${
+312-        trade.status === "STOPPED"
+313-          ? "border-rose-400/20 bg-rose-400/[0.04]"
+314-          : "border-fuchsia-400/20 bg-slate-900/75"
+315-      }`}
+316-    >
+317-      <div className="flex flex-wrap items-start justify-between gap-4">
+318-        <div>
+319-          <div className="flex flex-wrap items-center gap-3">
+320-            <span
+321-              className={`rounded-xl border px-4 py-2 text-sm font-black ${
+322-                trade.side === "CALL"
+323-                  ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-300"
+324-                  : "border-rose-400/30 bg-rose-400/10 text-rose-300"
+325-              }`}
+326-            >
+327-              {trade.side}
+328-            </span>
+329-
+330-            <h2 className="text-2xl font-black">
+331-              SPXW {formatNumber(
+332-                trade.strike,
+333-                0
+334-              )}
+335-            </h2>
+336-
+337-            {trade.score !== null ? (
+338-              <span className="rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-3 py-2 text-sm font-black text-cyan-300">
+339-                {formatNumber(
+340-                  trade.score,
+341-                  0
+342-                )}
+343-                /100
+344-              </span>
+345-            ) : null}
+346-          </div>
+347-
+348-          <p className="mt-3 break-all text-xs font-bold text-slate-500">
+349-            {trade.option_ticker}
+350-          </p>
+351-
+352-          <p className="mt-2 text-sm font-semibold text-slate-400">
+353-            الانتهاء:{" "}
+354-            {trade.expiration || "—"}
+355-          </p>
+356-        </div>
+357-
+358-        <span
+359-          className={`rounded-xl border px-4 py-3 text-sm font-black ${tradeStatusStyle(
+360-            trade.status
+361-          )}`}
+362-        >
+363-          {tradeStatusLabel(
+364-            trade.status
+365-          )}
+366-        </span>
+367-      </div>
+368-
+369-      {trade.status === "STOPPED" ? (
+370-        <div className="mt-5 rounded-2xl border border-rose-400/25 bg-rose-400/10 p-4 font-black text-rose-200">
+371-          ضرب وقف SPX عند{" "}
+372-          {formatNumber(
+373-            trade.invalidation_level
+374-          )}
+375-          . انتهت متابعة هذا العقد.
+376-        </div>
+377-      ) : null}
+===== نص ضرب الوقف =====
+27-  netGexFlip: number;
+28-  zeroGamma: number | null;
+29-  callWall: number;
+30-  putWall: number;
+31-  magnet: number;
+32-  strongestCallGammaStrike: number;
+33-  strongestCallGammaValue: number;
+34-  strongestPutGammaStrike: number;
+35-  strongestPutGammaValue: number;
+36-};
+37-
+38-type SignalData = {
+39-  ok: boolean;
+40-  status:
+41-    | "ACTIVE"
+42-    | "WATCH"
+43-    | "NO_TRADE"
+44-    | "NO_CONTRACTS";
+45-  message?: string;
+46-  market?: MarketData | null;
+47-  gamma?: GammaData | null;
+48-};
+49-
+50-type SpxTrade = {
+51-  id: string;
+52-  option_ticker: string;
+53-  side: "CALL" | "PUT";
+54-  strike: number;
+55-  expiration: string;
+56-
+57-  entry_price: number;
+58-  current_price: number | null;
+59-  current_bid: number | null;
+60-  current_ask: number | null;
+61-
+62-  best_price: number | null;
+63-  lowest_price: number | null;
+64-  best_profit_dollars: number | null;
+65-  best_profit_pct: number | null;
+66-
+67-  current_profit_dollars: number | null;
+68-  current_profit_pct: number | null;
+69-
+70-  spx_entry_price: number | null;
+71-  spx_current_price: number | null;
+72-  invalidation_level: number | null;
+73-
+74-  stop_contract_price: number | null;
+75-  stop_profit_dollars: number | null;
+76-  stop_profit_pct: number | null;
+77:  stop_reason: string | null;
+78-
+79-  score: number | null;
+80-  quality: string | null;
+81-
+82-  status:
+83-    | "WATCH"
+84-    | "ACTIVE"
+85:    | "STOPPED"
+86-    | "EXPIRED"
+87-    | "ERROR";
+88-
+89-  activated_at: string | null;
+90-  stopped_at: string | null;
+91-  hidden_after: string | null;
+92-};
+93-
+94-type ApiData = {
+95-  ok: boolean;
+96-  created?: boolean;
+97-  stopped?: boolean;
+98-  message?: string;
+99-  activeTrade?: SpxTrade | null;
+100-  trades?: SpxTrade[];
+101-  signal?: SignalData;
+102-
+103-  marketSession?: {
+104-    isOpen: boolean;
+105-    phase?: string;
+106-    label?: string;
+107-  };
+108-
+109-  error?: string;
+110-  updatedAt?: string;
+111-};
+112-
+113-function formatNumber(
+114-  value: unknown,
+115-  digits = 2
+116-) {
+117-  const parsed = Number(value);
+118-
+119-  if (!Number.isFinite(parsed)) {
+120-    return "—";
+121-  }
+122-
+123-  return parsed.toLocaleString("en-US", {
+124-    minimumFractionDigits: digits,
+125-    maximumFractionDigits: digits,
+126-  });
+127-}
+128-
+129-function money(
+130-  value: unknown,
+131-  showSign = false
+132-) {
+133-  const parsed = Number(value);
+134-
+135-  if (!Number.isFinite(parsed)) {
+136-    return "—";
+137-  }
+138-
+139-  const sign =
+140-    showSign && parsed > 0
+141-      ? "+"
+142-      : "";
+143-
+144-  return `${sign}$${formatNumber(parsed)}`;
+145-}
+146-
+147-function compactNumber(value: unknown) {
+148-  const parsed = Number(value);
+149-
+150-  if (!Number.isFinite(parsed)) {
+151-    return "—";
+152-  }
+153-
+154-  const absolute =
+155-    Math.abs(parsed);
+156-
+157-  if (absolute >= 1_000_000_000) {
+158-    return `${formatNumber(
+159-      parsed / 1_000_000_000
+160-    )}B`;
+161-  }
+162-
+163-  if (absolute >= 1_000_000) {
+164-    return `${formatNumber(
+165-      parsed / 1_000_000
+166-    )}M`;
+167-  }
+168-
+169-  if (absolute >= 1_000) {
+170-    return `${formatNumber(
+171-      parsed / 1_000
+172-    )}K`;
+173-  }
+174-
+175-  return formatNumber(parsed);
+176-}
+177-
+178-function formatDate(value?: string | null) {
+179-  if (!value) {
+180-    return "—";
+181-  }
+182-
+183-  const date =
+184-    new Date(value);
+185-
+186-  if (
+187-    Number.isNaN(date.getTime())
+188-  ) {
+189-    return "—";
+190-  }
+191-
+192-  return date.toLocaleString(
+193-    "ar-SA-u-ca-gregory",
+194-    {
+195-      dateStyle: "short",
+196-      timeStyle: "short",
+197-    }
+198-  );
+199-}
+200-
+201-const SPX_PRICE_DISPLAY_NOTE =
+202-  "يعتمد تنفيذ الصفقة على حركة الشارت اللحظية وليس على السعر المعروض داخل المنصة.";
+203-
+204-function Metric({
+205-  label,
+206-  value,
+207-  color = "text-white",
+208-  valueClassName,
+209-}: {
+210-  label: string;
+211-  value: string;
+212-  color?: string;
+213-  valueClassName?: string;
+214-}) {
+215-  return (
+216-    <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+217-      <p className="text-xs font-bold text-slate-500">
+218-        {label}
+219-      </p>
+220-
+221-      <p
+222-        dir={
+223-          valueClassName?.includes("force-ltr")
+224-            ? "ltr"
+225-            : undefined
+226-        }
+227-        className={`mt-2 break-words font-black ${valueClassName || "text-lg sm:text-xl"} ${color}`}
+228-      >
+229-        {value}
+230-      </p>
+231-    </div>
+232-  );
+233-}
+234-
+235-function tradeStatusStyle(
+236-  status?: string
+237-) {
+238-  if (status === "ACTIVE") {
+239-    return "border-emerald-400/30 bg-emerald-400/10 text-emerald-300";
+240-  }
+241-
+242-  if (status === "WATCH") {
+243-    return "border-amber-400/30 bg-amber-400/10 text-amber-300";
+244-  }
+245-
+246:  if (status === "STOPPED") {
+247-    return "border-rose-400/30 bg-rose-400/10 text-rose-300";
+248-  }
+249-
+250-  return "border-slate-400/20 bg-slate-400/10 text-slate-300";
+251-}
+252-
+253-function tradeStatusLabel(
+254-  status?: string
+255-) {
+256-  if (status === "ACTIVE") {
+257-    return "قيد المتابعة";
+258-  }
+259-
+260-  if (status === "WATCH") {
+261-    return "تحت المراقبة";
+262-  }
+263-
+264:  if (status === "STOPPED") {
+265:    return "ضرب الوقف";
+266-  }
+267-
+268-  if (status === "EXPIRED") {
+269-    return "منتهي";
+270-  }
+271-
+272-  return status || "—";
+273-}
+274-
+275-function TradeCard({
+276-  trade,
+277-}: {
+278-  trade: SpxTrade;
+279-}) {
+280-  const active =
+281-    trade.status === "ACTIVE" ||
+282-    trade.status === "WATCH";
+283-
+284-  const profit =
+285-    active
+286-      ? Number(
+287-          trade.current_profit_dollars
+288-        )
+289-      : Number(
+290-          trade.stop_profit_dollars
+291-        );
+292-
+293-  const profitPct =
+294-    active
+295-      ? Number(
+296-          trade.current_profit_pct
+297-        )
+298-      : Number(
+299-          trade.stop_profit_pct
+300-        );
+301-
+302-  const profitColor =
+303-    profit > 0
+304-      ? "text-emerald-300"
+305-      : profit < 0
+306-        ? "text-rose-300"
+307-        : "text-white";
+308-
+309-  return (
+310-    <article
+311-      className={`rounded-3xl border p-5 sm:p-7 ${
+312:        trade.status === "STOPPED"
+313-          ? "border-rose-400/20 bg-rose-400/[0.04]"
+314-          : "border-fuchsia-400/20 bg-slate-900/75"
+315-      }`}
+316-    >
+317-      <div className="flex flex-wrap items-start justify-between gap-4">
+318-        <div>
+319-          <div className="flex flex-wrap items-center gap-3">
+320-            <span
+321-              className={`rounded-xl border px-4 py-2 text-sm font-black ${
+322-                trade.side === "CALL"
+323-                  ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-300"
+324-                  : "border-rose-400/30 bg-rose-400/10 text-rose-300"
+325-              }`}
+326-            >
+327-              {trade.side}
+328-            </span>
+329-
+330-            <h2 className="text-2xl font-black">
+331-              SPXW {formatNumber(
+332-                trade.strike,
+333-                0
+334-              )}
+335-            </h2>
+336-
+337-            {trade.score !== null ? (
+338-              <span className="rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-3 py-2 text-sm font-black text-cyan-300">
+339-                {formatNumber(
+340-                  trade.score,
+341-                  0
+342-                )}
+343-                /100
+344-              </span>
+345-            ) : null}
+346-          </div>
+347-
+348-          <p className="mt-3 break-all text-xs font-bold text-slate-500">
+349-            {trade.option_ticker}
+350-          </p>
+351-
+352-          <p className="mt-2 text-sm font-semibold text-slate-400">
+353-            الانتهاء:{" "}
+354-            {trade.expiration || "—"}
+355-          </p>
+356-        </div>
+357-
+358-        <span
+359-          className={`rounded-xl border px-4 py-3 text-sm font-black ${tradeStatusStyle(
+360-            trade.status
+361-          )}`}
+362-        >
+363-          {tradeStatusLabel(
+364-            trade.status
+365-          )}
+366-        </span>
+367-      </div>
+368-
+369:      {trade.status === "STOPPED" ? (
+370-        <div className="mt-5 rounded-2xl border border-rose-400/25 bg-rose-400/10 p-4 font-black text-rose-200">
+371:          ضرب وقف SPX عند{" "}
+372-          {formatNumber(
+373-            trade.invalidation_level
+374-          )}
+375-          . انتهت متابعة هذا العقد.
+376-        </div>
+377-      ) : null}
+378-
+379-      <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+380-        <Metric
+381-          label="سعر الدخول"
+382-          value={`$${formatNumber(
+383-            trade.entry_price
+384-          )}`}
+385-        />
+386-
+387-        <Metric
+388-          label={
+389-            active
+390-              ? "سعر العقد الحالي"
+391-              : "سعر العقد عند الوقف"
+392-          }
+393-          value={`$${formatNumber(
+394-            active
+395-              ? trade.current_price
+396-              : trade.stop_contract_price
+397-          )}`}
+398-        />
+399-
+400-        <Metric
+401-          label="أعلى سعر تحقق"
+402-          value={`$${formatNumber(
+403-            trade.best_price
+404-          )}`}
+405-          color="text-emerald-300"
+406-        />
+407-
+408-        <Metric
+409-          label={
+410-            active
+411-              ? "الربح الحالي"
+412-              : "النتيجة عند الوقف"
+413-          }
+414-          value={`${money(
+415-            profit,
+416-            true
+417-          )} (${formatNumber(
+418-            profitPct
+419-          )}%)`}
+420-          color={profitColor}
+421-        />
+422-
+423-        <Metric
+424-          label="أعلى ربح تحقق"
+425-          value={`${money(
+426-            trade.best_profit_dollars,
+427-            true
+428-          )} (${formatNumber(
+429-            trade.best_profit_pct
+430-          )}%)`}
+431-          color="text-emerald-300"
+432-        />
+433-
+434-        <Metric
+435-          label="أدنى سعر للعقد"
+436-          value={`$${formatNumber(
+437-            trade.lowest_price ??
+438-              trade.entry_price
+439-          )}`}
+440-          color="text-amber-300"
+441-        />
+442-
+443-        <Metric
+444-          label="سعر SPX الحالي"
+445-          value={SPX_PRICE_DISPLAY_NOTE}
+446-          color="text-cyan-300"
+447-          valueClassName="text-xs leading-6 text-center whitespace-normal"
+448-        />
+449-
+450-        <Metric
+451-          label="الوقف"
+452-          value={formatNumber(
+453-            trade.invalidation_level
+454-          )}
+455-          color="text-rose-300"
+456-        />
+457-      </div>
+458-
+459-      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+460-        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+461-          <p className="text-xs font-bold text-slate-500">
+462-            وقت التفعيل
+463-          </p>
+464-
+465-          <p className="mt-2 font-black">
+466-            {formatDate(
+467-              trade.activated_at
+468-            )}
+469-          </p>
+470-        </div>
+471-
+472-        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+473-          <p className="text-xs font-bold text-slate-500">
+474:            وقت ضرب الوقف
+475-          </p>
+476-
+477-          <p className="mt-2 font-black">
+478-            {formatDate(
+479-              trade.stopped_at
+480-            )}
+481-          </p>
+482-        </div>
+483-      </div>
+484-    </article>
+485-  );
+486-}
+487-
+488-export default function SpxWhalesPage() {
+489-  const [data, setData] =
+490-    useState<ApiData | null>(null);
+491-
+492-  const [loading, setLoading] =
+493-    useState(true);
+494-
+495-  const [refreshing, setRefreshing] =
+496-    useState(false);
+497-
+498-  const [error, setError] =
+499-    useState("");
+500-
+501-  const load = useCallback(
+502-    async (initial = false) => {
+503-      try {
+504-        initial
+505-          ? setLoading(true)
+506-          : setRefreshing(true);
+507-
+508-        setError("");
+509-
+510-        const response =
+511-          await fetch(
+512-            "/api/spx-active-trade",
+513-            {
+514-              cache: "no-store",
+515-            }
+516-          );
+517-
+518-        const payload =
+519-          (await response.json()) as ApiData;
+520-
+521-        if (
+522-          !response.ok ||
+523-          !payload.ok
+524-        ) {
+525-          throw new Error(
+526-            payload.error ||
+527-              "تعذر تحميل صفقات SPX"
+528-          );
+529-        }
+530-
+531-        setData(payload);
+532-      } catch (loadError) {
+533-        setError(
+534-          loadError instanceof Error
+535-            ? loadError.message
+536-            : "حدث خطأ غير معروف"
+537-        );
+538-      } finally {
+539-        setLoading(false);
+540-        setRefreshing(false);
+541-      }
+542-    },
+543-    []
+544-  );
+545-
+546-  const quoteRequestRunning =
+547-    useRef(false);
+548-
+549-  const loadQuote =
+550-    useCallback(async () => {
+551-      if (
+552-        quoteRequestRunning.current
+553-      ) {
+554-        return;
+555-      }
+556-
+557-      quoteRequestRunning.current =
+558-        true;
+559-
+560-      try {
+561-        const response =
+562-          await fetch(
+563-            "/api/spx-active-trade/quote",
+564-            {
+565-              cache: "no-store",
+566-            }
+567-          );
+568-
+569-        const payload =
+570-          (await response.json()) as {
+571-            ok: boolean;
+572-            activeTrade?:
+573-              SpxTrade | null;
+574-            error?: string;
+575-          };
+576-
+577-        if (
+578-          !response.ok ||
+579-          !payload.ok
+580-        ) {
+581-          throw new Error(
+582-            payload.error ||
+583-              "تعذر تحديث سعر عقد SPX"
+584-          );
+585-        }
+586-
+587-        const updatedTrade =
+588-          payload.activeTrade;
+589-
+590-        if (!updatedTrade) {
+591-          return;
+592-        }
+593-
+594-        setData((current) => {
+595-          if (!current) {
+596-            return current;
+597-          }
+598-
+599-          return {
+600-            ...current,
+601-
+602-            activeTrade:
+603-              updatedTrade,
+604-
+605-            trades:
+606-              (current.trades || [])
+607-                .map((trade) =>
+608-                  trade.id ===
+609-                  updatedTrade.id
+610-                    ? updatedTrade
+611-                    : trade
+612-                ),
+613-          };
+614-        });
+--
+748-    };
+749-
+750-    startQuotePolling();
+751-
+752-    document.addEventListener(
+753-      "visibilitychange",
+754-      handleVisibilityChange
+755-    );
+756-
+757-    return () => {
+758-      stopQuotePolling();
+759-
+760-      document.removeEventListener(
+761-        "visibilitychange",
+762-        handleVisibilityChange
+763-      );
+764-    };
+765-  }, [
+766-    hasTrackedTrade,
+767-    loadQuote,
+768-    regularSessionOpen,
+769-  ]);
+770-
+771-  const signal =
+772-    data?.signal;
+773-
+774-  const marketSession =
+775-    data?.marketSession;
+776-
+777-  const market =
+778-    signal?.market;
+779-
+780-  const gamma =
+781-    signal?.gamma;
+782-
+783-  const trades =
+784-    data?.trades || [];
+785-
+786-  const activeTrade =
+787-    data?.activeTrade ||
+788-    trades.find(
+789-      (trade) =>
+790-        trade.status === "ACTIVE" ||
+791-        trade.status === "WATCH"
+792-    ) ||
+793-    null;
+794-
+795-  const stoppedTrades =
+796-    trades.filter(
+797-      (trade) =>
+798:        trade.status === "STOPPED"
+799-    );
+800-
+801-  const decisionMessage =
+802-    activeTrade
+803-      ? "توجد صفقة SPX تحت المتابعة — لن يتم إصدار عقد آخر حتى انتهاء متابعتها."
+804-      : marketSession?.isOpen === false
+805-        ? "السوق مغلق — لا يتم إصدار فرصة SPX جديدة."
+806-        : data?.message ||
+807-          signal?.message ||
+808-          "السوق مفتوح — لا توجد فرصة SPX مطابقة للشروط حاليًا.";
+809-
+810-  const spxPrice = Number(
+811-    market?.stockPrice || 0
+812-  );
+813-
+814-  const flowGap = Number(
+815-    market?.flowGap || 0
+816-  );
+817-
+818-  const flowDirection =
+819-    market?.direction || "NEUTRAL";
+820-
+821-  const callFlowPct = Number(
+822-    market?.callFlowPct || 0
+823-  );
+824-
+825-  const putFlowPct = Number(
+826-    market?.putFlowPct || 0
+827-  );
+828-
+829-  const netGex = Number(
+830-    gamma?.netGex || 0
+831-  );
+832-
+833-  const zeroGamma =
+834-    gamma?.zeroGamma != null
+835-      ? Number(gamma.zeroGamma)
+836-      : 0;
+837-
+838-  const netGexFlip = Number(
+839-    gamma?.netGexFlip || 0
+840-  );
+841-
+842-  const magnet = Number(
+843-    gamma?.magnet || 0
+844-  );
+845-
+846-  const callWall = Number(
+847-    gamma?.callWall || 0
+848-  );
+849-
+850-  const putWall = Number(
+851-    gamma?.putWall || 0
+852-  );
+853-
+854-  const pivotLevels = [
+855-    netGexFlip,
+856-    zeroGamma,
+857-    magnet,
+858-    putWall,
+859-  ].filter(
+860-    (level) =>
+861-      Number.isFinite(level) &&
+862-      level > 0 &&
+863-      (
+864-        spxPrice <= 0 ||
+865-        Math.abs(level - spxPrice) <= 30
+866-      )
+867-  );
+868-
+869-  const pivotLow =
+870-    pivotLevels.length > 0
+871-      ? Math.min(...pivotLevels)
+872-      : 0;
+873-
+874-  const pivotHigh =
+875-    pivotLevels.length > 0
+876-      ? Math.max(...pivotLevels)
+877-      : 0;
+878-
+879-  const pivotLabel =
+880-    pivotLow > 0 && pivotHigh > 0
+881-      ? Math.abs(pivotHigh - pivotLow) < 1
+882-        ? formatNumber(pivotLow, 0)
+883-        : `${formatNumber(
+884-            pivotLow,
+885-            0
+886-          )} – ${formatNumber(
+887-            pivotHigh,
+888-            0
+889-          )}`
+890-      : "غير محددة";
+891-
+892-  const marketReading =
+893-    flowDirection === "CALL"
+894-      ? `تدفق CALL متفوق بنسبة ${formatNumber(
+895-          callFlowPct
+896-        )}% مقابل ${formatNumber(
+897-          putFlowPct
+898-        )}% لـ PUT${
+899-          netGex > 0
+900-            ? "، وصافي القاما موجب"
+901-            : netGex < 0
+902-              ? "، لكن صافي القاما سالب"
+903-              : ""
+904-        }${
+905-          market?.gammaChop
+906-            ? "، مع وجود Gamma Chop"
+907-            : "، ولا توجد حالة Gamma Chop"
+908-        }.`
+909-      : flowDirection === "PUT"
+910-        ? `تدفق PUT متفوق بنسبة ${formatNumber(
+911-            putFlowPct
+912-          )}% مقابل ${formatNumber(
+913-            callFlowPct
+914-          )}% لـ CALL${
+915-            netGex > 0
+916-              ? "، وصافي القاما موجب"
+917-              : netGex < 0
+918-                ? "، وصافي القاما سالب"
+919-                : ""
+920-          }${
+921-            market?.gammaChop
+922-              ? "، مع وجود Gamma Chop"
+923-              : "، ولا توجد حالة Gamma Chop"
+924-          }.`
+925-        : `تدفقات CALL وPUT متقاربة، ولا توجد أفضلية اتجاه واضحة${
+926-            market?.gammaChop
+927-              ? " مع وجود Gamma Chop."
+928-              : "."
+929-          }`;
+930-
+931-  const primaryScenario =
+932-    flowDirection === "CALL"
+933-      ? pivotHigh > 0 && callWall > pivotHigh
+934-        ? `الثبات فوق المنطقة المحورية ${pivotLabel} يدعم استمرار الحركة باتجاه Call Wall عند ${formatNumber(
+935-            callWall,
+936-            0
+937-          )}.`
+938-        : "الأفضلية تميل إلى CALL، لكن لا توجد مساحة واضحة كافية حتى المقاومة التالية."
+===== زر تحديث الآن =====
+1474-  return (
+1475-    <main
+1476-      dir="rtl"
+1477-      className="min-h-screen bg-[#030712] px-4 py-8 text-white sm:px-6"
+1478-    >
+1479-      <div className="mx-auto max-w-7xl">
+1480-        <header className="rounded-3xl border border-fuchsia-400/20 bg-gradient-to-l from-fuchsia-500/10 via-slate-900 to-violet-500/10 p-6 shadow-2xl sm:p-8">
+1481-          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+1482-            <div>
+1483-              <p className="text-xs font-black tracking-[0.2em] text-fuchsia-300">
+1484-                SPX 0DTE INTELLIGENCE
+1485-              </p>
+1486-
+1487-              <h1 className="mt-2 text-3xl font-black sm:text-5xl">
+1488-                فرصة SPX اليومية
+1489-              </h1>
+1490-
+1491-              <p className="mt-3 max-w-3xl text-sm font-semibold leading-7 text-slate-400">
+1492-                رصد لحظي لأقوى عقد SPX يومي، مبني على القاما والسيولة والزخم. تتم متابعة فرصة واحدة فقط حتى تحقق أهدافها أو يُلغى السيناريو، مع حفظ أعلى ربح وصل إليه العقد.
+1493-              </p>
+1494-            </div>
+1495-
+1496-            <div className="flex flex-wrap gap-3">
+1497-              <Link
+1498-                href="/dashboard"
+1499-                className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-bold"
+1500-              >
+1501-                العودة إلى المنصة
+1502-              </Link>
+1503-
+1504-              <button
+1505-                type="button"
+1506-                onClick={() =>
+1507-                  void load(false)
+1508-                }
+1509-                disabled={refreshing}
+1510-                className="rounded-xl bg-fuchsia-400 px-5 py-3 text-sm font-black text-slate-950 disabled:opacity-50"
+1511-              >
+1512-                {refreshing
+1513-                  ? "جارٍ التحديث..."
+1514:                  : "تحديث الآن"}
+1515-              </button>
+1516-            </div>
+1517-          </div>
+1518-        </header>
+1519-
+1520-        {error ? (
+1521-          <div className="mt-5 rounded-2xl border border-rose-400/30 bg-rose-400/10 p-4 font-bold text-rose-200">
+1522-            {error}
+1523-          </div>
+1524-        ) : null}
+1525-
+1526-        {loading ? (
+1527-          <div className="mt-6 rounded-3xl border border-white/10 bg-slate-900/60 p-12 text-center font-black text-slate-400">
+1528-            جارٍ تحميل ومتابعة صفقة SPX...
+1529-          </div>
+1530-        ) : data ? (
+1531-          <>
+1532-            <section className="mt-6 rounded-3xl border border-white/10 bg-slate-900/65 p-5">
+1533-              <p className="text-xs font-bold text-slate-500">
+1534-                قرار النظام
+1535-              </p>
+1536-
+1537-              <h2 className="mt-2 text-xl font-black leading-8 sm:text-2xl">
+1538-                {decisionMessage}
+1539-              </h2>
+1540-            </section>
+1541-
+1542-            <section className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-6">
+1543-              <Metric
+1544-                label="سعر SPX"
+1545-                value={SPX_PRICE_DISPLAY_NOTE}
+1546-                color="text-cyan-300"
+1547-                valueClassName="text-xs leading-6 text-center whitespace-normal"
+1548-              />
+1549-
+1550-              <Metric
+1551-                label="اتجاه Flow"
+1552-                value={
+1553-                  market?.direction ||
+1554-                  "—"
+1555-                }
+1556-                color={
+1557-                  market?.direction ===
+1558-                  "CALL"
+1559-                    ? "text-emerald-300"
+1560-                    : market?.direction ===
+1561-                        "PUT"
+1562-                      ? "text-rose-300"
+1563-                      : "text-amber-300"
+1564-                }
+1565-              />
+1566-
+1567-              <Metric
+1568-                label="CALL Flow"
+1569-                value={
+1570-                  market
+1571-                    ? `${formatNumber(
+1572-                        market.callFlowPct
+1573-                      )}%`
+1574-                    : "—"
+1575-                }
+1576-                color="text-emerald-300"
+1577-                valueClassName="text-lg sm:text-xl force-ltr"
+1578-              />
+1579-
+1580-              <Metric
+1581-                label="PUT Flow"
+1582-                value={
+1583-                  market
+1584-                    ? `${formatNumber(
+1585-                        market.putFlowPct
+1586-                      )}%`
+1587-                    : "—"
+1588-                }
+1589-                color="text-rose-300"
+1590-                valueClassName="text-lg sm:text-xl force-ltr"
+1591-              />
+1592-
+1593-              <Metric
+1594-                label="إجمالي Flow"

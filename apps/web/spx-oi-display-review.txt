@@ -1,0 +1,3980 @@
+===== أنواع العقود وحقول OI =====
+import { NextResponse } from "next/server";
+import { calculateGammaFlip } from "@/lib/gamma-flip-engine";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
+type DataRecord = Record<string, unknown>;
+type ContractSide = "CALL" | "PUT";
+type MarketDirection = ContractSide | "NEUTRAL";
+
+type RawContract = {
+  ticker: string;
+  expiration: string;
+  side: ContractSide;
+  strike: number;
+  stockPrice: number;
+  bid: number;
+  ask: number;
+  midpoint: number;
+  executionPrice: number;
+  spreadPct: number;
+  delta: number;
+  gamma: number;
+  theta: number;
+  vega: number;
+  ivPct: number;
+  volume: number;
+  openInterest: number;
+  volumeOi: number;
+  distancePoints: number;
+  distancePct: number;
+  flowValue: number;
+};
+
+type ScoredContract = {
+  ticker: string;
+  expiration: string;
+  side: ContractSide;
+  strike: number;
+  stockPrice: number;
+  bid: number;
+  ask: number;
+  midpoint: number;
+  price: number;
+  spreadPct: number;
+  delta: number;
+  gamma: number;
+  theta: number;
+  vega: number;
+  ivPct: number;
+  volume: number;
+  openInterest: number;
+  volumeOi: number;
+  distancePoints: number;
+  distancePct: number;
+  baseScore: number;
+  finalScore: number;
+  quality: "ممتاز" | "جيد" | "مقبول";
+  reasons: string[];
+  warnings: string[];
+};
+
+function asRecord(value: unknown): DataRecord {
+  return value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+    ? (value as DataRecord)
+    : {};
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function numberValue(value: unknown, fallback = 0): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function textValue(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function round(value: number, digits = 2): number {
+  const factor = 10 ** digits;
+  return Math.round((value + Number.EPSILON) * factor) / factor;
+}
+
+function clamp(value: number, minimum: number, maximum: number): number {
+  return Math.min(maximum, Math.max(minimum, value));
+}
+
+function todayNewYork(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+function normalizeSide(value: unknown): ContractSide | null {
+  const side = textValue(value).toLowerCase();
+
+  if (side === "call" || side === "c") {
+    return "CALL";
+  }
+
+  if (side === "put" || side === "p") {
+    return "PUT";
+  }
+
+  return null;
+}
+
+async function fetchJson(url: string, headers?: HeadersInit): Promise<unknown> {
+  const response = await fetch(url, {
+    headers,
+    cache: "no-store",
+  });
+
+  const responseText = await response.text();
+
+  let payload: unknown = {};
+
+  try {
+    payload = responseText ? JSON.parse(responseText) : {};
+  } catch {
+    payload = { error: responseText };
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      textValue(asRecord(payload).error) ||
+        `فشل الطلب: HTTP ${response.status}`
+    );
+  }
+
+  return payload;
+}
+
+
+
+function estimateSpxPriceFromChain(
+  rawChain: unknown[],
+  expiration: string
+): number {
+  const pairs = new Map<
+    number,
+    {
+      call?: number;
+      put?: number;
+    }
+  >();
+
+  for (const value of rawChain) {
+    const contract = asRecord(value);
+    const details = asRecord(contract.details);
+    const quote = asRecord(contract.last_quote);
+    const trade = asRecord(contract.last_trade);
+
+    const ticker = textValue(details.ticker);
+    const contractExpiration =
+      textValue(details.expiration_date);
+
+    const side =
+      normalizeSide(details.contract_type);
+
+    const strike =
+      numberValue(details.strike_price);
+
+    if (
+      !ticker.toUpperCase().includes("SPXW") ||
+      contractExpiration !== expiration ||
+      !side ||
+      strike <= 0
+    ) {
+      continue;
+    }
+
+    const bid = numberValue(quote.bid);
+    const ask = numberValue(quote.ask);
+
+    const suppliedMidpoint =
+      numberValue(quote.midpoint);
+
+    const midpoint =
+      suppliedMidpoint > 0
+        ? suppliedMidpoint
+        : bid > 0 && ask > 0
+          ? (bid + ask) / 2
+          : numberValue(trade.price);
+
+    if (midpoint <= 0) {
+      continue;
+    }
+
+    const pair =
+      pairs.get(strike) || {};
+
+    if (side === "CALL") {
+      pair.call = midpoint;
+    } else {
+      pair.put = midpoint;
+    }
+
+    pairs.set(strike, pair);
+  }
+
+  /*
+    Put–Call Parity لعقود 0DTE:
+
+    SPX ≈ Strike + Call Mid - Put Mid
+
+    نختار أقرب ثلاثة أزواج ATM، وهي الأزواج
+    التي يكون فيها الفرق بين سعر CALL وPUT أقل،
+    ثم نأخذ الوسيط لتقليل أثر الأسعار الشاذة.
+  */
+  const estimates = Array.from(
+    pairs.entries()
+  )
+    .filter(
+      (
+        entry
+      ): entry is [
+        number,
+        {
+          call: number;
+          put: number;
+        },
+      ] =>
+        Number.isFinite(
+          entry[1].call
+        ) &&
+        Number.isFinite(
+          entry[1].put
+        ) &&
+        Number(entry[1].call) > 0 &&
+        Number(entry[1].put) > 0
+    )
+    .map(([strike, pair]) => ({
+      impliedPrice:
+        strike +
+        pair.call -
+        pair.put,
+
+      callPutDifference:
+        Math.abs(
+          pair.call -
+          pair.put
+        ),
+    }))
+    .filter(
+      (row) =>
+        row.impliedPrice >
+          1000 &&
+        row.impliedPrice <
+          20000
+    )
+    .sort(
+      (first, second) =>
+        first.callPutDifference -
+        second.callPutDifference
+    )
+    .slice(0, 3)
+    .map(
+      (row) =>
+        row.impliedPrice
+    )
+    .sort(
+      (first, second) =>
+        first - second
+    );
+
+  if (
+    estimates.length === 0
+  ) {
+    throw new Error(
+      "تعذر استنتاج مستوى SPX من عقود SPXW اليومية"
+===== جلب العقود و Open Interest =====
+1-import { NextResponse } from "next/server";
+2-import { calculateGammaFlip } from "@/lib/gamma-flip-engine";
+3-
+4-export const runtime = "nodejs";
+5-export const dynamic = "force-dynamic";
+6-export const revalidate = 0;
+7-
+8-type DataRecord = Record<string, unknown>;
+9-type ContractSide = "CALL" | "PUT";
+10-type MarketDirection = ContractSide | "NEUTRAL";
+11-
+12-type RawContract = {
+13-  ticker: string;
+14-  expiration: string;
+15-  side: ContractSide;
+16-  strike: number;
+17-  stockPrice: number;
+18-  bid: number;
+19-  ask: number;
+20-  midpoint: number;
+21-  executionPrice: number;
+22-  spreadPct: number;
+23-  delta: number;
+24-  gamma: number;
+25-  theta: number;
+26-  vega: number;
+27-  ivPct: number;
+28-  volume: number;
+29:  openInterest: number;
+30-  volumeOi: number;
+31-  distancePoints: number;
+32-  distancePct: number;
+33-  flowValue: number;
+34-};
+35-
+36-type ScoredContract = {
+37-  ticker: string;
+38-  expiration: string;
+39-  side: ContractSide;
+40-  strike: number;
+41-  stockPrice: number;
+42-  bid: number;
+43-  ask: number;
+44-  midpoint: number;
+45-  price: number;
+46-  spreadPct: number;
+47-  delta: number;
+48-  gamma: number;
+49-  theta: number;
+50-  vega: number;
+51-  ivPct: number;
+52-  volume: number;
+53:  openInterest: number;
+54-  volumeOi: number;
+55-  distancePoints: number;
+56-  distancePct: number;
+57-  baseScore: number;
+58-  finalScore: number;
+59-  quality: "ممتاز" | "جيد" | "مقبول";
+60-  reasons: string[];
+61-  warnings: string[];
+62-};
+63-
+64-function asRecord(value: unknown): DataRecord {
+65-  return value !== null &&
+66-    typeof value === "object" &&
+67-    !Array.isArray(value)
+68-    ? (value as DataRecord)
+69-    : {};
+70-}
+71-
+72-function asArray(value: unknown): unknown[] {
+73-  return Array.isArray(value) ? value : [];
+74-}
+75-
+76-function numberValue(value: unknown, fallback = 0): number {
+77-  const parsed = Number(value);
+78-  return Number.isFinite(parsed) ? parsed : fallback;
+79-}
+80-
+81-function textValue(value: unknown): string {
+82-  return typeof value === "string" ? value.trim() : "";
+83-}
+84-
+85-function round(value: number, digits = 2): number {
+86-  const factor = 10 ** digits;
+87-  return Math.round((value + Number.EPSILON) * factor) / factor;
+88-}
+89-
+90-function clamp(value: number, minimum: number, maximum: number): number {
+91-  return Math.min(maximum, Math.max(minimum, value));
+92-}
+93-
+94-function todayNewYork(): string {
+95-  return new Intl.DateTimeFormat("en-CA", {
+96-    timeZone: "America/New_York",
+97-    year: "numeric",
+98-    month: "2-digit",
+99-    day: "2-digit",
+100-  }).format(new Date());
+101-}
+102-
+103-function normalizeSide(value: unknown): ContractSide | null {
+104-  const side = textValue(value).toLowerCase();
+105-
+106-  if (side === "call" || side === "c") {
+107-    return "CALL";
+108-  }
+109-
+110-  if (side === "put" || side === "p") {
+111-    return "PUT";
+112-  }
+113-
+114-  return null;
+115-}
+116-
+117-async function fetchJson(url: string, headers?: HeadersInit): Promise<unknown> {
+118-  const response = await fetch(url, {
+119-    headers,
+120-    cache: "no-store",
+121-  });
+122-
+123-  const responseText = await response.text();
+124-
+125-  let payload: unknown = {};
+126-
+127-  try {
+128-    payload = responseText ? JSON.parse(responseText) : {};
+129-  } catch {
+130-    payload = { error: responseText };
+131-  }
+132-
+133-  if (!response.ok) {
+134-    throw new Error(
+135-      textValue(asRecord(payload).error) ||
+136-        `فشل الطلب: HTTP ${response.status}`
+137-    );
+138-  }
+139-
+140-  return payload;
+141-}
+142-
+143-
+144-
+145-function estimateSpxPriceFromChain(
+146-  rawChain: unknown[],
+147-  expiration: string
+148-): number {
+149-  const pairs = new Map<
+150-    number,
+151-    {
+152-      call?: number;
+153-      put?: number;
+154-    }
+155-  >();
+156-
+157-  for (const value of rawChain) {
+158-    const contract = asRecord(value);
+159-    const details = asRecord(contract.details);
+160-    const quote = asRecord(contract.last_quote);
+161-    const trade = asRecord(contract.last_trade);
+162-
+163-    const ticker = textValue(details.ticker);
+164-    const contractExpiration =
+165:      textValue(details.expiration_date);
+166-
+167-    const side =
+168-      normalizeSide(details.contract_type);
+169-
+170-    const strike =
+171-      numberValue(details.strike_price);
+172-
+173-    if (
+174-      !ticker.toUpperCase().includes("SPXW") ||
+175-      contractExpiration !== expiration ||
+176-      !side ||
+177-      strike <= 0
+178-    ) {
+179-      continue;
+180-    }
+181-
+182-    const bid = numberValue(quote.bid);
+183-    const ask = numberValue(quote.ask);
+184-
+185-    const suppliedMidpoint =
+186-      numberValue(quote.midpoint);
+187-
+188-    const midpoint =
+189-      suppliedMidpoint > 0
+190-        ? suppliedMidpoint
+191-        : bid > 0 && ask > 0
+192-          ? (bid + ask) / 2
+193-          : numberValue(trade.price);
+194-
+195-    if (midpoint <= 0) {
+196-      continue;
+197-    }
+198-
+199-    const pair =
+200-      pairs.get(strike) || {};
+201-
+202-    if (side === "CALL") {
+203-      pair.call = midpoint;
+204-    } else {
+205-      pair.put = midpoint;
+206-    }
+207-
+208-    pairs.set(strike, pair);
+209-  }
+210-
+211-  /*
+212-    Put–Call Parity لعقود 0DTE:
+213-
+214-    SPX ≈ Strike + Call Mid - Put Mid
+215-
+216-    نختار أقرب ثلاثة أزواج ATM، وهي الأزواج
+217-    التي يكون فيها الفرق بين سعر CALL وPUT أقل،
+218-    ثم نأخذ الوسيط لتقليل أثر الأسعار الشاذة.
+219-  */
+220-  const estimates = Array.from(
+221-    pairs.entries()
+222-  )
+223-    .filter(
+224-      (
+225-        entry
+226-      ): entry is [
+227-        number,
+228-        {
+229-          call: number;
+230-          put: number;
+231-        },
+232-      ] =>
+233-        Number.isFinite(
+234-          entry[1].call
+235-        ) &&
+236-        Number.isFinite(
+237-          entry[1].put
+238-        ) &&
+239-        Number(entry[1].call) > 0 &&
+240-        Number(entry[1].put) > 0
+241-    )
+242-    .map(([strike, pair]) => ({
+243-      impliedPrice:
+244-        strike +
+245-        pair.call -
+246-        pair.put,
+247-
+248-      callPutDifference:
+249-        Math.abs(
+250-          pair.call -
+251-          pair.put
+252-        ),
+253-    }))
+254-    .filter(
+255-      (row) =>
+256-        row.impliedPrice >
+257-          1000 &&
+258-        row.impliedPrice <
+259-          20000
+260-    )
+261-    .sort(
+262-      (first, second) =>
+263-        first.callPutDifference -
+264-        second.callPutDifference
+265-    )
+266-    .slice(0, 3)
+267-    .map(
+268-      (row) =>
+269-        row.impliedPrice
+270-    )
+271-    .sort(
+272-      (first, second) =>
+273-        first - second
+274-    );
+275-
+276-  if (
+277-    estimates.length === 0
+278-  ) {
+279-    throw new Error(
+280-      "تعذر استنتاج مستوى SPX من عقود SPXW اليومية"
+281-    );
+282-  }
+283-
+284-  const middleIndex =
+285-    Math.floor(
+286-      estimates.length / 2
+287-    );
+288-
+289-  const estimatedPrice =
+290-    estimates.length % 2 === 1
+291-      ? estimates[middleIndex]
+292-      : (
+293-          estimates[
+294-            middleIndex - 1
+295-          ] +
+296-          estimates[middleIndex]
+297-        ) / 2;
+298-
+299-  return round(
+300-    estimatedPrice,
+301-    2
+302-  );
+303-}
+304-
+305-async function fetchTodaySpxwChain(
+306-  massiveApiKey: string,
+307-  expiration: string
+308-): Promise<unknown[]> {
+309-  const baseUrl =
+310-    process.env.MASSIVE_BASE_URL?.replace(/\/+$/, "") ||
+311-    "https://api.massive.com";
+312-
+313-  const rows: unknown[] = [];
+314-
+315-  let nextUrl: string | null =
+316:    `${baseUrl}/v3/snapshot/options/I%3ASPX` +
+317:    `?expiration_date=${encodeURIComponent(expiration)}` +
+318-    `&limit=250` +
+319-    `&apiKey=${encodeURIComponent(massiveApiKey)}`;
+320-
+321-  let page = 0;
+322-
+323-  while (nextUrl && page < 12) {
+324-    const payload = asRecord(await fetchJson(nextUrl));
+325-
+326-    rows.push(...asArray(payload.results));
+327-
+328-    const returnedNextUrl = textValue(payload.next_url);
+329-
+330-    if (!returnedNextUrl) {
+331-      nextUrl = null;
+332-    } else if (returnedNextUrl.includes("apiKey=")) {
+333-      nextUrl = returnedNextUrl;
+334-    } else {
+335-      nextUrl =
+336-        `${returnedNextUrl}${returnedNextUrl.includes("?") ? "&" : "?"}` +
+337-        `apiKey=${encodeURIComponent(massiveApiKey)}`;
+338-    }
+339-
+340-    page += 1;
+341-  }
+342-
+343-  return rows;
+344-}
+345-
+346-function readContract(
+347-  value: unknown,
+348-  today: string,
+349-  stockPrice: number
+350-): RawContract | null {
+351-  const contract = asRecord(value);
+352-  const details = asRecord(contract.details);
+353-  const quote = asRecord(contract.last_quote);
+354-  const lastTrade = asRecord(contract.last_trade);
+355-  const greeks = asRecord(contract.greeks);
+356-  const day = asRecord(contract.day);
+357-
+358-  const ticker = textValue(details.ticker);
+359:  const expiration = textValue(details.expiration_date);
+360-  const side = normalizeSide(details.contract_type);
+361-
+362-  // SPXW فقط + انتهاء اليوم فقط.
+363-  if (
+364-    !ticker ||
+365-    !ticker.toUpperCase().includes("SPXW") ||
+366-    expiration !== today ||
+367-    !side
+368-  ) {
+369-    return null;
+370-  }
+371-
+372-  const strike = numberValue(details.strike_price);
+373-
+374-  const bid = numberValue(quote.bid);
+375-  const ask = numberValue(quote.ask);
+376-  const suppliedMidpoint = numberValue(quote.midpoint);
+377-
+378-  const midpoint =
+379-    suppliedMidpoint > 0
+380-      ? suppliedMidpoint
+381-      : bid > 0 && ask > 0
+382-        ? (bid + ask) / 2
+383-        : 0;
+384-
+385-  const lastPrice = numberValue(lastTrade.price);
+386-
+387-  const referencePrice =
+388-    midpoint > 0
+389-      ? midpoint
+390-      : lastPrice > 0
+391-        ? lastPrice
+392-        : bid > 0
+393-          ? bid
+394-          : ask;
+395-
+396-  const executionPrice = ask > 0 ? ask : referencePrice;
+397-
+398-  const spreadPct =
+399-    midpoint > 0 && ask > bid && bid > 0
+400-      ? ((ask - bid) / midpoint) * 100
+401-      : 999;
+402-
+403-  const delta = numberValue(greeks.delta);
+404-  const gamma = numberValue(greeks.gamma);
+405-  const theta = numberValue(greeks.theta);
+406-  const vega = numberValue(greeks.vega);
+407-
+408-  const rawIv = numberValue(contract.implied_volatility);
+409-  const ivPct = rawIv > 0 && rawIv <= 3 ? rawIv * 100 : rawIv;
+410-
+411-  const volume = numberValue(day.volume);
+412:  const openInterest = numberValue(contract.open_interest);
+413-
+414-  const volumeOi =
+415:    openInterest > 0 ? volume / openInterest : volume > 0 ? volume : 0;
+416-
+417-  const distancePoints = Math.abs(strike - stockPrice);
+418-  const distancePct =
+419-    stockPrice > 0 ? (distancePoints / stockPrice) * 100 : 999;
+420-
+421-  if (
+422-    strike <= 0 ||
+423-    stockPrice <= 0 ||
+424-    executionPrice <= 0 ||
+425-    !Number.isFinite(delta)
+426-  ) {
+427-    return null;
+428-  }
+429-
+430-  // Flow تقديري من حجم وقيمة عقود اليوم نفسها، وليس من الحيتان.
+431-  const flowValue =
+432-    volume > 0 && referencePrice > 0
+433-      ? volume * referencePrice * 100
+434-      : 0;
+435-
+436-  return {
+437-    ticker,
+438-    expiration,
+439-    side,
+440-    strike,
+441-    stockPrice,
+442-    bid,
+443-    ask,
+444-    midpoint,
+445-    executionPrice,
+446-    spreadPct,
+447-    delta,
+448-    gamma,
+449-    theta,
+450-    vega,
+451-    ivPct,
+452-    volume,
+453:    openInterest,
+454-    volumeOi,
+455-    distancePoints,
+456-    distancePct,
+457-    flowValue,
+458-  };
+459-}
+460-
+461-function calculateBaseScore(input: {
+462-  price: number;
+463-  spreadPct: number;
+464-  delta: number;
+465-  volume: number;
+466:  openInterest: number;
+467-  volumeOi: number;
+468-  distancePct: number;
+469-}): { score: number; reasons: string[] } {
+470-  let score = 0;
+471-  const reasons: string[] = [];
+472-
+473-  const absoluteDelta = Math.abs(input.delta);
+474-
+475-  if (absoluteDelta >= 0.35 && absoluteDelta <= 0.5) {
+476-    score += 22;
+477-    reasons.push("دلتا ممتازة للمضاربة السريعة");
+478-  } else if (absoluteDelta >= 0.28 && absoluteDelta <= 0.55) {
+479-    score += 14;
+480-    reasons.push("دلتا ضمن النطاق المقبول");
+481-  }
+482-
+483-  if (input.spreadPct <= 4) {
+484-    score += 20;
+485-    reasons.push("سبريد ممتاز");
+486-  } else if (input.spreadPct <= 7) {
+487-    score += 15;
+488-    reasons.push("سبريد جيد");
+489-  } else if (input.spreadPct <= 12) {
+490-    score += 8;
+491-    reasons.push("السبريد ضمن الحد المقبول");
+492-  }
+493-
+494-  if (input.volume >= 1500) {
+495-    score += 16;
+496-    reasons.push("حجم تداول مرتفع جدًا");
+497-  } else if (input.volume >= 600) {
+498-    score += 12;
+499-    reasons.push("حجم تداول قوي");
+500-  } else if (input.volume >= 200) {
+501-    score += 7;
+502-  }
+503-
+504:  if (input.openInterest >= 1500) {
+505-    score += 12;
+506-    reasons.push("اهتمام مفتوح مرتفع");
+507:  } else if (input.openInterest >= 500) {
+508-    score += 9;
+509-    reasons.push("اهتمام مفتوح جيد");
+510:  } else if (input.openInterest >= 100) {
+511-    score += 5;
+512-  }
+513-
+514-  if (input.distancePct <= 0.1) {
+515-    score += 17;
+516-    reasons.push("العقد قريب جدًا من ATM");
+517-  } else if (input.distancePct <= 0.2) {
+518-    score += 13;
+519-    reasons.push("العقد قريب من ATM");
+520-  } else if (input.distancePct <= 0.35) {
+521-    score += 8;
+522-  } else {
+523-    score += 3;
+524-  }
+525-
+526-  if (input.volumeOi >= 1) {
+527-    score += 8;
+528-    reasons.push("الحجم قوي مقارنة بالاهتمام المفتوح");
+529-  } else if (input.volumeOi >= 0.5) {
+530-    score += 5;
+531-  }
+532-
+533-  if (input.price >= 1 && input.price <= 6) {
+534-    score += 5;
+535-    reasons.push("سعر العقد مناسب للمضاربة");
+536-  } else if (input.price > 0 && input.price <= 10) {
+537-    score += 3;
+538-  }
+539-
+540-  return {
+541-    score: clamp(Math.round(score), 0, 100),
+542-    reasons,
+543-  };
+544-}
+545-
+546-
+547-function calculateGammaFromContracts(
+548:  contracts: RawContract[],
+549-  stockPrice: number
+550-) {
+551:  const nearContracts = contracts.filter(
+552-    (contract) =>
+553-      Math.abs(contract.strike - stockPrice) <= 150
+554-  );
+555-  const byStrike = new Map<
+556-    number,
+557-    {
+558-      callGex: number;
+559-      putGex: number;
+560-      netGex: number;
+561-      totalOpenInterest: number;
+562-      totalVolume: number;
+563-    }
+564-  >();
+565-
+566-  let totalNetGex = 0;
+567-
+568-  for (const contract of nearContracts) {
+569-    const unsignedGex =
+570-      contract.gamma *
+571:      contract.openInterest *
+572-      100 *
+573-      stockPrice *
+574-      stockPrice *
+575-      0.01;
+576-
+577-    const signedGex =
+578-      contract.side === "CALL"
+579-        ? unsignedGex
+580-        : -unsignedGex;
+581-
+582-    totalNetGex += signedGex;
+583-
+584-    const current = byStrike.get(contract.strike) || {
+585-      callGex: 0,
+586-      putGex: 0,
+587-      netGex: 0,
+588-      totalOpenInterest: 0,
+589-      totalVolume: 0,
+590-    };
+591-
+592-    if (contract.side === "CALL") {
+593-      current.callGex += unsignedGex;
+594-    } else {
+595-      current.putGex += unsignedGex;
+596-    }
+597-
+598-    current.netGex += signedGex;
+599:    current.totalOpenInterest += contract.openInterest;
+600-    current.totalVolume += contract.volume;
+601-
+602-    byStrike.set(contract.strike, current);
+603-  }
+604-
+605-  const rows = Array.from(byStrike.entries())
+606-    .map(([strike, values]) => ({
+607-      strike,
+608-      ...values,
+609-    }))
+610-    .sort((first, second) => first.strike - second.strike);
+611-
+612-  const emptyRow = {
+613-    strike: 0,
+614-    callGex: 0,
+615-    putGex: 0,
+616-    netGex: 0,
+617-    totalOpenInterest: 0,
+618-    totalVolume: 0,
+619-  };
+620-
+621-  /*
+622-    Call Wall يجب أن يكون عند السعر أو فوقه،
+623-    وPut Wall عند السعر أو تحته.
+624-  */
+625-  const callWallCandidates = rows.filter(
+626-    (row) => row.strike >= stockPrice
+627-  );
+628-
+629-  const putWallCandidates = rows.filter(
+630-    (row) => row.strike <= stockPrice
+631-  );
+632-
+633-  const strongestCallGammaRow =
+634-    rows.length > 0
+635-      ? rows.reduce(
+636-          (best, row) =>
+637-            row.callGex > best.callGex
+638-              ? row
+639-              : best,
+640-          rows[0]
+641-        )
+642-      : emptyRow;
+643-
+644-  const strongestPutGammaRow =
+645-    rows.length > 0
+646-      ? rows.reduce(
+647-          (best, row) =>
+648-            row.putGex > best.putGex
+649-              ? row
+650-              : best,
+651-          rows[0]
+652-        )
+653-      : emptyRow;
+654-
+655-  const callWall =
+656-    callWallCandidates.length > 0
+657-      ? callWallCandidates.reduce(
+658-          (best, row) =>
+659-            row.callGex > best.callGex
+660-              ? row
+661-              : best,
+662-          callWallCandidates[0]
+663-        ).strike
+664-      : 0;
+665-
+666-  const putWall =
+667-    putWallCandidates.length > 0
+668-      ? putWallCandidates.reduce(
+669-          (best, row) =>
+670-            row.putGex > best.putGex
+671-              ? row
+672-              : best,
+673-          putWallCandidates[0]
+674-        ).strike
+675-      : 0;
+676-
+677-  /*
+678-    Magnet لحظي لـ0DTE:
+679-    نبحث ضمن 50 نقطة من السعر فقط،
+680-    ونوازن بين OI وحجم تداول اليوم.
+681-  */
+682-  const magnetCandidates = rows.filter(
+683-    (row) =>
+684-      Math.abs(row.strike - stockPrice) <= 50
+685-  );
+686-
+687-  const magnet =
+688-    magnetCandidates.length > 0
+689-      ? magnetCandidates.reduce(
+690-          (best, row) => {
+691-            const rowScore =
+692-              row.totalOpenInterest +
+693-              row.totalVolume * 0.5;
+694-
+695-            const bestScore =
+696-              best.totalOpenInterest +
+697-              best.totalVolume * 0.5;
+698-
+699-            if (rowScore !== bestScore) {
+700-              return rowScore > bestScore
+701-                ? row
+702-                : best;
+703-            }
+704-
+705-            return Math.abs(row.strike - stockPrice) <
+706-              Math.abs(best.strike - stockPrice)
+707-              ? row
+708-              : best;
+709-          },
+710-          magnetCandidates[0]
+711-        ).strike
+712-      : 0;
+713-
+714-  let zeroGamma = 0;
+715-
+716-  for (let index = 1; index < rows.length; index += 1) {
+717-    const previous = rows[index - 1];
+718-    const current = rows[index];
+719-
+720-    const crossed =
+721-      (previous.netGex <= 0 && current.netGex >= 0) ||
+722-      (previous.netGex >= 0 && current.netGex <= 0);
+723-
+724-    if (crossed) {
+725-      zeroGamma =
+726-        Math.abs(previous.netGex) <= Math.abs(current.netGex)
+727-          ? previous.strike
+728-          : current.strike;
+729-
+730-      break;
+731-    }
+732-  }
+733-
+734-  if (zeroGamma === 0 && rows.length > 0) {
+735-    zeroGamma = rows.reduce(
+736-      (best, row) =>
+737-        Math.abs(row.netGex) < Math.abs(best.netGex)
+738-          ? row
+739-          : best,
+740-      rows[0]
+741-    ).strike;
+742-  }
+743-
+744-  return {
+745-    netGex: totalNetGex,
+746-    zeroGamma,
+747-    callWall,
+748-    putWall,
+749-    magnet,
+750-    strongestCallGammaStrike:
+751-      strongestCallGammaRow.strike,
+752-    strongestCallGammaValue:
+753-      strongestCallGammaRow.callGex,
+754-    strongestPutGammaStrike:
+755-      strongestPutGammaRow.strike,
+756-    strongestPutGammaValue:
+757-      strongestPutGammaRow.putGex,
+758-  };
+759-}
+760-
+761-
+762-export async function GET() {
+763-  try {
+764-    const massiveApiKey =
+765-      process.env.MASSIVE_API_KEY;
+766-
+767-    if (!massiveApiKey) {
+768-      throw new Error(
+769-        "متغير MASSIVE_API_KEY غير موجود"
+770-      );
+771-    }
+772-
+773-    const today =
+774-      todayNewYork();
+775-
+776-    const rawChain =
+777-      await fetchTodaySpxwChain(
+778-        massiveApiKey,
+779-        today
+780-      );
+781-
+782-    const stockPrice =
+783-      estimateSpxPriceFromChain(
+784-        rawChain,
+785-        today
+786-      );
+787-
+788:    const allContracts = rawChain
+789-      .map((row) => readContract(row, today, stockPrice))
+790-      .filter((row): row is RawContract => row !== null);
+791-
+792:    if (allContracts.length === 0) {
+793-      return NextResponse.json({
+794-        ok: true,
+795-        date: today,
+796-        status: "NO_CONTRACTS",
+797-        message: "لا توجد عقود SPXW منتهية اليوم حاليًا.",
+798-        market: null,
+799-        gamma: null,
+800-        bestContract: null,
+801:        contracts: [],
+802-        updatedAt: new Date().toISOString(),
+803-      });
+804-    }
+805-
+806-
+807:    const callFlow = allContracts
+808-      .filter((row) => row.side === "CALL")
+809-      .reduce((total, row) => total + row.flowValue, 0);
+810-
+811:    const putFlow = allContracts
+812-      .filter((row) => row.side === "PUT")
+813-      .reduce((total, row) => total + row.flowValue, 0);
+814-
+815-    const totalFlow = callFlow + putFlow;
+816-
+817-    const callFlowPct =
+818-      totalFlow > 0 ? (callFlow / totalFlow) * 100 : 0;
+819-
+820-    const putFlowPct =
+821-      totalFlow > 0 ? (putFlow / totalFlow) * 100 : 0;
+822-
+823-    const flowGap = Math.abs(callFlowPct - putFlowPct);
+824-
+825-    let flowDirection: MarketDirection = "NEUTRAL";
+826-
+827-    if (callFlowPct >= 58) {
+828-      flowDirection = "CALL";
+829-    } else if (putFlowPct >= 58) {
+830-      flowDirection = "PUT";
+831-    }
+832-
+833:    const gamma = calculateGammaFromContracts(allContracts, stockPrice);
+834-
+835-    const nowNewYork = new Date(
+836-      new Date().toLocaleString("en-US", {
+837-        timeZone: "America/New_York",
+838-      })
+839-    );
+840-
+841-    const sessionClose = new Date(nowNewYork);
+842-    sessionClose.setHours(16, 0, 0, 0);
+843-
+844-    const remainingMs = Math.max(
+845-      sessionClose.getTime() - nowNewYork.getTime(),
+846-      5 * 60 * 1000
+847-    );
+848-
+849-    const gammaFlipModel = calculateGammaFlip({
+850:      contracts: allContracts.map((contract) => ({
+851-        side: contract.side,
+852-        strike: contract.strike,
+853:        openInterest: contract.openInterest,
+854-        ivPct: contract.ivPct,
+855-      })),
+856-      currentSpot: stockPrice,
+857-      timeYears:
+858-        remainingMs /
+859-        (365 * 24 * 60 * 60 * 1000),
+860-      rangePoints: 200,
+861-      step: 1,
+862-    });
+863-
+864-    const magnetDistance =
+865-      gamma.magnet > 0 && stockPrice > 0
+866-        ? Math.abs(stockPrice - gamma.magnet)
+867-        : 999;
+868-
+869-    const nearMagnet =
+870-      magnetDistance <= Math.max(5, stockPrice * 0.0008);
+871-
+872-    const betweenWalls =
+873-      gamma.callWall > 0 &&
+874-      gamma.putWall > 0 &&
+875-      stockPrice < gamma.callWall &&
+876-      stockPrice > gamma.putWall;
+877-
+878-    const wallWidth =
+879-      gamma.callWall > 0 && gamma.putWall > 0
+880-        ? gamma.callWall - gamma.putWall
+881-        : 999;
+882-
+883-    const gammaChop =
+884-      (nearMagnet && flowGap < 14) ||
+885-      (gamma.netGex > 0 &&
+886-        betweenWalls &&
+887-        wallWidth > 0 &&
+888-        wallWidth <= 35 &&
+889-        flowGap < 18);
+890-
+891:    const eligibleContracts = allContracts.filter((row) => {
+892-      const absoluteDelta = Math.abs(row.delta);
+893-
+894-      return (
+895-        row.expiration === today &&
+896-        row.ticker.toUpperCase().includes("SPXW") &&
+897-        absoluteDelta >= 0.28 &&
+898-        absoluteDelta <= 0.55 &&
+899-        row.spreadPct <= 12 &&
+900-        row.volume >= 100 &&
+901:        (row.openInterest >= 20 || row.volume >= 500) &&
+902-        row.executionPrice >= 0.8 &&
+903-        row.executionPrice <= 50 &&
+904-        row.distancePct <= 0.45
+905-      );
+906-    });
+907-
+908-    const scoredContracts: ScoredContract[] = eligibleContracts
+909-      .map((row) => {
+910-        const base = calculateBaseScore({
+911-          price: row.executionPrice,
+912-          spreadPct: row.spreadPct,
+913-          delta: row.delta,
+914-          volume: row.volume,
+915:          openInterest: row.openInterest,
+916-          volumeOi: row.volumeOi,
+917-          distancePct: row.distancePct,
+918-        });
+919-
+920-        let finalScore = base.score;
+921-        const reasons = [...base.reasons];
+922-        const warnings: string[] = [];
+923-
+924-        const relevantFlowPct =
+925-          row.side === "CALL" ? callFlowPct : putFlowPct;
+926-
+927-        if (row.side === flowDirection) {
+928-          if (relevantFlowPct >= 65) {
+929-            finalScore += 12;
+930-            reasons.push("توافق قوي مع اتجاه Flow اليومي");
+931-          } else {
+932-            finalScore += 8;
+933-            reasons.push("العقد متوافق مع اتجاه Flow");
+934-          }
+935-        } else {
+936-          finalScore -= 20;
+937-          warnings.push("العقد عكس اتجاه Flow اليومي");
+938-        }
+939-
+940-        if (gamma.netGex < 0) {
+941-          finalScore += 8;
+942-          reasons.push("Net GEX سالب يدعم توسع الحركة");
+943-        } else if (gamma.netGex > 0) {
+944-          const alignedWithMagnetSide =
+945-            (row.side === "CALL" && stockPrice > gamma.magnet) ||
+946-            (row.side === "PUT" && stockPrice < gamma.magnet);
+947-
+948-          if (alignedWithMagnetSide) {
+949-            finalScore += 3;
+950-          } else {
+951-            finalScore -= 6;
+952-            warnings.push("Net GEX موجب وقد يعيد السعر نحو Magnet");
+953-          }
+954-        }
+955-
+956-        if (gamma.magnet > 0) {
+957-          const directionMatchesMagnet =
+958-            (row.side === "CALL" && stockPrice > gamma.magnet) ||
+959-            (row.side === "PUT" && stockPrice < gamma.magnet);
+960-
+961-          if (directionMatchesMagnet && !nearMagnet) {
+962-            finalScore += 8;
+963-            reasons.push("السعر يتحرك في الجهة الصحيحة من Magnet");
+964-          } else if (!directionMatchesMagnet) {
+965-            finalScore -= 12;
+966-            warnings.push("العقد ضد موقع السعر بالنسبة إلى Magnet");
+967-          }
+968-        }
+969-
+970-        if (row.side === "CALL" && gamma.callWall > 0) {
+971-          const distanceToWall = gamma.callWall - stockPrice;
+972-
+973-          if (distanceToWall > 0 && distanceToWall <= 8) {
+974-            finalScore -= 8;
+975-            warnings.push("Call Wall قريب وقد يحد الصعود");
+976-          }
+977-        }
+978-
+979-        if (row.side === "PUT" && gamma.putWall > 0) {
+980-          const distanceToWall = stockPrice - gamma.putWall;
+981-
+982-          if (distanceToWall > 0 && distanceToWall <= 8) {
+983-            finalScore -= 8;
+984-            warnings.push("Put Wall قريب وقد يحد الهبوط");
+985-          }
+986-        }
+987-
+988-        finalScore = clamp(Math.round(finalScore), 0, 100);
+989-
+990-        const quality: ScoredContract["quality"] =
+991-          finalScore >= 85
+992-            ? "ممتاز"
+993-            : finalScore >= 72
+994-              ? "جيد"
+995-              : "مقبول";
+996-
+997-        return {
+998-          ticker: row.ticker,
+999-          expiration: row.expiration,
+1000-          side: row.side,
+1001-          strike: round(row.strike),
+1002-          stockPrice: round(row.stockPrice),
+1003-          bid: round(row.bid),
+1004-          ask: round(row.ask),
+1005-          midpoint: round(row.midpoint),
+1006-          price: round(row.executionPrice),
+1007-          spreadPct: round(row.spreadPct),
+1008-          delta: round(row.delta, 4),
+1009-          gamma: round(row.gamma, 6),
+1010-          theta: round(row.theta, 4),
+1011-          vega: round(row.vega, 4),
+1012-          ivPct: round(row.ivPct),
+1013-          volume: Math.round(row.volume),
+1014:          openInterest: Math.round(row.openInterest),
+1015-          volumeOi: round(row.volumeOi),
+1016-          distancePoints: round(row.distancePoints),
+1017-          distancePct: round(row.distancePct, 3),
+1018-          baseScore: base.score,
+1019-          finalScore,
+1020-          quality,
+1021-          reasons,
+1022-          warnings,
+1023-        };
+1024-      })
+1025-      .sort(
+1026-        (first, second) =>
+1027-          second.finalScore - first.finalScore ||
+1028-          second.volume - first.volume ||
+1029-          first.spreadPct - second.spreadPct
+1030-      );
+1031-
+1032-    let status: "ACTIVE" | "WATCH" | "NO_TRADE";
+1033-    let message: string;
+1034-    let bestContract: ScoredContract | null = null;
+1035-
+1036-    if (gammaChop) {
+1037-      status = "NO_TRADE";
+1038-      message =
+1039-        "لا توجد صفقة: السعر داخل Gamma Chop وقريب من Magnet مع غياب أفضلية قوية.";
+1040-    } else if (flowDirection === "NEUTRAL") {
+1041-      status = "NO_TRADE";
+1042-      message =
+1043-        "لا توجد صفقة: تدفق CALL وPUT متقارب ولا يوجد اتجاه واضح.";
+1044-    } else {
+1045-      bestContract =
+1046-        scoredContracts.find(
+1047-          (contract) => contract.side === flowDirection
+1048-        ) || null;
+1049-
+1050-      if (!bestContract) {
+1051-        status = "NO_TRADE";
+1052-        message =
+1053-          "لا يوجد عقد SPXW 0DTE يطابق شروط الجودة والسيولة حاليًا.";
+1054-      } else if (bestContract.finalScore >= 80) {
+1055-        status = "ACTIVE";
+1056-        message =
+1057-          `فرصة ${flowDirection} مفعّلة وفق Flow والقاما وجودة العقد.`;
+1058-      } else {
+1059-        status = "WATCH";
+1060-        message =
+1061-          `فرصة ${flowDirection} تحت المراقبة ولم تصل إلى درجة التفعيل.`;
+1062-      }
+1063-    }
+1064-
+1065-    /*
+1066-      عقد التنفيذ منفصل تمامًا عن العقد التحليلي:
+1067-      - bestContract يبقى أساس القرار والتقييم.
+1068-      - executionContract يُختار بعد اكتمال القرار فقط.
+1069-      - جميع البدائل هنا اجتازت أصلًا نفس شروط eligibleContracts.
+1070-    */
+1071-    let executionContract:
+1072-      ScoredContract | null =
+1073-        bestContract;
+1074-
+1075-    if (
+1076-      bestContract &&
+1077-      bestContract.price > 3.5
+1078-    ) {
+1079-      /*
+1080-        البحث عن عقد التنفيذ يتم بعد اكتمال القرار،
+1081-        ومن جميع عقود اليوم، ولا يشارك في تقييم الفرصة.
+1082-      */
+1083-      const affordableExecutionCandidates =
+1084:        allContracts
+1085-          .filter((candidate) => {
+1086-            return (
+1087-              candidate.side ===
+1088-                bestContract?.side &&
+1089-              candidate.expiration ===
+1090-                bestContract?.expiration &&
+1091-              candidate.ticker !==
+1092-                bestContract?.ticker &&
+1093-              candidate.executionPrice >= 1 &&
+1094-              candidate.executionPrice <= 3.5 &&
+1095-              candidate.bid > 0 &&
+1096-              candidate.ask > 0 &&
+1097-              candidate.spreadPct <= 20 &&
+1098-              candidate.volume >= 50 &&
+1099-              (
+1100:                candidate.openInterest >= 10 ||
+1101-                candidate.volume >= 200
+1102-              )
+1103-            );
+1104-          })
+1105-          .sort((first, second) => {
+1106-            const firstDeltaGap =
+1107-              Math.abs(
+1108-                Math.abs(first.delta) -
+1109-                  Math.abs(
+1110-                    bestContract?.delta || 0
+1111-                  )
+1112-              );
+1113-
+1114-            const secondDeltaGap =
+1115-              Math.abs(
+1116-                Math.abs(second.delta) -
+1117-                  Math.abs(
+1118-                    bestContract?.delta || 0
+1119-                  )
+1120-              );
+1121-
+1122-            if (firstDeltaGap !== secondDeltaGap) {
+1123-              return firstDeltaGap - secondDeltaGap;
+1124-            }
+1125-
+1126-            const firstStrikeGap =
+1127-              Math.abs(
+1128-                first.strike -
+1129-                  (bestContract?.strike || 0)
+1130-              );
+1131-
+1132-            const secondStrikeGap =
+1133-              Math.abs(
+1134-                second.strike -
+1135-                  (bestContract?.strike || 0)
+1136-              );
+1137-
+1138-            if (firstStrikeGap !== secondStrikeGap) {
+1139-              return firstStrikeGap - secondStrikeGap;
+1140-            }
+1141-
+1142-            return (
+1143-              first.spreadPct -
+1144-                second.spreadPct ||
+1145-              second.volume -
+1146-                first.volume ||
+1147:              second.openInterest -
+1148:                first.openInterest
+1149-            );
+1150-          });
+1151-
+1152-      const affordableExecutionRow =
+1153-        affordableExecutionCandidates[0] || null;
+1154-
+1155-      if (affordableExecutionRow) {
+1156-        executionContract = {
+1157-          ...bestContract,
+1158-
+1159-          ticker:
+1160-            affordableExecutionRow.ticker,
+1161-
+1162-          expiration:
+1163-            affordableExecutionRow.expiration,
+1164-
+1165-          side:
+1166-            affordableExecutionRow.side,
+1167-
+1168-          strike:
+1169-            round(
+1170-              affordableExecutionRow.strike
+1171-            ),
+1172-
+1173-          stockPrice:
+1174-            round(
+1175-              affordableExecutionRow.stockPrice
+1176-            ),
+1177-
+1178-          bid:
+1179-            round(
+1180-              affordableExecutionRow.bid
+1181-            ),
+1182-
+1183-          ask:
+1184-            round(
+1185-              affordableExecutionRow.ask
+1186-            ),
+1187-
+1188-          midpoint:
+1189-            round(
+1190-              affordableExecutionRow.midpoint
+1191-            ),
+1192-
+1193-          price:
+1194-            round(
+1195-              affordableExecutionRow.executionPrice
+1196-            ),
+1197-
+1198-          spreadPct:
+1199-            round(
+1200-              affordableExecutionRow.spreadPct
+1201-            ),
+1202-
+1203-          delta:
+1204-            round(
+1205-              affordableExecutionRow.delta,
+1206-              4
+1207-            ),
+1208-
+1209-          gamma:
+1210-            round(
+1211-              affordableExecutionRow.gamma,
+1212-              6
+1213-            ),
+1214-
+1215-          theta:
+1216-            round(
+1217-              affordableExecutionRow.theta,
+1218-              4
+1219-            ),
+1220-
+1221-          vega:
+1222-            round(
+1223-              affordableExecutionRow.vega,
+1224-              4
+1225-            ),
+1226-
+1227-          ivPct:
+1228-            round(
+1229-              affordableExecutionRow.ivPct
+1230-            ),
+1231-
+1232-          volume:
+1233-            Math.round(
+1234-              affordableExecutionRow.volume
+1235-            ),
+1236-
+1237:          openInterest:
+1238-            Math.round(
+1239:              affordableExecutionRow.openInterest
+1240-            ),
+1241-
+1242-          volumeOi:
+1243-            round(
+1244-              affordableExecutionRow.volumeOi
+1245-            ),
+1246-
+1247-          distancePoints:
+1248-            round(
+1249-              affordableExecutionRow.distancePoints
+1250-            ),
+1251-
+1252-          distancePct:
+1253-            round(
+1254-              affordableExecutionRow.distancePct,
+1255-              3
+1256-            ),
+1257-
+1258-          reasons: [
+1259-            ...bestContract.reasons,
+1260-            "عقد تنفيذ بديل أرخص من نفس اتجاه الفرصة.",
+1261-          ],
+1262-
+1263-          warnings: [
+1264-            ...bestContract.warnings,
+1265-            "عقد التنفيذ البديل لا يغيّر تحليل الفرصة أو تقييمها.",
+1266-          ],
+1267-        };
+1268-      }
+1269-    }
+1270-
+1271-    return NextResponse.json(
+1272-      {
+1273-        ok: true,
+1274-        date: today,
+1275-        status,
+1276-        message,
+1277-
+1278-        market: {
+1279-          direction: flowDirection,
+1280-
+1281-          priceSource:
+1282-            "SPXW put-call parity",
+1283-          flowMethod: "0DTE volume × midpoint × 100",
+1284-          stockPrice: round(stockPrice),
+1285-          callFlow: round(callFlow),
+1286-          putFlow: round(putFlow),
+1287-          totalFlow: round(totalFlow),
+1288-          callFlowPct: round(callFlowPct),
+1289-          putFlowPct: round(putFlowPct),
+1290-          flowGap: round(flowGap),
+1291-          gammaChop,
+1292-          nearMagnet,
+1293-          magnetDistance: round(magnetDistance),
+1294-        },
+1295-
+1296-        gamma: {
+1297-          netGex: round(gamma.netGex),
+1298-
+1299-          netGexFlip: round(gamma.zeroGamma),
+1300-
+1301-          zeroGamma:
+1302-            gammaFlipModel.zeroGamma == null
+1303-              ? null
+1304-              : round(gammaFlipModel.zeroGamma),
+1305-
+1306-          callWall: round(gamma.callWall),
+1307-          putWall: round(gamma.putWall),
+1308-          magnet: round(gamma.magnet),
+1309-          strongestCallGammaStrike: round(
+1310-            gamma.strongestCallGammaStrike
+1311-          ),
+1312-          strongestCallGammaValue: round(
+1313-            gamma.strongestCallGammaValue
+1314-          ),
+1315-          strongestPutGammaStrike: round(
+1316-            gamma.strongestPutGammaStrike
+1317-          ),
+1318-          strongestPutGammaValue: round(
+1319-            gamma.strongestPutGammaValue
+1320-          ),
+1321-        },
+1322-
+1323-        filters: {
+1324-          expiration: today,
+1325-          symbol: "SPXW",
+1326-          delta: "0.28 - 0.55",
+1327-          maxSpreadPct: 12,
+1328-          minimumVolume: 100,
+1329-          minimumOpenInterest: 20,
+1330-          maximumDistancePct: 0.45,
+1331-          contractPrice: "0.80 - 50.00",
+1332-        },
+1333-
+1334-        bestContract,
+1335-        executionContract,
+1336:        contracts: scoredContracts.slice(0, 30),
+1337-
+1338-        counts: {
+1339:          allTodayContracts: allContracts.length,
+1340-          eligibleContracts: eligibleContracts.length,
+1341-          scoredContracts: scoredContracts.length,
+1342-        },
+1343-
+1344-        updatedAt: new Date().toISOString(),
+1345-      },
+1346-      {
+1347-        headers: {
+1348-          "Cache-Control": "private, no-store, max-age=0",
+1349-        },
+1350-      }
+1351-    );
+1352-  } catch (error) {
+1353-    return NextResponse.json(
+1354-      {
+1355-        ok: false,
+1356-        error:
+1357-          error instanceof Error
+1358-            ? error.message
+1359-            : "حدث خطأ غير معروف",
+1360-      },
+1361-      { status: 500 }
+1362-    );
+1363-  }
+1364-}
+===== استجابة SPX API =====
+1-import { NextResponse } from "next/server";
+2-import { calculateGammaFlip } from "@/lib/gamma-flip-engine";
+3-
+4-export const runtime = "nodejs";
+5-export const dynamic = "force-dynamic";
+6-export const revalidate = 0;
+7-
+8-type DataRecord = Record<string, unknown>;
+9-type ContractSide = "CALL" | "PUT";
+10-type MarketDirection = ContractSide | "NEUTRAL";
+11-
+12-type RawContract = {
+13-  ticker: string;
+14-  expiration: string;
+15-  side: ContractSide;
+16-  strike: number;
+17-  stockPrice: number;
+18-  bid: number;
+19-  ask: number;
+20-  midpoint: number;
+21-  executionPrice: number;
+22-  spreadPct: number;
+23-  delta: number;
+24:  gamma: number;
+25-  theta: number;
+26-  vega: number;
+27-  ivPct: number;
+28-  volume: number;
+29-  openInterest: number;
+30-  volumeOi: number;
+31-  distancePoints: number;
+32-  distancePct: number;
+33-  flowValue: number;
+34-};
+35-
+36-type ScoredContract = {
+37-  ticker: string;
+38-  expiration: string;
+39-  side: ContractSide;
+40-  strike: number;
+41-  stockPrice: number;
+42-  bid: number;
+43-  ask: number;
+44-  midpoint: number;
+45-  price: number;
+46-  spreadPct: number;
+47-  delta: number;
+48:  gamma: number;
+49-  theta: number;
+50-  vega: number;
+51-  ivPct: number;
+52-  volume: number;
+53-  openInterest: number;
+54-  volumeOi: number;
+55-  distancePoints: number;
+56-  distancePct: number;
+57-  baseScore: number;
+58-  finalScore: number;
+59-  quality: "ممتاز" | "جيد" | "مقبول";
+60-  reasons: string[];
+61-  warnings: string[];
+62-};
+63-
+64-function asRecord(value: unknown): DataRecord {
+65-  return value !== null &&
+66-    typeof value === "object" &&
+67-    !Array.isArray(value)
+68-    ? (value as DataRecord)
+69-    : {};
+70-}
+71-
+72-function asArray(value: unknown): unknown[] {
+73-  return Array.isArray(value) ? value : [];
+74-}
+75-
+76-function numberValue(value: unknown, fallback = 0): number {
+77-  const parsed = Number(value);
+78-  return Number.isFinite(parsed) ? parsed : fallback;
+79-}
+80-
+81-function textValue(value: unknown): string {
+82-  return typeof value === "string" ? value.trim() : "";
+83-}
+84-
+85-function round(value: number, digits = 2): number {
+86-  const factor = 10 ** digits;
+87-  return Math.round((value + Number.EPSILON) * factor) / factor;
+88-}
+89-
+90-function clamp(value: number, minimum: number, maximum: number): number {
+91-  return Math.min(maximum, Math.max(minimum, value));
+92-}
+93-
+94-function todayNewYork(): string {
+95-  return new Intl.DateTimeFormat("en-CA", {
+96-    timeZone: "America/New_York",
+97-    year: "numeric",
+98-    month: "2-digit",
+99-    day: "2-digit",
+100-  }).format(new Date());
+101-}
+102-
+103-function normalizeSide(value: unknown): ContractSide | null {
+104-  const side = textValue(value).toLowerCase();
+105-
+106-  if (side === "call" || side === "c") {
+107-    return "CALL";
+108-  }
+109-
+110-  if (side === "put" || side === "p") {
+111-    return "PUT";
+112-  }
+113-
+114-  return null;
+115-}
+116-
+117-async function fetchJson(url: string, headers?: HeadersInit): Promise<unknown> {
+118-  const response = await fetch(url, {
+119-    headers,
+120-    cache: "no-store",
+121-  });
+122-
+123-  const responseText = await response.text();
+124-
+125-  let payload: unknown = {};
+126-
+127-  try {
+128-    payload = responseText ? JSON.parse(responseText) : {};
+129-  } catch {
+130-    payload = { error: responseText };
+131-  }
+132-
+133-  if (!response.ok) {
+134-    throw new Error(
+135-      textValue(asRecord(payload).error) ||
+136-        `فشل الطلب: HTTP ${response.status}`
+137-    );
+138-  }
+139-
+140-  return payload;
+141-}
+142-
+143-
+144-
+145-function estimateSpxPriceFromChain(
+146-  rawChain: unknown[],
+147-  expiration: string
+148-): number {
+149-  const pairs = new Map<
+150-    number,
+151-    {
+152-      call?: number;
+153-      put?: number;
+154-    }
+155-  >();
+156-
+157-  for (const value of rawChain) {
+158-    const contract = asRecord(value);
+159-    const details = asRecord(contract.details);
+160-    const quote = asRecord(contract.last_quote);
+161-    const trade = asRecord(contract.last_trade);
+162-
+163-    const ticker = textValue(details.ticker);
+164-    const contractExpiration =
+165-      textValue(details.expiration_date);
+166-
+167-    const side =
+168-      normalizeSide(details.contract_type);
+169-
+170-    const strike =
+171-      numberValue(details.strike_price);
+172-
+173-    if (
+174-      !ticker.toUpperCase().includes("SPXW") ||
+175-      contractExpiration !== expiration ||
+176-      !side ||
+177-      strike <= 0
+178-    ) {
+179-      continue;
+180-    }
+181-
+182-    const bid = numberValue(quote.bid);
+183-    const ask = numberValue(quote.ask);
+184-
+185-    const suppliedMidpoint =
+186-      numberValue(quote.midpoint);
+187-
+188-    const midpoint =
+189-      suppliedMidpoint > 0
+190-        ? suppliedMidpoint
+191-        : bid > 0 && ask > 0
+192-          ? (bid + ask) / 2
+193-          : numberValue(trade.price);
+194-
+195-    if (midpoint <= 0) {
+196-      continue;
+197-    }
+198-
+199-    const pair =
+200-      pairs.get(strike) || {};
+201-
+202-    if (side === "CALL") {
+203-      pair.call = midpoint;
+204-    } else {
+205-      pair.put = midpoint;
+206-    }
+207-
+208-    pairs.set(strike, pair);
+209-  }
+210-
+211-  /*
+212-    Put–Call Parity لعقود 0DTE:
+213-
+214-    SPX ≈ Strike + Call Mid - Put Mid
+215-
+216-    نختار أقرب ثلاثة أزواج ATM، وهي الأزواج
+217-    التي يكون فيها الفرق بين سعر CALL وPUT أقل،
+218-    ثم نأخذ الوسيط لتقليل أثر الأسعار الشاذة.
+219-  */
+220-  const estimates = Array.from(
+221-    pairs.entries()
+222-  )
+223-    .filter(
+224-      (
+225-        entry
+226-      ): entry is [
+227-        number,
+228-        {
+229-          call: number;
+230-          put: number;
+231-        },
+232-      ] =>
+233-        Number.isFinite(
+234-          entry[1].call
+235-        ) &&
+236-        Number.isFinite(
+237-          entry[1].put
+238-        ) &&
+239-        Number(entry[1].call) > 0 &&
+240-        Number(entry[1].put) > 0
+241-    )
+242-    .map(([strike, pair]) => ({
+243-      impliedPrice:
+244-        strike +
+245-        pair.call -
+246-        pair.put,
+247-
+248-      callPutDifference:
+249-        Math.abs(
+250-          pair.call -
+251-          pair.put
+252-        ),
+253-    }))
+254-    .filter(
+255-      (row) =>
+256-        row.impliedPrice >
+257-          1000 &&
+258-        row.impliedPrice <
+259-          20000
+260-    )
+261-    .sort(
+262-      (first, second) =>
+263-        first.callPutDifference -
+264-        second.callPutDifference
+265-    )
+266-    .slice(0, 3)
+267-    .map(
+268-      (row) =>
+--
+733-
+734-  if (zeroGamma === 0 && rows.length > 0) {
+735-    zeroGamma = rows.reduce(
+736-      (best, row) =>
+737-        Math.abs(row.netGex) < Math.abs(best.netGex)
+738-          ? row
+739-          : best,
+740-      rows[0]
+741-    ).strike;
+742-  }
+743-
+744-  return {
+745-    netGex: totalNetGex,
+746-    zeroGamma,
+747-    callWall,
+748-    putWall,
+749-    magnet,
+750-    strongestCallGammaStrike:
+751-      strongestCallGammaRow.strike,
+752-    strongestCallGammaValue:
+753-      strongestCallGammaRow.callGex,
+754-    strongestPutGammaStrike:
+755-      strongestPutGammaRow.strike,
+756-    strongestPutGammaValue:
+757-      strongestPutGammaRow.putGex,
+758-  };
+759-}
+760-
+761-
+762-export async function GET() {
+763-  try {
+764-    const massiveApiKey =
+765-      process.env.MASSIVE_API_KEY;
+766-
+767-    if (!massiveApiKey) {
+768-      throw new Error(
+769-        "متغير MASSIVE_API_KEY غير موجود"
+770-      );
+771-    }
+772-
+773-    const today =
+774-      todayNewYork();
+775-
+776-    const rawChain =
+777-      await fetchTodaySpxwChain(
+778-        massiveApiKey,
+779-        today
+780-      );
+781-
+782-    const stockPrice =
+783-      estimateSpxPriceFromChain(
+784-        rawChain,
+785-        today
+786-      );
+787-
+788-    const allContracts = rawChain
+789-      .map((row) => readContract(row, today, stockPrice))
+790-      .filter((row): row is RawContract => row !== null);
+791-
+792-    if (allContracts.length === 0) {
+793:      return NextResponse.json({
+794-        ok: true,
+795-        date: today,
+796-        status: "NO_CONTRACTS",
+797-        message: "لا توجد عقود SPXW منتهية اليوم حاليًا.",
+798-        market: null,
+799:        gamma: null,
+800:        bestContract: null,
+801-        contracts: [],
+802-        updatedAt: new Date().toISOString(),
+803-      });
+804-    }
+805-
+806-
+807-    const callFlow = allContracts
+808-      .filter((row) => row.side === "CALL")
+809-      .reduce((total, row) => total + row.flowValue, 0);
+810-
+811-    const putFlow = allContracts
+812-      .filter((row) => row.side === "PUT")
+813-      .reduce((total, row) => total + row.flowValue, 0);
+814-
+815-    const totalFlow = callFlow + putFlow;
+816-
+817-    const callFlowPct =
+818-      totalFlow > 0 ? (callFlow / totalFlow) * 100 : 0;
+819-
+820-    const putFlowPct =
+821-      totalFlow > 0 ? (putFlow / totalFlow) * 100 : 0;
+822-
+823-    const flowGap = Math.abs(callFlowPct - putFlowPct);
+824-
+825-    let flowDirection: MarketDirection = "NEUTRAL";
+826-
+827-    if (callFlowPct >= 58) {
+828-      flowDirection = "CALL";
+829-    } else if (putFlowPct >= 58) {
+830-      flowDirection = "PUT";
+831-    }
+832-
+833-    const gamma = calculateGammaFromContracts(allContracts, stockPrice);
+834-
+835-    const nowNewYork = new Date(
+836-      new Date().toLocaleString("en-US", {
+837-        timeZone: "America/New_York",
+838-      })
+839-    );
+840-
+841-    const sessionClose = new Date(nowNewYork);
+842-    sessionClose.setHours(16, 0, 0, 0);
+843-
+844-    const remainingMs = Math.max(
+845-      sessionClose.getTime() - nowNewYork.getTime(),
+846-      5 * 60 * 1000
+847-    );
+848-
+849-    const gammaFlipModel = calculateGammaFlip({
+850-      contracts: allContracts.map((contract) => ({
+851-        side: contract.side,
+852-        strike: contract.strike,
+853-        openInterest: contract.openInterest,
+854-        ivPct: contract.ivPct,
+855-      })),
+856-      currentSpot: stockPrice,
+857-      timeYears:
+858-        remainingMs /
+859-        (365 * 24 * 60 * 60 * 1000),
+860-      rangePoints: 200,
+861-      step: 1,
+862-    });
+863-
+864-    const magnetDistance =
+865-      gamma.magnet > 0 && stockPrice > 0
+866-        ? Math.abs(stockPrice - gamma.magnet)
+867-        : 999;
+868-
+869-    const nearMagnet =
+870-      magnetDistance <= Math.max(5, stockPrice * 0.0008);
+871-
+872-    const betweenWalls =
+873-      gamma.callWall > 0 &&
+874-      gamma.putWall > 0 &&
+875-      stockPrice < gamma.callWall &&
+876-      stockPrice > gamma.putWall;
+877-
+878-    const wallWidth =
+879-      gamma.callWall > 0 && gamma.putWall > 0
+880-        ? gamma.callWall - gamma.putWall
+881-        : 999;
+882-
+883-    const gammaChop =
+884-      (nearMagnet && flowGap < 14) ||
+885-      (gamma.netGex > 0 &&
+886-        betweenWalls &&
+887-        wallWidth > 0 &&
+888-        wallWidth <= 35 &&
+889-        flowGap < 18);
+890-
+891-    const eligibleContracts = allContracts.filter((row) => {
+892-      const absoluteDelta = Math.abs(row.delta);
+893-
+894-      return (
+895-        row.expiration === today &&
+896-        row.ticker.toUpperCase().includes("SPXW") &&
+897-        absoluteDelta >= 0.28 &&
+898-        absoluteDelta <= 0.55 &&
+899-        row.spreadPct <= 12 &&
+900-        row.volume >= 100 &&
+901-        (row.openInterest >= 20 || row.volume >= 500) &&
+902-        row.executionPrice >= 0.8 &&
+903-        row.executionPrice <= 50 &&
+904-        row.distancePct <= 0.45
+905-      );
+906-    });
+907-
+908-    const scoredContracts: ScoredContract[] = eligibleContracts
+909-      .map((row) => {
+910-        const base = calculateBaseScore({
+911-          price: row.executionPrice,
+912-          spreadPct: row.spreadPct,
+913-          delta: row.delta,
+914-          volume: row.volume,
+915-          openInterest: row.openInterest,
+916-          volumeOi: row.volumeOi,
+917-          distancePct: row.distancePct,
+918-        });
+919-
+920-        let finalScore = base.score;
+921-        const reasons = [...base.reasons];
+922-        const warnings: string[] = [];
+923-
+924-        const relevantFlowPct =
+925-          row.side === "CALL" ? callFlowPct : putFlowPct;
+926-
+927-        if (row.side === flowDirection) {
+928-          if (relevantFlowPct >= 65) {
+929-            finalScore += 12;
+930-            reasons.push("توافق قوي مع اتجاه Flow اليومي");
+931-          } else {
+932-            finalScore += 8;
+933-            reasons.push("العقد متوافق مع اتجاه Flow");
+934-          }
+935-        } else {
+936-          finalScore -= 20;
+937-          warnings.push("العقد عكس اتجاه Flow اليومي");
+938-        }
+939-
+940-        if (gamma.netGex < 0) {
+941-          finalScore += 8;
+942-          reasons.push("Net GEX سالب يدعم توسع الحركة");
+943-        } else if (gamma.netGex > 0) {
+944-          const alignedWithMagnetSide =
+945-            (row.side === "CALL" && stockPrice > gamma.magnet) ||
+946-            (row.side === "PUT" && stockPrice < gamma.magnet);
+947-
+948-          if (alignedWithMagnetSide) {
+949-            finalScore += 3;
+950-          } else {
+951-            finalScore -= 6;
+952-            warnings.push("Net GEX موجب وقد يعيد السعر نحو Magnet");
+953-          }
+954-        }
+955-
+956-        if (gamma.magnet > 0) {
+957-          const directionMatchesMagnet =
+958-            (row.side === "CALL" && stockPrice > gamma.magnet) ||
+959-            (row.side === "PUT" && stockPrice < gamma.magnet);
+960-
+961-          if (directionMatchesMagnet && !nearMagnet) {
+962-            finalScore += 8;
+963-            reasons.push("السعر يتحرك في الجهة الصحيحة من Magnet");
+964-          } else if (!directionMatchesMagnet) {
+965-            finalScore -= 12;
+966-            warnings.push("العقد ضد موقع السعر بالنسبة إلى Magnet");
+967-          }
+968-        }
+969-
+970-        if (row.side === "CALL" && gamma.callWall > 0) {
+971-          const distanceToWall = gamma.callWall - stockPrice;
+972-
+973-          if (distanceToWall > 0 && distanceToWall <= 8) {
+974-            finalScore -= 8;
+975-            warnings.push("Call Wall قريب وقد يحد الصعود");
+976-          }
+977-        }
+978-
+979-        if (row.side === "PUT" && gamma.putWall > 0) {
+980-          const distanceToWall = stockPrice - gamma.putWall;
+981-
+982-          if (distanceToWall > 0 && distanceToWall <= 8) {
+983-            finalScore -= 8;
+984-            warnings.push("Put Wall قريب وقد يحد الهبوط");
+985-          }
+986-        }
+987-
+988-        finalScore = clamp(Math.round(finalScore), 0, 100);
+989-
+990-        const quality: ScoredContract["quality"] =
+991-          finalScore >= 85
+992-            ? "ممتاز"
+993-            : finalScore >= 72
+994-              ? "جيد"
+995-              : "مقبول";
+996-
+997-        return {
+998-          ticker: row.ticker,
+999-          expiration: row.expiration,
+1000-          side: row.side,
+1001-          strike: round(row.strike),
+1002-          stockPrice: round(row.stockPrice),
+1003-          bid: round(row.bid),
+1004-          ask: round(row.ask),
+1005-          midpoint: round(row.midpoint),
+1006-          price: round(row.executionPrice),
+1007-          spreadPct: round(row.spreadPct),
+1008-          delta: round(row.delta, 4),
+1009:          gamma: round(row.gamma, 6),
+1010-          theta: round(row.theta, 4),
+1011-          vega: round(row.vega, 4),
+1012-          ivPct: round(row.ivPct),
+1013-          volume: Math.round(row.volume),
+1014-          openInterest: Math.round(row.openInterest),
+1015-          volumeOi: round(row.volumeOi),
+1016-          distancePoints: round(row.distancePoints),
+1017-          distancePct: round(row.distancePct, 3),
+1018-          baseScore: base.score,
+1019-          finalScore,
+1020-          quality,
+1021-          reasons,
+1022-          warnings,
+1023-        };
+1024-      })
+1025-      .sort(
+1026-        (first, second) =>
+1027-          second.finalScore - first.finalScore ||
+1028-          second.volume - first.volume ||
+1029-          first.spreadPct - second.spreadPct
+1030-      );
+1031-
+1032-    let status: "ACTIVE" | "WATCH" | "NO_TRADE";
+1033-    let message: string;
+1034:    let bestContract: ScoredContract | null = null;
+1035-
+1036-    if (gammaChop) {
+1037-      status = "NO_TRADE";
+1038-      message =
+1039-        "لا توجد صفقة: السعر داخل Gamma Chop وقريب من Magnet مع غياب أفضلية قوية.";
+1040-    } else if (flowDirection === "NEUTRAL") {
+1041-      status = "NO_TRADE";
+1042-      message =
+1043-        "لا توجد صفقة: تدفق CALL وPUT متقارب ولا يوجد اتجاه واضح.";
+1044-    } else {
+1045:      bestContract =
+1046-        scoredContracts.find(
+1047-          (contract) => contract.side === flowDirection
+1048-        ) || null;
+1049-
+1050:      if (!bestContract) {
+1051-        status = "NO_TRADE";
+1052-        message =
+1053-          "لا يوجد عقد SPXW 0DTE يطابق شروط الجودة والسيولة حاليًا.";
+1054:      } else if (bestContract.finalScore >= 80) {
+1055-        status = "ACTIVE";
+1056-        message =
+1057-          `فرصة ${flowDirection} مفعّلة وفق Flow والقاما وجودة العقد.`;
+1058-      } else {
+1059-        status = "WATCH";
+1060-        message =
+1061-          `فرصة ${flowDirection} تحت المراقبة ولم تصل إلى درجة التفعيل.`;
+1062-      }
+1063-    }
+1064-
+1065-    /*
+1066-      عقد التنفيذ منفصل تمامًا عن العقد التحليلي:
+1067:      - bestContract يبقى أساس القرار والتقييم.
+1068:      - executionContract يُختار بعد اكتمال القرار فقط.
+1069-      - جميع البدائل هنا اجتازت أصلًا نفس شروط eligibleContracts.
+1070-    */
+1071:    let executionContract:
+1072-      ScoredContract | null =
+1073:        bestContract;
+1074-
+1075-    if (
+1076:      bestContract &&
+1077:      bestContract.price > 3.5
+1078-    ) {
+1079-      /*
+1080-        البحث عن عقد التنفيذ يتم بعد اكتمال القرار،
+1081-        ومن جميع عقود اليوم، ولا يشارك في تقييم الفرصة.
+1082-      */
+1083-      const affordableExecutionCandidates =
+1084-        allContracts
+1085-          .filter((candidate) => {
+1086-            return (
+1087-              candidate.side ===
+1088:                bestContract?.side &&
+1089-              candidate.expiration ===
+1090:                bestContract?.expiration &&
+1091-              candidate.ticker !==
+1092:                bestContract?.ticker &&
+1093-              candidate.executionPrice >= 1 &&
+1094-              candidate.executionPrice <= 3.5 &&
+1095-              candidate.bid > 0 &&
+1096-              candidate.ask > 0 &&
+1097-              candidate.spreadPct <= 20 &&
+1098-              candidate.volume >= 50 &&
+1099-              (
+1100-                candidate.openInterest >= 10 ||
+1101-                candidate.volume >= 200
+1102-              )
+1103-            );
+1104-          })
+1105-          .sort((first, second) => {
+1106-            const firstDeltaGap =
+1107-              Math.abs(
+1108-                Math.abs(first.delta) -
+1109-                  Math.abs(
+1110:                    bestContract?.delta || 0
+1111-                  )
+1112-              );
+1113-
+1114-            const secondDeltaGap =
+1115-              Math.abs(
+1116-                Math.abs(second.delta) -
+1117-                  Math.abs(
+1118:                    bestContract?.delta || 0
+1119-                  )
+1120-              );
+1121-
+1122-            if (firstDeltaGap !== secondDeltaGap) {
+1123-              return firstDeltaGap - secondDeltaGap;
+1124-            }
+1125-
+1126-            const firstStrikeGap =
+1127-              Math.abs(
+1128-                first.strike -
+1129:                  (bestContract?.strike || 0)
+1130-              );
+1131-
+1132-            const secondStrikeGap =
+1133-              Math.abs(
+1134-                second.strike -
+1135:                  (bestContract?.strike || 0)
+1136-              );
+1137-
+1138-            if (firstStrikeGap !== secondStrikeGap) {
+1139-              return firstStrikeGap - secondStrikeGap;
+1140-            }
+1141-
+1142-            return (
+1143-              first.spreadPct -
+1144-                second.spreadPct ||
+1145-              second.volume -
+1146-                first.volume ||
+1147-              second.openInterest -
+1148-                first.openInterest
+1149-            );
+1150-          });
+1151-
+1152-      const affordableExecutionRow =
+1153-        affordableExecutionCandidates[0] || null;
+1154-
+1155-      if (affordableExecutionRow) {
+1156:        executionContract = {
+1157:          ...bestContract,
+1158-
+1159-          ticker:
+1160-            affordableExecutionRow.ticker,
+1161-
+1162-          expiration:
+1163-            affordableExecutionRow.expiration,
+1164-
+1165-          side:
+1166-            affordableExecutionRow.side,
+1167-
+1168-          strike:
+1169-            round(
+1170-              affordableExecutionRow.strike
+1171-            ),
+1172-
+1173-          stockPrice:
+1174-            round(
+1175-              affordableExecutionRow.stockPrice
+1176-            ),
+1177-
+1178-          bid:
+1179-            round(
+1180-              affordableExecutionRow.bid
+1181-            ),
+1182-
+1183-          ask:
+1184-            round(
+1185-              affordableExecutionRow.ask
+1186-            ),
+1187-
+1188-          midpoint:
+1189-            round(
+1190-              affordableExecutionRow.midpoint
+1191-            ),
+1192-
+1193-          price:
+1194-            round(
+1195-              affordableExecutionRow.executionPrice
+1196-            ),
+1197-
+1198-          spreadPct:
+1199-            round(
+1200-              affordableExecutionRow.spreadPct
+1201-            ),
+1202-
+1203-          delta:
+1204-            round(
+1205-              affordableExecutionRow.delta,
+1206-              4
+1207-            ),
+1208-
+1209:          gamma:
+1210-            round(
+1211-              affordableExecutionRow.gamma,
+1212-              6
+1213-            ),
+1214-
+1215-          theta:
+1216-            round(
+1217-              affordableExecutionRow.theta,
+1218-              4
+1219-            ),
+1220-
+1221-          vega:
+1222-            round(
+1223-              affordableExecutionRow.vega,
+1224-              4
+1225-            ),
+1226-
+1227-          ivPct:
+1228-            round(
+1229-              affordableExecutionRow.ivPct
+1230-            ),
+1231-
+1232-          volume:
+1233-            Math.round(
+1234-              affordableExecutionRow.volume
+1235-            ),
+1236-
+1237-          openInterest:
+1238-            Math.round(
+1239-              affordableExecutionRow.openInterest
+1240-            ),
+1241-
+1242-          volumeOi:
+1243-            round(
+1244-              affordableExecutionRow.volumeOi
+1245-            ),
+1246-
+1247-          distancePoints:
+1248-            round(
+1249-              affordableExecutionRow.distancePoints
+1250-            ),
+1251-
+1252-          distancePct:
+1253-            round(
+1254-              affordableExecutionRow.distancePct,
+1255-              3
+1256-            ),
+1257-
+1258-          reasons: [
+1259:            ...bestContract.reasons,
+1260-            "عقد تنفيذ بديل أرخص من نفس اتجاه الفرصة.",
+1261-          ],
+1262-
+1263-          warnings: [
+1264:            ...bestContract.warnings,
+1265-            "عقد التنفيذ البديل لا يغيّر تحليل الفرصة أو تقييمها.",
+1266-          ],
+1267-        };
+1268-      }
+1269-    }
+1270-
+1271:    return NextResponse.json(
+1272-      {
+1273-        ok: true,
+1274-        date: today,
+1275-        status,
+1276-        message,
+1277-
+1278-        market: {
+1279-          direction: flowDirection,
+1280-
+1281-          priceSource:
+1282-            "SPXW put-call parity",
+1283-          flowMethod: "0DTE volume × midpoint × 100",
+1284-          stockPrice: round(stockPrice),
+1285-          callFlow: round(callFlow),
+1286-          putFlow: round(putFlow),
+1287-          totalFlow: round(totalFlow),
+1288-          callFlowPct: round(callFlowPct),
+1289-          putFlowPct: round(putFlowPct),
+1290-          flowGap: round(flowGap),
+1291-          gammaChop,
+1292-          nearMagnet,
+1293-          magnetDistance: round(magnetDistance),
+1294-        },
+1295-
+1296:        gamma: {
+1297-          netGex: round(gamma.netGex),
+1298-
+1299-          netGexFlip: round(gamma.zeroGamma),
+1300-
+1301-          zeroGamma:
+1302-            gammaFlipModel.zeroGamma == null
+1303-              ? null
+1304-              : round(gammaFlipModel.zeroGamma),
+1305-
+1306-          callWall: round(gamma.callWall),
+1307-          putWall: round(gamma.putWall),
+1308-          magnet: round(gamma.magnet),
+1309-          strongestCallGammaStrike: round(
+1310-            gamma.strongestCallGammaStrike
+1311-          ),
+1312-          strongestCallGammaValue: round(
+1313-            gamma.strongestCallGammaValue
+1314-          ),
+1315-          strongestPutGammaStrike: round(
+1316-            gamma.strongestPutGammaStrike
+1317-          ),
+1318-          strongestPutGammaValue: round(
+1319-            gamma.strongestPutGammaValue
+1320-          ),
+1321-        },
+1322-
+1323-        filters: {
+1324-          expiration: today,
+1325-          symbol: "SPXW",
+1326-          delta: "0.28 - 0.55",
+1327-          maxSpreadPct: 12,
+1328-          minimumVolume: 100,
+1329-          minimumOpenInterest: 20,
+1330-          maximumDistancePct: 0.45,
+1331-          contractPrice: "0.80 - 50.00",
+1332-        },
+1333-
+1334:        bestContract,
+1335:        executionContract,
+1336-        contracts: scoredContracts.slice(0, 30),
+1337-
+1338-        counts: {
+1339-          allTodayContracts: allContracts.length,
+1340-          eligibleContracts: eligibleContracts.length,
+1341-          scoredContracts: scoredContracts.length,
+1342-        },
+1343-
+1344-        updatedAt: new Date().toISOString(),
+1345-      },
+1346-      {
+1347-        headers: {
+1348-          "Cache-Control": "private, no-store, max-age=0",
+1349-        },
+1350-      }
+1351-    );
+1352-  } catch (error) {
+1353:    return NextResponse.json(
+1354-      {
+1355-        ok: false,
+1356-        error:
+1357-          error instanceof Error
+1358-            ? error.message
+1359-            : "حدث خطأ غير معروف",
+1360-      },
+1361-      { status: 500 }
+1362-    );
+1363-  }
+1364-}
+===== أنواع بيانات صفحة SPX =====
+"use client";
+
+import Link from "next/link";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+
+type MarketData = {
+  direction: "CALL" | "PUT" | "NEUTRAL";
+  stockPrice: number;
+  callFlow: number;
+  putFlow: number;
+  totalFlow: number;
+  callFlowPct: number;
+  putFlowPct: number;
+  flowGap: number;
+  gammaChop: boolean;
+  nearMagnet: boolean;
+  magnetDistance: number;
+};
+
+type GammaData = {
+  netGex: number;
+  netGexFlip: number;
+  zeroGamma: number | null;
+  callWall: number;
+  putWall: number;
+  magnet: number;
+  strongestCallGammaStrike: number;
+  strongestCallGammaValue: number;
+  strongestPutGammaStrike: number;
+  strongestPutGammaValue: number;
+};
+
+type SignalData = {
+  ok: boolean;
+  status:
+    | "ACTIVE"
+    | "WATCH"
+    | "NO_TRADE"
+    | "NO_CONTRACTS";
+  message?: string;
+  market?: MarketData | null;
+  gamma?: GammaData | null;
+};
+
+type SpxTrade = {
+  id: string;
+  option_ticker: string;
+  side: "CALL" | "PUT";
+  strike: number;
+  expiration: string;
+
+  entry_price: number;
+  current_price: number | null;
+  current_bid: number | null;
+  current_ask: number | null;
+
+  best_price: number | null;
+  lowest_price: number | null;
+  best_profit_dollars: number | null;
+  best_profit_pct: number | null;
+
+  current_profit_dollars: number | null;
+  current_profit_pct: number | null;
+
+  spx_entry_price: number | null;
+  spx_current_price: number | null;
+  invalidation_level: number | null;
+
+  stop_contract_price: number | null;
+  stop_profit_dollars: number | null;
+  stop_profit_pct: number | null;
+  stop_reason: string | null;
+  close_reason: string | null;
+
+  score: number | null;
+  quality: string | null;
+
+  status:
+    | "WATCH"
+    | "ACTIVE"
+    | "STOPPED"
+    | "EXPIRED"
+    | "ERROR";
+
+  activated_at: string | null;
+  stopped_at: string | null;
+  hidden_after: string | null;
+};
+
+type ApiData = {
+  ok: boolean;
+  created?: boolean;
+  stopped?: boolean;
+  message?: string;
+  activeTrade?: SpxTrade | null;
+  trades?: SpxTrade[];
+  signal?: SignalData;
+
+  marketSession?: {
+    isOpen: boolean;
+    phase?: string;
+    label?: string;
+  };
+
+  error?: string;
+  updatedAt?: string;
+};
+
+function formatNumber(
+  value: unknown,
+  digits = 2
+) {
+  const parsed = Number(value);
+
+  if (!Number.isFinite(parsed)) {
+    return "—";
+  }
+
+  return parsed.toLocaleString("en-US", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
+}
+
+function money(
+  value: unknown,
+  showSign = false
+) {
+  const parsed = Number(value);
+
+  if (!Number.isFinite(parsed)) {
+    return "—";
+  }
+
+  const sign =
+    showSign && parsed > 0
+      ? "+"
+      : "";
+
+  return `${sign}$${formatNumber(parsed)}`;
+}
+
+function compactNumber(value: unknown) {
+  const parsed = Number(value);
+
+  if (!Number.isFinite(parsed)) {
+    return "—";
+  }
+
+  const absolute =
+    Math.abs(parsed);
+
+  if (absolute >= 1_000_000_000) {
+    return `${formatNumber(
+      parsed / 1_000_000_000
+    )}B`;
+  }
+
+  if (absolute >= 1_000_000) {
+    return `${formatNumber(
+      parsed / 1_000_000
+    )}M`;
+  }
+
+  if (absolute >= 1_000) {
+    return `${formatNumber(
+      parsed / 1_000
+    )}K`;
+  }
+
+  return formatNumber(parsed);
+}
+
+function formatDate(value?: string | null) {
+  if (!value) {
+    return "—";
+  }
+
+  const date =
+    new Date(value);
+
+  if (
+    Number.isNaN(date.getTime())
+  ) {
+    return "—";
+===== مكان بطاقات التحليل =====
+968-        )}% مقابل ${formatNumber(
+969-          putFlowPct
+970-        )}% لـ PUT${
+971-          netGex > 0
+972-            ? "، وصافي القاما موجب"
+973-            : netGex < 0
+974-              ? "، لكن صافي القاما سالب"
+975-              : ""
+976-        }${
+977-          market?.gammaChop
+978-            ? "، مع وجود Gamma Chop"
+979-            : "، ولا توجد حالة Gamma Chop"
+980-        }.`
+981-      : flowDirection === "PUT"
+982-        ? `تدفق PUT متفوق بنسبة ${formatNumber(
+983-            putFlowPct
+984-          )}% مقابل ${formatNumber(
+985-            callFlowPct
+986-          )}% لـ CALL${
+987-            netGex > 0
+988-              ? "، وصافي القاما موجب"
+989-              : netGex < 0
+990-                ? "، وصافي القاما سالب"
+991-                : ""
+992-          }${
+993-            market?.gammaChop
+994-              ? "، مع وجود Gamma Chop"
+995-              : "، ولا توجد حالة Gamma Chop"
+996-          }.`
+997-        : `تدفقات CALL وPUT متقاربة، ولا توجد أفضلية اتجاه واضحة${
+998-            market?.gammaChop
+999-              ? " مع وجود Gamma Chop."
+1000-              : "."
+1001-          }`;
+1002-
+1003-  const primaryScenario =
+1004-    flowDirection === "CALL"
+1005-      ? pivotHigh > 0 && callWall > pivotHigh
+1006-        ? `الثبات فوق المنطقة المحورية ${pivotLabel} يدعم استمرار الحركة باتجاه Call Wall عند ${formatNumber(
+1007-            callWall,
+1008-            0
+1009-          )}.`
+1010-        : "الأفضلية تميل إلى CALL، لكن لا توجد مساحة واضحة كافية حتى المقاومة التالية."
+1011-      : flowDirection === "PUT"
+1012-        ? pivotLow > 0 && putWall < pivotLow
+1013-          ? `الثبات أسفل المنطقة المحورية ${pivotLabel} يدعم استمرار الحركة باتجاه Put Wall عند ${formatNumber(
+1014-              putWall,
+1015-              0
+1016-            )}.`
+1017-          : "الأفضلية تميل إلى PUT، لكن لا توجد مساحة واضحة كافية حتى الدعم التالي."
+1018:        : "لا يوجد سيناريو اتجاهي واضح حاليًا؛ الأفضل انتظار اتساع فرق التدفق وخروج السعر من المنطقة المحورية.";
+1019-
+1020-  const invalidationScenario =
+1021-    flowDirection === "CALL"
+1022-      ? pivotLow > 0
+1023-        ? `كسر ${formatNumber(
+1024-            pivotLow,
+1025-            0
+1026:          )} والثبات أسفله يضعف سيناريو CALL ويستدعي إعادة التقييم.`
+1027-        : "انقلاب Flow إلى PUT أو ظهور Gamma Chop يلغي أفضلية CALL الحالية."
+1028-      : flowDirection === "PUT"
+1029-        ? pivotHigh > 0
+1030-          ? `اختراق ${formatNumber(
+1031-              pivotHigh,
+1032-              0
+1033:            )} والثبات فوقه يضعف سيناريو PUT ويستدعي إعادة التقييم.`
+1034-          : "انقلاب Flow إلى CALL أو اختفاء الضغط البيعي يلغي أفضلية PUT الحالية."
+1035:        : "يظل سيناريو الانتظار قائمًا حتى يظهر تفوق واضح في Flow ويخرج السعر من نطاق التذبذب.";
+1036-
+1037-  const confidenceReasons: string[] = [];
+1038-
+1039-  if (flowDirection !== "NEUTRAL") {
+1040-    confidenceReasons.push(
+1041:      "✅ اتجاه Flow واضح"
+1042-    );
+1043-  } else {
+1044-    confidenceReasons.push(
+1045:      "⚠️ اتجاه Flow محايد"
+1046-    );
+1047-  }
+1048-
+1049-  if (netGex > 0) {
+1050-    confidenceReasons.push(
+1051-      "✅ Net GEX موجب"
+1052-    );
+1053-  } else if (netGex < 0) {
+1054-    confidenceReasons.push(
+1055-      "⚠️ Net GEX سالب ويرفع التقلب"
+1056-    );
+1057-  }
+1058-
+1059-  confidenceReasons.push(
+1060-    market?.gammaChop
+1061-      ? "⚠️ Gamma Chop نشط"
+1062-      : "✅ لا يوجد Gamma Chop"
+1063-  );
+1064-
+1065-  if (
+1066-    pivotLow > 0 &&
+1067-    pivotHigh > 0
+1068-  ) {
+1069-    confidenceReasons.push(
+1070-      `✅ المنطقة المحورية محددة عند ${pivotLabel}`
+1071-    );
+1072-  }
+1073-
+1074-  const systemScore = Math.max(
+1075-    0,
+1076-    Math.min(
+1077-      100,
+1078-      Math.round(
+1079-        45 +
+1080-          Math.min(
+1081-            Math.abs(flowGap),
+1082-            25
+1083-          ) *
+1084-            1.4 +
+1085-          (
+1086-            flowDirection === "NEUTRAL"
+1087-              ? -15
+1088-              : 10
+1089-          ) +
+1090-          (
+1091-            market?.gammaChop
+1092-              ? -20
+1093-              : 10
+1094-          ) +
+1095-          (
+1096-            pivotLevels.length >= 2
+1097-              ? 10
+1098-              : 0
+1099-          )
+1100-      )
+1101-    )
+1102-  );
+1103-
+1104-  type GammaLevelSummary = {
+1105-    key: string;
+1106-    label: string;
+1107-    price: number;
+1108-    role: string;
+1109-    distance: number;
+1110-    side: "ABOVE" | "BELOW" | "AT";
+1111-  };
+1112-
+1113-  const gammaLevels: GammaLevelSummary[] = [];
+1114-
+1115-  const addGammaLevel = (
+1116-    key: string,
+1117-    label: string,
+1118-    rawPrice: number,
+1119-    role: string
+1120-  ) => {
+1121-    const price = Number(rawPrice || 0);
+1122-
+1123-    if (!Number.isFinite(price) || price <= 0) {
+1124-      return;
+1125-    }
+1126-
+1127-    const difference =
+1128-      spxPrice > 0
+1129-        ? price - spxPrice
+1130-        : 0;
+1131-
+1132-    gammaLevels.push({
+1133-      key,
+1134-      label,
+1135-      price,
+1136-      role,
+1137-      distance: Math.abs(difference),
+1138-      side:
+1139-        difference > 1
+1140-          ? "ABOVE"
+1141-          : difference < -1
+1142-            ? "BELOW"
+1143-            : "AT",
+1144-    });
+1145-  };
+1146-
+1147-  if (gamma) {
+1148-    addGammaLevel(
+1149-      "call-wall",
+1150-      "Call Wall",
+1151-      gamma.callWall,
+1152-      "المقاومة الرئيسية"
+1153-    );
+1154-
+1155-    addGammaLevel(
+1156-      "put-wall",
+1157-      "Put Wall",
+1158-      gamma.putWall,
+1159-      "الدعم الرئيسي"
+1160-    );
+1161-
+1162-    addGammaLevel(
+1163-      "magnet",
+1164-      "Magnet",
+1165-      gamma.magnet,
+1166-      "منطقة جذب سعري"
+1167-    );
+1168-
+1169-    addGammaLevel(
+1170-      "net-gex-flip",
+1171-      "Net GEX Flip",
+1172-      gamma.netGexFlip,
+1173-      "مستوى تفاعل لحظي"
+1174-    );
+1175-
+1176-    if (gamma.zeroGamma != null) {
+1177-      addGammaLevel(
+1178-        "zero-gamma",
+1179-        "Zero Gamma",
+1180-        gamma.zeroGamma,
+1181-        "منطقة تحول في بيئة القاما"
+1182-      );
+1183-    }
+1184-  }
+1185-
+1186-  const sortedGammaLevels =
+1187-    [...gammaLevels].sort(
+1188-      (first, second) =>
+1189-        first.distance -
+1190-        second.distance
+1191-    );
+1192-
+1193-  const nearestSupport =
+1194-    sortedGammaLevels.find(
+1195-      (level) =>
+1196-        level.side === "BELOW" &&
+1197-        (
+1198-          level.key === "put-wall" ||
+1199-          level.key === "net-gex-flip" ||
+1200-          level.key === "zero-gamma" ||
+1201-          level.key === "magnet"
+1202-        )
+1203-    ) || null;
+1204-
+1205-  const nearestResistance =
+1206-    sortedGammaLevels.find(
+1207-      (level) =>
+1208-        level.side === "ABOVE" &&
+1209-        (
+1210-          level.key === "call-wall" ||
+1211-          level.key === "net-gex-flip" ||
+1212-          level.key === "zero-gamma" ||
+1213-          level.key === "magnet"
+1214-        )
+1215-    ) || null;
+1216-
+1217-  const clusteredLevels =
+1218-    gammaLevels.filter(
+1219-      (level) =>
+1220-        spxPrice > 0 &&
+1221-        level.distance <= 10
+1222-    );
+1223-
+1224-  const gammaClusterLow =
+1225-    clusteredLevels.length > 0
+--
+1255-            0
+1256-          )} – ${formatNumber(
+1257-            gammaClusterHigh,
+1258-            0
+1259-          )}`
+1260-      : "لا توجد منطقة متقاربة حاليًا";
+1261-
+1262-  const gammaRiskSummary =
+1263-    clusteredLevels.length >= 3
+1264-      ? `توجد كثافة مرتفعة من مستويات القاما قرب السعر داخل نطاق ${gammaClusterLabel}، لذلك هذه المنطقة مرشحة لتفاعل قوي أو تذبذب قبل تحديد الاتجاه.`
+1265-      : clusteredLevels.length === 2
+1266-        ? `يوجد تداخل بين مستويين مهمين قرب السعر عند ${gammaClusterLabel}، ما يجعل المنطقة حساسة للاختراق أو الارتداد.`
+1267-        : "مستويات القاما متباعدة نسبيًا، لذلك الحركة بين الدعم والمقاومة قد تكون أوضح.";
+1268-
+1269-  const strongestGammaBias =
+1270-    gamma &&
+1271-    gamma.strongestCallGammaValue >
+1272-      gamma.strongestPutGammaValue
+1273-      ? `تجمع Gamma CALL أقوى عند ${formatNumber(
+1274-          gamma.strongestCallGammaStrike,
+1275-          0
+1276-        )} بقوة ${compactNumber(
+1277-          gamma.strongestCallGammaValue
+1278-        )}.`
+1279-      : gamma &&
+1280-          gamma.strongestPutGammaValue >
+1281-            gamma.strongestCallGammaValue
+1282-        ? `تجمع Gamma PUT أقوى عند ${formatNumber(
+1283-            gamma.strongestPutGammaStrike,
+1284-            0
+1285-          )} بقوة ${compactNumber(
+1286-            gamma.strongestPutGammaValue
+1287-          )}.`
+1288-        : "قوة Gamma CALL وPUT متقاربة، ولا توجد أفضلية واضحة من التجمعات.";
+1289-
+1290-  const decisionSupportFactors: string[] = [];
+1291-  const decisionRiskFactors: string[] = [];
+1292-
+1293-  let advancedDecisionScore = 50;
+1294-
+1295-  const flowStrength =
+1296-    Math.abs(callFlowPct - putFlowPct);
+1297-
+1298-  if (flowDirection === "CALL") {
+1299-    advancedDecisionScore += Math.min(
+1300-      20,
+1301-      flowStrength * 0.8
+1302-    );
+1303-
+1304-    decisionSupportFactors.push(
+1305:      `تفوق CALL Flow بنسبة ${formatNumber(
+1306-        callFlowPct
+1307-      )}%`
+1308-    );
+1309-  } else if (flowDirection === "PUT") {
+1310-    advancedDecisionScore += Math.min(
+1311-      20,
+1312-      flowStrength * 0.8
+1313-    );
+1314-
+1315-    decisionSupportFactors.push(
+1316:      `تفوق PUT Flow بنسبة ${formatNumber(
+1317-        putFlowPct
+1318-      )}%`
+1319-    );
+1320-  } else {
+1321-    advancedDecisionScore -= 20;
+1322-
+1323-    decisionRiskFactors.push(
+1324-      "تدفقات CALL وPUT متقاربة"
+1325-    );
+1326-  }
+1327-
+1328-  if (market?.gammaChop) {
+1329-    advancedDecisionScore -= 22;
+1330-
+1331-    decisionRiskFactors.push(
+1332-      "Gamma Chop نشط ويرفع احتمالية الاختراقات الكاذبة"
+1333-    );
+1334-  } else {
+1335-    advancedDecisionScore += 10;
+1336-
+1337-    decisionSupportFactors.push(
+1338-      "لا توجد حالة Gamma Chop"
+1339-    );
+1340-  }
+1341-
+1342-  if (netGex > 0) {
+1343-    if (flowDirection !== "NEUTRAL") {
+1344-      advancedDecisionScore += 7;
+1345-    }
+1346-
+1347-    decisionSupportFactors.push(
+1348-      "Net GEX موجب ويميل إلى تهدئة التقلب"
+1349-    );
+1350-  } else if (netGex < 0) {
+1351-    advancedDecisionScore -= 3;
+1352-
+1353-    decisionRiskFactors.push(
+1354-      "Net GEX سالب وقد يوسّع الحركة بسرعة"
+1355-    );
+1356-  }
+1357-
+1358-  const aboveZeroGamma =
+1359-    zeroGamma > 0 &&
+1360-    spxPrice > zeroGamma;
+1361-
+1362-  const belowZeroGamma =
+1363-    zeroGamma > 0 &&
+1364-    spxPrice < zeroGamma;
+1365-
+1366-  if (
+1367-    flowDirection === "CALL" &&
+1368-    aboveZeroGamma
+1369-  ) {
+1370-    advancedDecisionScore += 10;
+1371-
+1372-    decisionSupportFactors.push(
+1373:      "السعر أعلى Zero Gamma ويدعم سيناريو CALL"
+1374-    );
+1375-  } else if (
+1376-    flowDirection === "PUT" &&
+1377-    belowZeroGamma
+1378-  ) {
+1379-    advancedDecisionScore += 10;
+1380-
+1381-    decisionSupportFactors.push(
+1382:      "السعر أسفل Zero Gamma ويدعم سيناريو PUT"
+1383-    );
+1384-  } else if (
+1385-    flowDirection === "CALL" &&
+1386-    belowZeroGamma
+1387-  ) {
+1388-    advancedDecisionScore -= 12;
+1389-
+1390-    decisionRiskFactors.push(
+1391-      "السعر أسفل Zero Gamma رغم تفوق CALL"
+1392-    );
+1393-  } else if (
+1394-    flowDirection === "PUT" &&
+1395-    aboveZeroGamma
+1396-  ) {
+1397-    advancedDecisionScore -= 12;
+1398-
+1399-    decisionRiskFactors.push(
+1400-      "السعر أعلى Zero Gamma رغم تفوق PUT"
+1401-    );
+1402-  }
+1403-
+1404-  const distanceToMagnet =
+1405-    magnet > 0 && spxPrice > 0
+1406-      ? Math.abs(spxPrice - magnet)
+1407-      : 999;
+1408-
+1409-  if (distanceToMagnet <= 5) {
+1410-    advancedDecisionScore -= 8;
+1411-
+1412-    decisionRiskFactors.push(
+1413-      "السعر ملاصق لـ Magnet وقد يبقى في حالة جذب وتذبذب"
+1414-    );
+1415-  } else if (distanceToMagnet <= 10) {
+1416-    advancedDecisionScore -= 4;
+1417-
+1418-    decisionRiskFactors.push(
+1419-      "السعر قريب من Magnet"
+1420-    );
+1421-  }
+1422-
+1423-  const callRoom =
+1424-    callWall > 0 && spxPrice > 0
+1425-      ? callWall - spxPrice
+1426-      : 0;
+1427-
+1428-  const putRoom =
+1429-    putWall > 0 && spxPrice > 0
+1430-      ? spxPrice - putWall
+1431-      : 0;
+1432-
+1433-  if (flowDirection === "CALL") {
+1434-    if (callRoom >= 15) {
+1435-      advancedDecisionScore += 8;
+1436-
+1437-      decisionSupportFactors.push(
+1438-        `توجد مساحة ${formatNumber(
+1439-          callRoom,
+1440-          0
+1441-        )} نقطة حتى Call Wall`
+1442-      );
+1443-    } else if (callRoom > 0) {
+1444-      advancedDecisionScore -= 8;
+1445-
+1446-      decisionRiskFactors.push(
+1447-        `المسافة إلى Call Wall محدودة: ${formatNumber(
+1448-          callRoom,
+1449-          0
+1450-        )} نقاط`
+1451-      );
+1452-    }
+1453-  }
+1454-
+1455-  if (flowDirection === "PUT") {
+1456-    if (putRoom >= 15) {
+1457-      advancedDecisionScore += 8;
+1458-
+1459-      decisionSupportFactors.push(
+1460-        `توجد مساحة ${formatNumber(
+1461-          putRoom,
+1462-          0
+1463-        )} نقطة حتى Put Wall`
+1464-      );
+1465-    } else if (putRoom > 0) {
+1466-      advancedDecisionScore -= 8;
+1467-
+1468-      decisionRiskFactors.push(
+1469-        `المسافة إلى Put Wall محدودة: ${formatNumber(
+1470-          putRoom,
+1471-          0
+1472-        )} نقاط`
+1473-      );
+1474-    }
+1475-  }
+1476-
+1477-  const modeledDecisionScore = Math.max(
+1478-    0,
+1479-    Math.min(
+1480-      100,
+1481-      Math.round(
+1482-        advancedDecisionScore
+1483-      )
+1484-    )
+1485-  );
+1486-
+1487-  const advancedDecision =
+1488-    market?.gammaChop ||
+1489-    flowDirection === "NEUTRAL" ||
+1490-    modeledDecisionScore < 65
+1491-      ? "انتظار"
+1492-      : flowDirection;
+1493-
+1494-  const decisionQuality =
+1495-    modeledDecisionScore >= 85
+1496-      ? "ممتازة"
+1497-      : modeledDecisionScore >= 75
+1498-        ? "جيدة"
+1499-        : modeledDecisionScore >= 65
+1500-          ? "مقبولة بحذر"
+1501-          : "غير مؤهلة";
+1502-
+1503-  const decisionRiskLevel =
+1504-    market?.gammaChop ||
+1505-    modeledDecisionScore < 60
+1506-      ? "مرتفع"
+1507-      : netGex < 0 ||
+1508-          distanceToMagnet <= 10
+1509-        ? "متوسط"
+1510-        : "منخفض";
+1511-
+1512-  const activationCondition =
+1513-    advancedDecision === "CALL"
+1514-      ? pivotHigh > 0
+1515-        ? `الثبات فوق ${formatNumber(
+1516-            pivotHigh,
+1517-            0
+1518:          )} مع استمرار تفوق CALL Flow.`
+1519:        : "استمرار تفوق CALL Flow مع اختراق المقاومة الأقرب والثبات فوقها."
+1520-      : advancedDecision === "PUT"
+1521-        ? pivotLow > 0
+1522-          ? `الثبات أسفل ${formatNumber(
+1523-              pivotLow,
+1524-              0
+1525:            )} مع استمرار تفوق PUT Flow.`
+1526:          : "استمرار تفوق PUT Flow مع كسر الدعم الأقرب والثبات أسفله."
+1527-        : "انتظار اتساع فرق Flow وخروج السعر بوضوح من منطقة التفاعل.";
+1528-
+1529-  const advancedInvalidation =
+1530-    advancedDecision === "CALL"
+1531-      ? pivotLow > 0
+1532-        ? `كسر ${formatNumber(
+1533-            pivotLow,
+1534-            0
+1535-          )} أو انقلاب Flow إلى PUT.`
+1536-        : "انقلاب Flow إلى PUT أو ظهور Gamma Chop."
+1537-      : advancedDecision === "PUT"
+1538-        ? pivotHigh > 0
+1539-          ? `اختراق ${formatNumber(
+1540-              pivotHigh,
+1541-              0
+1542-            )} أو انقلاب Flow إلى CALL.`
+1543-          : "انقلاب Flow إلى CALL أو ظهور Gamma Chop."
+1544:        : "لا يوجد إلغاء قبل تفعيل سيناريو واضح.";
+1545-
+1546-  return (
+1547-    <main
+1548-      dir="rtl"
+1549-      className="min-h-screen bg-[#030712] px-4 py-8 text-white sm:px-6"
+1550-    >
+1551-      <div className="mx-auto max-w-7xl">
+1552-        <header className="rounded-3xl border border-fuchsia-400/20 bg-gradient-to-l from-fuchsia-500/10 via-slate-900 to-violet-500/10 p-6 shadow-2xl sm:p-8">
+1553-          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+1554-            <div>
+1555-              <p className="text-xs font-black tracking-[0.2em] text-fuchsia-300">
+1556-                SPX 0DTE INTELLIGENCE
+1557-              </p>
+1558-
+1559-              <h1 className="mt-2 text-3xl font-black sm:text-5xl">
+1560-                فرصة SPX اليومية
+1561-              </h1>
+1562-
+1563-              <p className="mt-3 max-w-3xl text-sm font-semibold leading-7 text-slate-400">
+1564:                رصد لحظي لأقوى عقد SPX يومي، مبني على القاما والسيولة والزخم. تتم متابعة فرصة واحدة فقط حتى تحقق أهدافها أو يُلغى السيناريو، مع حفظ أعلى ربح وصل إليه العقد.
+1565-              </p>
+1566-            </div>
+1567-
+1568-            <div className="flex flex-wrap gap-3">
+1569-              <Link
+1570-                href="/dashboard"
+1571-                className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-bold"
+1572-              >
+1573-                العودة إلى المنصة
+1574-              </Link>
+1575-
+1576-              <button
+1577-                type="button"
+1578-                onClick={() =>
+1579-                  void load(false)
+1580-                }
+1581-                disabled={refreshing}
+1582-                className="rounded-xl bg-fuchsia-400 px-5 py-3 text-sm font-black text-slate-950 disabled:opacity-50"
+1583-              >
+1584-                {refreshing
+1585-                  ? "جارٍ التحديث..."
+1586-                  : "تحديث الآن"}
+1587-              </button>
+1588-            </div>
+1589-          </div>
+1590-        </header>
+1591-
+1592-        {error ? (
+1593-          <div className="mt-5 rounded-2xl border border-rose-400/30 bg-rose-400/10 p-4 font-bold text-rose-200">
+1594-            {error}
+1595-          </div>
+1596-        ) : null}
+1597-
+1598-        {loading ? (
+1599-          <div className="mt-6 rounded-3xl border border-white/10 bg-slate-900/60 p-12 text-center font-black text-slate-400">
+1600-            جارٍ تحميل ومتابعة صفقة SPX...
+1601-          </div>
+1602-        ) : data ? (
+1603-          <>
+1604-            <section className="mt-6 rounded-3xl border border-white/10 bg-slate-900/65 p-5">
+1605-              <p className="text-xs font-bold text-slate-500">
+1606-                قرار النظام
+1607-              </p>
+1608-
+1609-              <h2 className="mt-2 text-xl font-black leading-8 sm:text-2xl">
+1610-                {decisionMessage}
+1611-              </h2>
+1612-            </section>
+1613-
+1614-            <section className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-6">
+1615-              <Metric
+1616-                label="سعر SPX"
+1617-                value={SPX_PRICE_DISPLAY_NOTE}
+1618-                color="text-cyan-300"
+1619-                valueClassName="text-xs leading-6 text-center whitespace-normal"
+1620-              />
+1621-
+1622-              <Metric
+1623:                label="اتجاه Flow"
+1624-                value={
+1625-                  market?.direction ||
+1626-                  "—"
+1627-                }
+1628-                color={
+1629-                  market?.direction ===
+1630-                  "CALL"
+1631-                    ? "text-emerald-300"
+1632-                    : market?.direction ===
+1633-                        "PUT"
+1634-                      ? "text-rose-300"
+1635-                      : "text-amber-300"
+1636-                }
+1637-              />
+1638-
+1639-              <Metric
+1640:                label="CALL Flow"
+1641-                value={
+1642-                  market
+1643-                    ? `${formatNumber(
+1644-                        market.callFlowPct
+1645-                      )}%`
+1646-                    : "—"
+1647-                }
+1648-                color="text-emerald-300"
+1649-                valueClassName="text-lg sm:text-xl force-ltr"
+1650-              />
+1651-
+1652-              <Metric
+1653:                label="PUT Flow"
+1654-                value={
+1655-                  market
+1656-                    ? `${formatNumber(
+1657-                        market.putFlowPct
+1658-                      )}%`
+1659-                    : "—"
+1660-                }
+1661-                color="text-rose-300"
+1662-                valueClassName="text-lg sm:text-xl force-ltr"
+1663-              />
+1664-
+1665-              <Metric
+1666-                label="إجمالي Flow"
+1667-                value={
+1668-                  market
+1669-                    ? compactNumber(
+1670-                        market.totalFlow
+1671-                      )
+1672-                    : "—"
+1673-                }
+1674-                color="text-amber-300"
+1675-              />
+1676-
+1677-              <Metric
+1678-                label="Gamma Chop"
+1679-                value={
+1680-                  market?.gammaChop
+1681-                    ? "نعم"
+1682-                    : "لا"
+1683-                }
+1684-                color={
+1685-                  market?.gammaChop
+1686-                    ? "text-rose-300"
+1687-                    : "text-emerald-300"
+1688-                }
+1689-              />
+1690-            </section>
+1691-
+1692-            <section className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-5">
+1693-              <Metric
+1694-                label="Net GEX"
+1695-                value={
+1696-                  gamma
+1697-                    ? compactNumber(
+1698-                        gamma.netGex
+1699-                      )
+1700-                    : "—"
+1701-                }
+1702-              />
+1703-
+1704-              <Metric
+1705-                label="Net GEX Flip"
+1706-                value={
+1707-                  gamma
+1708-                    ? formatNumber(
+1709-                        gamma.netGexFlip,
+1710-                        0
+1711-                      )
+1712-                    : "—"
+1713-                }
+1714-                color="text-violet-300"
+1715-              />
+1716-
+1717-              <Metric
+1718-                label="Zero Gamma"
+1719-                value={
+1720-                  gamma?.zeroGamma != null
+1721-                    ? formatNumber(
+1722-                        gamma.zeroGamma,
+1723-                        0
+1724-                      )
+1725-                    : "—"
+1726-                }
+1727-                color="text-cyan-300"
+1728-              />
+1729-
+1730-              <Metric
+1731-                label="Call Wall"
+1732-                value={
+1733-                  gamma
+1734-                    ? formatNumber(
+1735-                        gamma.callWall,
+1736-                        0
+1737-                      )
+1738-                    : "—"
+1739-                }
+1740-              />
+1741-
+1742-              <Metric
+1743-                label="Put Wall"
+1744-                value={
+1745-                  gamma
+1746-                    ? formatNumber(
+1747-                        gamma.putWall,
+1748-                        0
+1749-                      )
+1750-                    : "—"
+1751-                }
+1752-              />
+1753-
+1754-              <Metric
+1755-                label="Magnet"
+1756-                value={
+1757-                  gamma
+1758-                    ? formatNumber(
+1759-                        gamma.magnet,
+1760-                        0
+1761-                      )
+1762-                    : "—"
+1763-                }
+1764-              />
+1765-
+1766-
+1767-              <Metric
+1768-                label="أقوى Gamma CALL"
+1769-                value={
+1770-                  gamma
+1771-                    ? `\u2066${formatNumber(
+1772-                        gamma.strongestCallGammaStrike,
+1773-                        0
+1774-                      )} — ${compactNumber(
+1775-                        gamma.strongestCallGammaValue
+1776-                      )}\u2069`
+1777-                    : "—"
+1778-                }
+1779-                color="text-emerald-300"
+1780-              />
+1781-
+1782-              <Metric
+1783-                label="أقوى Gamma PUT"
+1784-                value={
+1785-                  gamma
+1786-                    ? `\u2066${formatNumber(
+1787-                        gamma.strongestPutGammaStrike,
+1788-                        0
+1789-                      )} — ${compactNumber(
+1790-                        gamma.strongestPutGammaValue
+1791-                      )}\u2069`
+1792-                    : "—"
+1793-                }
+1794-                color="text-rose-300"
+1795-              />
+1796-            </section>
+1797-
+1798-
+1799-            <section className="mt-6 rounded-3xl border border-cyan-400/20 bg-slate-900/70 p-5 sm:p-6">
+1800-              <div>
+1801-                <p className="text-xs font-black text-cyan-300">
+1802-                  المرحلة الأولى
+1803-                </p>
+1804-
+1805-                <h2 className="mt-2 text-2xl font-black">
+1806-                  التقرير التنفيذي
+1807-                </h2>
+1808-              </div>
+1809-
+1810-              <div className="mt-5 grid gap-4 lg:grid-cols-2">
+1811-                <article className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+1812-                  <p className="text-sm font-black text-cyan-300">
+1813-                    📊 قراءة السوق
+1814-                  </p>
+1815-
+1816-                  <p className="mt-3 text-sm font-semibold leading-7 text-slate-300">
+1817-                    {marketReading}
+1818-                  </p>
+1819-                </article>
+1820-
+1821-                <article className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+1822-                  <p className="text-sm font-black text-violet-300">
+1823-                    🎯 المنطقة المحورية
+1824-                  </p>
+1825-
+1826-                  <p className="mt-3 text-2xl font-black text-white">
+1827-                    {pivotLabel}
+1828-                  </p>
+1829-
+1830-                  <p className="mt-2 text-xs font-semibold leading-6 text-slate-400">
+1831-                    تجمع Net GEX Flip وZero Gamma وMagnet والجدار الأقرب عند توفرها.
+1832-                  </p>
+1833-                </article>
+1834-
+1835-                <article className="rounded-2xl border border-emerald-400/20 bg-emerald-400/[0.05] p-4">
+1836-                  <p className="text-sm font-black text-emerald-300">
+1837:                    📈 السيناريو الأساسي
+1838-                  </p>
+1839-
+1840-                  <p className="mt-3 text-sm font-semibold leading-7 text-slate-300">
+1841-                    {primaryScenario}
+1842-                  </p>
+1843-                </article>
+1844-
+1845-                <article className="rounded-2xl border border-rose-400/20 bg-rose-400/[0.05] p-4">
+1846-                  <p className="text-sm font-black text-rose-300">
+1847:                    ⚠️ سيناريو الإلغاء
+1848-                  </p>
+1849-
+1850-                  <p className="mt-3 text-sm font-semibold leading-7 text-slate-300">
+1851-                    {invalidationScenario}
+1852-                  </p>
+1853-                </article>
+1854-              </div>
+1855-
+1856-              <article className="mt-4 rounded-2xl border border-fuchsia-400/20 bg-fuchsia-400/[0.05] p-4">
+1857-                <div className="flex flex-wrap items-center justify-between gap-3">
+1858-                  <div>
+1859-                    <p className="text-sm font-black text-fuchsia-300">
+1860-                      ⭐ درجة الثقة
+1861-                    </p>
+1862-
+1863-                    <p className="mt-2 text-3xl font-black">
+1864-                      {systemScore}/100
+1865-                    </p>
+1866-                  </div>
+1867-
+1868-                  <span
+1869-                    className={[
+1870-                      "rounded-full border px-4 py-2 text-sm font-black",
+1871-                      flowDirection === "CALL"
+1872-                        ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-300"
+1873-                        : flowDirection === "PUT"
+1874-                          ? "border-rose-400/30 bg-rose-400/10 text-rose-300"
+1875-                          : "border-amber-400/30 bg-amber-400/10 text-amber-300",
+1876-                    ].join(" ")}
+1877-                  >
+1878-                    الاتجاه: {
+1879-                      flowDirection === "NEUTRAL"
+1880-                        ? "انتظار"
+1881-                        : flowDirection
+1882-                    }
+1883-                  </span>
+1884-                </div>
+1885-
+1886-                <div className="mt-4 grid gap-2 text-sm font-semibold leading-7 text-slate-300 sm:grid-cols-2">
+1887-                  {confidenceReasons.map(
+1888-                    (reason) => (
+1889-                      <p key={reason}>
+1890-                        {reason}
+1891-                      </p>
+1892-                    )
+1893-                  )}
+1894-                </div>
+1895-              </article>
+1896-            </section>
+1897-
+1898-            <section className="mt-6 rounded-3xl border border-violet-400/20 bg-slate-900/70 p-5 sm:p-6">
+1899-              <div>
+1900-                <p className="text-xs font-black text-violet-300">
+1901-                  المرحلة الثانية
+1902-                </p>
+1903-
+1904-                <h2 className="mt-2 text-2xl font-black">
+1905-                  خريطة مستويات القاما
+1906-                </h2>
+1907-              </div>
+1908-
+1909-              <div className="mt-5 grid gap-4 lg:grid-cols-3">
+1910-                <article className="rounded-2xl border border-emerald-400/20 bg-emerald-400/[0.05] p-4">
+1911-                  <p className="text-sm font-black text-emerald-300">
+1912-                    الدعم الأقرب
+1913-                  </p>
+1914-
+1915-                  <p className="mt-3 text-2xl font-black">
+1916-                    {nearestSupport
+1917-                      ? formatNumber(
+1918-                          nearestSupport.price,
+1919-                          0
+1920-                        )
+1921-                      : "—"}
+1922-                  </p>
+1923-
+1924-                  <p className="mt-2 text-sm font-semibold leading-7 text-slate-300">
+1925-                    {nearestSupport
+1926-                      ? `${nearestSupport.label} — ${nearestSupport.role} ويبعد ${formatNumber(
+1927-                          nearestSupport.distance,
+1928-                          0
+1929-                        )} نقطة عن السعر.`
+1930-                      : "لا يوجد مستوى دعم واضح أسفل السعر ضمن البيانات الحالية."}
+1931-                  </p>
+1932-                </article>
+1933-
+1934-                <article className="rounded-2xl border border-rose-400/20 bg-rose-400/[0.05] p-4">
+1935-                  <p className="text-sm font-black text-rose-300">
+1936-                    المقاومة الأقرب
+1937-                  </p>
+1938-
+1939-                  <p className="mt-3 text-2xl font-black">
+1940-                    {nearestResistance
+1941-                      ? formatNumber(
+1942-                          nearestResistance.price,
+1943-                          0
+1944-                        )
+1945-                      : "—"}
+1946-                  </p>
+1947-
+1948-                  <p className="mt-2 text-sm font-semibold leading-7 text-slate-300">
+1949-                    {nearestResistance
+1950-                      ? `${nearestResistance.label} — ${nearestResistance.role} وتبعد ${formatNumber(
+1951-                          nearestResistance.distance,
+1952-                          0
+1953-                        )} نقطة عن السعر.`
+1954-                      : "لا يوجد مستوى مقاومة واضح أعلى السعر ضمن البيانات الحالية."}
+1955-                  </p>
+1956-                </article>
+1957-
+1958-                <article className="rounded-2xl border border-cyan-400/20 bg-cyan-400/[0.05] p-4">
+1959-                  <p className="text-sm font-black text-cyan-300">
+1960-                    منطقة التفاعل
+1961-                  </p>
+1962-
+1963-                  <p className="mt-3 text-2xl font-black">
+1964-                    {gammaClusterLabel}
+1965-                  </p>
+1966-
+1967-                  <p className="mt-2 text-sm font-semibold leading-7 text-slate-300">
+1968-                    {gammaRiskSummary}
+1969-                  </p>
+1970-                </article>
+1971-              </div>
+1972-
+1973-              <div className="mt-4 grid gap-4 lg:grid-cols-2">
+1974-                <article className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+1975-                  <p className="text-sm font-black text-violet-300">
+1976-                    ترتيب المستويات حسب القرب
+1977-                  </p>
+1978-
+1979-                  <div className="mt-3 space-y-2 text-sm font-semibold leading-7 text-slate-300">
+1980-                    {sortedGammaLevels.length > 0 ? (
+1981-                      sortedGammaLevels.map(
+1982-                        (level) => (
+1983-                          <p key={level.key}>
+1984-                            {level.label}:{" "}
+1985-                            <span className="font-black text-white">
+1986-                              {formatNumber(
+1987-                                level.price,
+1988-                                0
+1989-                              )}
+1990-                            </span>{" "}
+1991-                            — {level.role} — يبعد{" "}
+1992-                            {formatNumber(
+1993-                              level.distance,
+1994-                              0
+1995-                            )} نقطة
+1996-                          </p>
+1997-                        )
+1998-                      )
+1999-                    ) : (
+2000-                      <p>
+2001-                        لا تتوفر مستويات قاما كافية حاليًا.
+2002-                      </p>
+2003-                    )}
+2004-                  </div>
+2005-                </article>
+2006-
+2007-                <article className="rounded-2xl border border-amber-400/20 bg-amber-400/[0.05] p-4">
+2008-                  <p className="text-sm font-black text-amber-300">
+2009-                    قراءة تجمعات القاما
+2010-                  </p>
+2011-
+2012-                  <p className="mt-3 text-sm font-semibold leading-7 text-slate-300">
+2013-                    {strongestGammaBias}
+2014-                  </p>
+2015-
+2016-                  <p className="mt-3 text-xs font-semibold leading-6 text-slate-400">
+2017-                    أقوى تجمع لا يُستخدم وحده كإشارة دخول؛ يتم دمجه مع Flow وموقع السعر والجدران.
+2018-                  </p>
+2019-                </article>
+2020-              </div>
+2021-            </section>
+2022-
+2023-            <section className="mt-6 rounded-3xl border border-fuchsia-400/20 bg-slate-900/70 p-5 sm:p-6">
+2024-              <div className="flex flex-wrap items-start justify-between gap-4">
+2025-                <div>
+2026-                  <p className="text-xs font-black text-fuchsia-300">
+2027-                    المرحلة الثالثة
+2028-                  </p>
+2029-
+2030-                  <h2 className="mt-2 text-2xl font-black">
+2031-                    قرار النظام المتقدم
+2032-                  </h2>
+2033-                </div>
+2034-
+2035-                <div className="flex flex-wrap gap-2">
+2036-                  <span
+2037-                    className={[
+2038-                      "rounded-full border px-4 py-2 text-sm font-black",
+2039-                      advancedDecision === "CALL"
+2040-                        ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-300"
+2041-                        : advancedDecision === "PUT"
+2042-                          ? "border-rose-400/30 bg-rose-400/10 text-rose-300"
+2043-                          : "border-amber-400/30 bg-amber-400/10 text-amber-300",
+2044-                    ].join(" ")}
+2045-                  >
+2046-                    القرار: {advancedDecision}
+2047-                  </span>
+2048-
+2049-                  <span className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm font-black">
+2050-                    الجودة: {decisionQuality}
+2051-                  </span>
+2052-                </div>
+2053-              </div>
+2054-
+2055-              <div className="mt-5 grid gap-4 sm:grid-cols-3">
+2056-                <article className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+2057-                  <p className="text-xs font-bold text-slate-500">
+2058:                    درجة السيناريو
+2059-                  </p>
+2060-
+2061-                  <p className="mt-2 text-3xl font-black">
+2062-                    {modeledDecisionScore}/100
+2063-                  </p>
+2064-                </article>
+2065-
+2066-                <article className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+2067-                  <p className="text-xs font-bold text-slate-500">
+2068-                    مستوى الخطر
+2069-                  </p>
+2070-
+2071-                  <p
+2072-                    className={[
+2073-                      "mt-2 text-2xl font-black",
+2074-                      decisionRiskLevel === "منخفض"
+2075-                        ? "text-emerald-300"
+2076-                        : decisionRiskLevel === "متوسط"
+2077-                          ? "text-amber-300"
+2078-                          : "text-rose-300",
+2079-                    ].join(" ")}
+2080-                  >
+2081-                    {decisionRiskLevel}
+2082-                  </p>
+2083-                </article>
+2084-
+2085-                <article className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+2086-                  <p className="text-xs font-bold text-slate-500">
+2087-                    الهدف الهيكلي
+2088-                  </p>
+2089-
+2090-                  <p className="mt-2 text-2xl font-black">
+2091-                    {advancedDecision === "CALL" &&
+2092-                    callWall > 0
+2093-                      ? formatNumber(
+2094-                          callWall,
+2095-                          0
+2096-                        )
+2097-                      : advancedDecision === "PUT" &&
+2098-                          putWall > 0
+2099-                        ? formatNumber(
+2100-                            putWall,
+2101-                            0
+2102-                          )
+2103-                        : "انتظار"}
+2104-                  </p>
+2105-                </article>
+2106-              </div>
+2107-
+2108-              <div className="mt-4 grid gap-4 lg:grid-cols-2">
+2109-                <article className="rounded-2xl border border-emerald-400/20 bg-emerald-400/[0.05] p-4">
+2110-                  <p className="text-sm font-black text-emerald-300">
+2111-                    العوامل الداعمة
+2112-                  </p>
+2113-
+2114-                  <div className="mt-3 space-y-2 text-sm font-semibold leading-7 text-slate-300">
+2115-                    {decisionSupportFactors.length > 0 ? (
+2116-                      decisionSupportFactors.map(
+2117-                        (factor) => (
+2118-                          <p key={factor}>
+2119-                            ✅ {factor}
+2120-                          </p>
+2121-                        )
+2122-                      )
+2123-                    ) : (
+2124-                      <p>
+2125-                        لا توجد عوامل داعمة كافية حاليًا.
+2126-                      </p>
+2127-                    )}
+2128-                  </div>
+2129-                </article>
+2130-
+2131-                <article className="rounded-2xl border border-rose-400/20 bg-rose-400/[0.05] p-4">
+2132-                  <p className="text-sm font-black text-rose-300">
+2133-                    عوامل الخطر
+2134-                  </p>
+2135-
+2136-                  <div className="mt-3 space-y-2 text-sm font-semibold leading-7 text-slate-300">
+2137-                    {decisionRiskFactors.length > 0 ? (
+2138-                      decisionRiskFactors.map(
+2139-                        (factor) => (
+2140-                          <p key={factor}>
+2141-                            ⚠️ {factor}
+2142-                          </p>
+2143-                        )
+2144-                      )
+2145-                    ) : (
+2146-                      <p>
+2147-                        لا توجد عوامل خطر جوهرية حاليًا.
+2148-                      </p>
+2149-                    )}
+2150-                  </div>
+2151-                </article>
+2152-              </div>
+2153-
+2154-              <div className="mt-4 grid gap-4 lg:grid-cols-2">
+2155-                <article className="rounded-2xl border border-cyan-400/20 bg-cyan-400/[0.05] p-4">
+2156-                  <p className="text-sm font-black text-cyan-300">
+2157-                    شرط التفعيل
+2158-                  </p>
+2159-
+2160-                  <p className="mt-3 text-sm font-semibold leading-7 text-slate-300">
+2161-                    {activationCondition}
+2162-                  </p>
+2163-                </article>
+2164-
+2165-                <article className="rounded-2xl border border-amber-400/20 bg-amber-400/[0.05] p-4">
+2166-                  <p className="text-sm font-black text-amber-300">
+2167-                    شرط الإلغاء
+2168-                  </p>
+2169-
+2170-                  <p className="mt-3 text-sm font-semibold leading-7 text-slate-300">
+2171-                    {advancedInvalidation}
+2172-                  </p>
+2173-                </article>
+2174-              </div>
+2175-
+2176-              <p className="mt-4 text-xs font-semibold leading-6 text-slate-500">
+2177:                درجة السيناريو تقيس توافق Flow وهيكل القاما وموقع السعر، وهي مستقلة عن تقييم جودة عقد الأوبشن نفسه.
+2178-              </p>
+2179-            </section>
+2180-
+2181-            <section className="mt-6">
+2182-              <h2 className="mb-4 text-xl font-black">
+2183-                الصفقة تحت المتابعة
+2184-              </h2>
+2185-
+2186-              {activeTrade ? (
+2187-                <TradeCard
+2188-                  trade={activeTrade}
+2189-                
+2190-              onRefresh={() => void load(false)}
+2191-              refreshing={refreshing}
+2192-            />
+2193-              ) : (
+2194-                <div className="rounded-3xl border border-dashed border-white/10 bg-slate-900/50 p-10 text-center font-bold text-slate-500">
+2195-                  {marketSession?.isOpen === false
+2196-                    ? "السوق مغلق — لا يتم إصدار فرصة SPX جديدة"
+2197-                    : "السوق مفتوح — لا توجد فرصة SPX مطابقة للشروط حاليًا"}
+2198-                </div>
+2199-              )}
+2200-            </section>
+2201-
+2202-            {stoppedTrades.length > 0 ? (
+2203-              <section className="mt-8">
+2204-                <h2 className="mb-4 text-xl font-black">
+2205-                  الصفقات التي ضربت الوقف
+2206-                </h2>
+2207-
+2208-                <div className="space-y-4">
+2209-                  {stoppedTrades.map(
+2210-                    (trade) => (
+2211-                      <TradeCard
+2212-                        key={trade.id}
+2213-                        trade={trade}
+2214-                      
+2215-              onRefresh={() => void load(false)}
+2216-              refreshing={refreshing}
+2217-            />
+2218-                    )
+2219-                  )}
+2220-                </div>
+2221-              </section>
+2222-            ) : null}
+2223-
+2224-            <p className="mt-6 text-center text-xs font-bold text-slate-600">
+2225-              آخر تحديث:{" "}
+2226-              {formatDate(
+2227-                data.updatedAt
+2228-              )}
+2229-            </p>
+2230-          </>
+2231-        ) : null}
+2232-      </div>
+2233-    </main>
+2234-  );
+2235-}

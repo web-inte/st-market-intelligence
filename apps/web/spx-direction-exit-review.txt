@@ -1,0 +1,1984 @@
+===== تحديث الصفقة الحالية =====
+336-      todayNewYork();
+337-
+338-    const stoppedCutoff =
+339-      new Date(
+340-        Date.now() -
+341-          30 * 60 * 1000
+342-      ).toISOString();
+343-
+344-    /*
+345-      تنظيف صفقات SPX القديمة:
+346-      1) عقود الأيام السابقة تختفي فورًا.
+347-      2) الصفقات التي ضربت الوقف تختفي بعد 30 دقيقة.
+348-    */
+349-    const {
+350-      error: expiredCleanupError,
+351-    } = await supabase
+352-      .from("spx_trade_setups")
+353-      .update({
+354-        status: "EXPIRED",
+355-        hidden_after: nowIso,
+356-        last_error:
+357-          "انتهى تاريخ عقد SPX",
+358-      })
+359-      .in("status", [
+360-        "WATCH",
+361-        "ACTIVE",
+362-      ])
+363-      .lt("expiration", today);
+364-
+365-    if (expiredCleanupError) {
+366-      throw expiredCleanupError;
+367-    }
+368-
+369-    const {
+370-      error: stoppedCleanupError,
+371-    } = await supabase
+372-      .from("spx_trade_setups")
+373-      .update({
+374-        hidden_after: nowIso,
+375-      })
+376:      .eq("status", "STOPPED")
+377-      .lt(
+378:        "stopped_at",
+379-        stoppedCutoff
+380-      );
+381-
+382-    if (stoppedCleanupError) {
+383-      throw stoppedCleanupError;
+384-    }
+385-
+386-
+387-    const {
+388-      data: visibleTrades,
+389-      error: visibleError,
+390-    } = await supabase
+391-      .from("spx_trade_setups")
+392-      .select("*")
+393-      .or(
+394:        `status.in.(WATCH,ACTIVE),and(status.eq.STOPPED,hidden_after.gt.${nowIso})`
+395-      )
+396-      .order("created_at", {
+397-        ascending: false,
+398-      })
+399-      .limit(20);
+400-
+401-    if (visibleError) {
+402-      throw visibleError;
+403-    }
+404-
+405-    const liveTrade =
+406-      (visibleTrades || []).find(
+407-        (row) =>
+408:          row.status === "WATCH" ||
+409:          row.status === "ACTIVE"
+410-      );
+411-
+412-    const sessionOrigin =
+413-      process.env.NODE_ENV === "development"
+414-        ? `http://127.0.0.1:${process.env.PORT || "3000"}`
+415-        : new URL(request.url).origin;
+416-
+417-    const sessionResponse =
+418-      await fetch(
+419-        `${sessionOrigin}/api/market-session`,
+420-        {
+421-          cache: "no-store",
+422-          headers: {
+423-            cookie:
+424-              request.headers.get("cookie") || "",
+425-          },
+426-        }
+427-      );
+428-
+429-    const session =
+430-      await sessionResponse.json();
+431-
+432-    const regularSessionOpen =
+433-      session?.isOpen === true &&
+434-      session?.phase === "REGULAR";
+435-
+436-    /*
+437-      نستمر في جلب التحليل خارج الجلسة الرسمية
+438-      لعرض Flow والقاما والمستويات فقط.
+439-
+440-      لكن بيانات أسعار العقود خارج REGULAR
+441-      لا تُستخدم لإصدار أو متابعة أي صفقة.
+442-    */
+443-    const signal =
+444-      await fetchSpxSignal(request);
+445-
+446-    if (!regularSessionOpen) {
+447-      /*
+448-        عند انتهاء الجلسة الرسمية:
+449-        - إغلاق جميع صفقات SPX المفتوحة.
+450-        - إخفاؤها فورًا من الصفحة.
+451-        - عدم إصدار أي صفقة جديدة حتى REGULAR التالية.
+452-      */
+453-      const {
+454-        error: sessionCloseError,
+455-      } = await supabase
+456-        .from("spx_trade_setups")
+457-        .update({
+458-          status: "EXPIRED",
+459-          hidden_after: nowIso,
+460-          last_error:
+461-            "انتهت الجلسة الرسمية وتم إغلاق المتابعة تلقائيًا",
+462-        })
+463-        .in("status", [
+464-          "ACTIVE",
+465-          "WATCH",
+466-        ]);
+467-
+468-      if (sessionCloseError) {
+469-        throw sessionCloseError;
+470-      }
+471-
+472-      return NextResponse.json(
+473-        {
+474-          ok: true,
+475-          created: false,
+476-          activeTrade: null,
+477-          trades: [],
+478-          signal,
+479-          executionEnabled: false,
+480-          message:
+481-            "السوق خارج الجلسة الرسمية — التحليل متاح، لكن أسعار العقود غير معتمدة ولا يتم إصدار أو متابعة صفقات حتى افتتاح الجلسة الرئيسية.",
+482-          marketSession:
+483-            session,
+484-          updatedAt:
+485-            nowIso,
+486-        },
+487-        {
+488-          headers: {
+489-            "Cache-Control":
+490-              "private, no-store, max-age=0",
+491-          },
+492-        }
+493-      );
+494-    }
+495-
+496-    if (liveTrade) {
+497-      const entryPrice =
+498-        numberValue(
+499-          liveTrade.entry_price
+500-        );
+501-
+502-      let snapshotErrorMessage:
+503-        string | null = null;
+504-
+505-      let snapshot = {
+506-        bid: numberValue(
+507-          liveTrade.current_bid
+508-        ),
+509-        ask: numberValue(
+510-          liveTrade.current_ask
+511-        ),
+512-        midpoint: numberValue(
+513:          liveTrade.current_price,
+514-          entryPrice
+515-        ),
+516-        currentPrice: numberValue(
+517:          liveTrade.current_price,
+518-          entryPrice
+519-        ),
+520-        quoteAt:
+521-          textValue(
+522-            liveTrade.last_quote_at
+523-          ) || nowIso,
+524-      };
+525-
+526-      try {
+527-        snapshot =
+528-          await fetchContractSnapshot(
+529-            textValue(
+530-              liveTrade.option_ticker
+531-            ),
+532-            massiveApiKey
+533-          );
+534-      } catch (snapshotError) {
+535-        snapshotErrorMessage =
+536-          snapshotError instanceof Error
+537-            ? snapshotError.message
+538-            : "تعذر تحديث سعر العقد مؤقتًا";
+539-
+540-        console.warn(
+541-          "SPX contract snapshot unavailable:",
+542-          {
+543-            ticker:
+544-              liveTrade.option_ticker,
+545-            error:
+546-              snapshotErrorMessage,
+547-          }
+548-        );
+549-      }
+550-
+551-      const currentPrice =
+552-        snapshot.currentPrice;
+553-
+554-      const previousBest =
+555-        numberValue(
+556:          liveTrade.best_price,
+557-          entryPrice
+558-        );
+559-
+560-      const previousLowest =
+561-        numberValue(
+562-          liveTrade.lowest_price,
+563-          entryPrice
+564-        );
+565-
+566-      const bestPrice =
+567-        Math.max(
+568-          previousBest,
+569-          currentPrice
+570-        );
+571-
+572-      const lowestPrice =
+573-        Math.min(
+574-          previousLowest,
+575-          currentPrice
+576-        );
+577-
+578-      const currentProfitDollars =
+579-        round(
+580-          (currentPrice - entryPrice) *
+581-            100
+582-        );
+583-
+584-      const currentProfitPct =
+585-        entryPrice > 0
+586-          ? round(
+587-              ((currentPrice -
+588-                entryPrice) /
+589-                entryPrice) *
+590-                100
+591-            )
+592-          : 0;
+593-
+594-      const bestProfitDollars =
+595-        round(
+596-          (bestPrice - entryPrice) *
+597-            100
+598-        );
+599-
+600-      const bestProfitPct =
+601-        entryPrice > 0
+602-          ? round(
+603-              ((bestPrice -
+604-                entryPrice) /
+605-                entryPrice) *
+606-                100
+607-            )
+608-          : 0;
+609-
+610-      const spxCurrentPrice =
+611-        numberValue(
+612-          signal.market?.stockPrice
+613-        );
+614-
+615-      const invalidationLevel =
+616-        numberValue(
+617-          liveTrade.invalidation_level
+618-        );
+619-
+620-      const side =
+621-        textValue(
+622-          liveTrade.side
+623-        ).toUpperCase();
+624-
+625-      const stopped =
+626-        invalidationLevel > 0 &&
+627-        spxCurrentPrice > 0 &&
+628-        (
+629-          (
+630-            side === "CALL" &&
+631-            spxCurrentPrice <=
+632-              invalidationLevel
+633-          ) ||
+634-          (
+635-            side === "PUT" &&
+636-            spxCurrentPrice >=
+637-              invalidationLevel
+638-          )
+639-        );
+640-
+641-      const stoppedAt =
+642-        stopped ? nowIso : null;
+643-
+644-      const hiddenAfter =
+645-        stopped
+646-          ? new Date(
+647-              Date.now() +
+648-                30 *
+649-                  60 *
+650-                  1000
+651-            ).toISOString()
+652-          : null;
+653-
+654-      const updatePayload = {
+655:        current_price:
+656-          currentPrice,
+657-
+658-        current_bid:
+659-          snapshot.bid,
+660-
+661-        current_ask:
+662-          snapshot.ask,
+663-
+664:        best_price:
+665-          bestPrice,
+666-
+667-        lowest_price:
+668-          lowestPrice,
+669-
+670:        best_price_at:
+671-          bestPrice >
+672-          previousBest
+673-            ? snapshot.quoteAt
+674:            : liveTrade.best_price_at,
+675-
+676-        current_profit_dollars:
+677-          currentProfitDollars,
+678-
+679-        current_profit_pct:
+680-          currentProfitPct,
+681-
+682-        best_profit_dollars:
+683-          bestProfitDollars,
+684-
+685-        best_profit_pct:
+686-          bestProfitPct,
+687-
+688:        spx_current_price:
+689-          spxCurrentPrice || null,
+690-
+691-        last_quote_at:
+692-          snapshot.quoteAt,
+693-
+694-        last_error:
+695-          snapshotErrorMessage,
+696-
+697-        ...(stopped
+698-          ? {
+699:              status: "STOPPED",
+700:              stopped_at:
+701-                stoppedAt,
+702-              closed_at:
+703-                stoppedAt,
+704-              hidden_after:
+705-                hiddenAfter,
+706-              stop_contract_price:
+707-                currentPrice,
+708-              stop_profit_dollars:
+709-                currentProfitDollars,
+710-              stop_profit_pct:
+711-                currentProfitPct,
+712-              stop_reason:
+713-                `كسر الوقف ${invalidationLevel}`,
+714-              close_reason:
+715-                "SPX_INVALIDATION",
+716-            }
+717-          : {
+718:              status: "ACTIVE",
+719-            }),
+720-      };
+721-
+722-      const {
+723-        data: updatedTrade,
+724-        error: updateError,
+725-      } = await supabase
+726-        .from("spx_trade_setups")
+727-        .update(updatePayload)
+728-        .eq("id", liveTrade.id)
+729-        .select("*")
+730-        .single();
+731-
+732-      if (
+733-        updateError ||
+734-        !updatedTrade
+735-      ) {
+736-        throw (
+737-          updateError ||
+738-          new Error(
+739-            "تعذر تحديث صفقة SPX"
+740-          )
+741-        );
+742-      }
+743-
+744-      await supabase
+745-        .from("spx_trade_updates")
+746-        .insert({
+747-          setup_id:
+748-            updatedTrade.id,
+749-
+750-          event_type:
+751-            stopped
+752:              ? "STOPPED"
+753-              : "UPDATED",
+754-
+755-          contract_price:
+756-            currentPrice,
+757-
+758-          profit_dollars:
+759-            currentProfitDollars,
+760-
+761-          profit_pct:
+762-            currentProfitPct,
+763-
+764-          message:
+765-            stopped
+766-              ? `ضرب وقف SPX عند مستوى ${invalidationLevel}`
+767-              : "تم تحديث صفقة SPX",
+768-
+769-          metadata: {
+770-            spxCurrentPrice,
+771-            invalidationLevel,
+772-            bid: snapshot.bid,
+773-            ask: snapshot.ask,
+774-            bestPrice,
+775-            bestProfitDollars,
+776-            bestProfitPct,
+777-          },
+778-        });
+779-
+780-      const {
+781-        data: latestTrades,
+782-        error: latestError,
+783-      } = await supabase
+784-        .from("spx_trade_setups")
+785-        .select("*")
+786-        .or(
+787:          `status.in.(WATCH,ACTIVE),and(status.eq.STOPPED,hidden_after.gt.${nowIso})`
+788-        )
+789-        .order("created_at", {
+790-          ascending: false,
+791-        })
+792-        .limit(20);
+793-
+794-      if (latestError) {
+795-        throw latestError;
+796-      }
+797-
+798-      return NextResponse.json(
+799-        {
+800-          ok: true,
+801-          created: false,
+802-          stopped,
+803-          activeTrade:
+804-            stopped
+805-              ? null
+806-              : updatedTrade,
+807-          trades:
+808-            latestTrades || [],
+809-          signal,
+810-          updatedAt: nowIso,
+811-        },
+812-        {
+813-          headers: {
+814-            "Cache-Control":
+815-              "private, no-store, max-age=0",
+816-          },
+817-        }
+818-      );
+819-    }
+820-
+821-    if (
+822:      signal.status !== "ACTIVE" ||
+823-      !signal.bestContract ||
+824-      !signal.market ||
+825-      !signal.gamma
+826-    ) {
+827-      return NextResponse.json(
+828-        {
+829-          ok: true,
+830-          created: false,
+831-          activeTrade: null,
+832-          trades:
+833-            visibleTrades || [],
+834-          signal,
+835-          message:
+836-            signal.message ||
+837-            "لا توجد فرصة SPX مفعّلة حاليًا.",
+838-          updatedAt: nowIso,
+839-        },
+840-        {
+841-          headers: {
+842-            "Cache-Control":
+843-              "private, no-store, max-age=0",
+844-          },
+845-        }
+846-      );
+847-    }
+848-
+849-    const analyticalContract =
+850-      signal.bestContract;
+851-
+852-    const contract =
+853-      signal.executionContract ||
+854-      analyticalContract;
+855-
+856-    /*
+857-      لا نغيّر اختيار الفرصة أو تقييمها.
+858-      فقط نمنع إعادة إنشاء نفس العقد لمدة 30 دقيقة
+859-      إذا تم إغلاقه يدويًا للاختبار.
+860-    */
+861-    const manualCloseCutoff =
+862-      new Date(
+863-        Date.now() -
+864-          30 * 60 * 1000
+865-      ).toISOString();
+866-
+867-    const {
+868-      data: recentlyClosedSameContract,
+869-      error: recentlyClosedError,
+870-    } = await supabase
+871-      .from("spx_trade_setups")
+872-      .select("id, option_ticker, hidden_after")
+873-      .eq(
+874-        "option_ticker",
+875-        contract.ticker
+876-      )
+877-      .eq("status", "EXPIRED")
+878-      .ilike(
+879-        "last_error",
+880-        "%إغلاق يدوي%"
+881-      )
+882-      .gte(
+883-        "hidden_after",
+884-        manualCloseCutoff
+885-      )
+886-      .order("hidden_after", {
+887-        ascending: false,
+888-      })
+889-      .limit(1)
+890-      .maybeSingle();
+891-
+892-    if (recentlyClosedError) {
+893-      throw recentlyClosedError;
+894-    }
+895-
+896-    if (recentlyClosedSameContract) {
+897-      return NextResponse.json(
+898-        {
+899-          ok: true,
+900-          created: false,
+901-          activeTrade: null,
+902-          trades:
+903-            visibleTrades || [],
+904-          signal,
+905-          message:
+906-            "تم إغلاق هذا العقد يدويًا — لن يعاد تفعيله لمدة 30 دقيقة.",
+907-          updatedAt: nowIso,
+908-        },
+909-        {
+910-          headers: {
+911-            "Cache-Control":
+912-              "private, no-store, max-age=0",
+913-          },
+914-        }
+915-      );
+916-    }
+917-
+918-    const spxEntryPrice =
+919-      numberValue(
+920-        signal.market.stockPrice
+921-      );
+922-
+923-    const invalidationLevel =
+924-      chooseInvalidationLevel({
+925-        side:
+926-          contract.side,
+927-
+928-        stockPrice:
+929-          spxEntryPrice,
+930-
+931-        gamma:
+932-          signal.gamma,
+933-      });
+934-
+935-    if (
+936-      spxEntryPrice <= 0 ||
+937-      invalidationLevel <= 0
+938-    ) {
+939-      return NextResponse.json(
+940-        {
+941-          ok: true,
+942-          created: false,
+943-          activeTrade: null,
+944-          trades:
+945-            visibleTrades || [],
+946-          signal,
+947-          message:
+948-            "ظهرت فرصة لكن لم يتوفر وقف صالح من بيانات القاما.",
+949-          updatedAt: nowIso,
+950-        },
+951-        {
+952-          headers: {
+953-            "Cache-Control":
+954-              "private, no-store, max-age=0",
+955-          },
+956-        }
+957-      );
+958-    }
+959-
+960-    const entryPrice =
+961-      numberValue(
+962-        contract.midpoint,
+963-        numberValue(
+964-          contract.ask,
+965-          numberValue(
+966-            contract.price
+967-          )
+968-        )
+969-      );
+970-
+971-    const {
+972-      data: createdTrade,
+973-      error: createError,
+974-    } = await supabase
+975-      .from("spx_trade_setups")
+976-      .insert({
+977-        option_ticker:
+978-          contract.ticker,
+979-
+980-        side:
+981-          contract.side,
+982-
+983-        strike:
+984-          contract.strike,
+985-
+986-        expiration:
+987-          contract.expiration,
+988-
+989-        entry_price:
+990-          entryPrice,
+991-
+992:        current_price:
+993-          entryPrice,
+994-
+995-        current_bid:
+996-          contract.bid,
+997-
+998-        current_ask:
+999-          contract.ask,
+1000-
+1001:        best_price:
+1002-          entryPrice,
+1003-
+1004-        lowest_price:
+1005-          entryPrice,
+1006-
+1007:        best_price_at:
+1008-          nowIso,
+1009-
+1010-        current_profit_dollars:
+1011-          0,
+1012-
+1013-        current_profit_pct:
+1014-          0,
+1015-
+1016-        best_profit_dollars:
+1017-          0,
+1018-
+1019-        best_profit_pct:
+1020-          0,
+1021-
+1022-        spx_entry_price:
+1023-          spxEntryPrice,
+1024-
+1025:        spx_current_price:
+1026-          spxEntryPrice,
+1027-
+1028-        invalidation_level:
+1029-          invalidationLevel,
+1030-
+1031-        score:
+1032-          analyticalContract.finalScore,
+1033-
+1034-        quality:
+1035-          analyticalContract.quality,
+1036-
+1037-        analysis_snapshot: {
+1038-          ...signal,
+1039-          analyticalContract,
+1040-          executionContract:
+1041-            contract,
+1042-        },
+1043-
+1044-        status:
+1045-          "ACTIVE",
+1046-
+1047-        activated_at:
+1048-          nowIso,
+1049-
+1050-        last_quote_at:
+1051-          nowIso,
+1052-      })
+1053-      .select("*")
+1054-      .single();
+1055-
+1056-    if (
+1057-      createError ||
+1058-      !createdTrade
+1059-    ) {
+1060-      throw (
+1061-        createError ||
+1062-        new Error(
+1063-          "تعذر إنشاء صفقة SPX"
+1064-        )
+1065-      );
+1066-    }
+1067-
+1068-    await supabase
+1069-      .from("spx_trade_updates")
+1070-      .insert({
+1071-        setup_id:
+1072-          createdTrade.id,
+1073-
+1074-        event_type:
+1075-          "CREATED",
+1076-
+1077-        contract_price:
+1078-          entryPrice,
+1079-
+1080-        profit_dollars:
+1081-          0,
+1082-
+1083-        profit_pct:
+1084-          0,
+1085-
+1086-        message:
+1087-          `تم تفعيل صفقة ${contract.side} عند وقف ${invalidationLevel}`,
+1088-
+1089-        metadata: {
+1090-          score:
+1091-            analyticalContract.finalScore,
+1092-          quality:
+1093-            analyticalContract.quality,
+1094-          analyticalTicker:
+1095-            analyticalContract.ticker,
+1096-          analyticalStrike:
+1097-            analyticalContract.strike,
+1098-          analyticalPrice:
+1099-            analyticalContract.price,
+1100-          executionTicker:
+1101-            contract.ticker,
+1102-          executionStrike:
+1103-            contract.strike,
+1104-          executionPrice:
+1105-            entryPrice,
+1106-          usedAffordableAlternative:
+1107-            contract.ticker !==
+1108-            analyticalContract.ticker,
+1109-          spxEntryPrice,
+1110-          invalidationLevel,
+1111-        },
+1112-      });
+1113-
+1114-    const {
+1115-      data: latestTrades,
+1116-      error: latestError,
+1117-    } = await supabase
+1118-      .from("spx_trade_setups")
+1119-      .select("*")
+1120-      .or(
+1121:        `status.in.(WATCH,ACTIVE),and(status.eq.STOPPED,hidden_after.gt.${nowIso})`
+1122-      )
+1123-      .order("created_at", {
+1124-        ascending: false,
+1125-      })
+1126-      .limit(20);
+1127-
+1128-    if (latestError) {
+1129-      throw latestError;
+1130-    }
+1131-
+1132-    return NextResponse.json(
+1133-      {
+1134-        ok: true,
+1135-        created: true,
+1136-        activeTrade:
+1137-          createdTrade,
+1138-        trades:
+1139-          latestTrades || [],
+1140-        signal,
+1141-        updatedAt: nowIso,
+1142-      },
+1143-      {
+1144-        headers: {
+1145-          "Cache-Control":
+1146-            "private, no-store, max-age=0",
+1147-        },
+1148-      }
+1149-    );
+1150-  } catch (error) {
+1151-    return NextResponse.json(
+1152-      {
+1153-        ok: false,
+1154-        error:
+1155-          error instanceof Error
+1156-            ? error.message
+1157-            : "حدث خطأ غير معروف",
+1158-      },
+1159-      {
+1160-        status: 500,
+1161-      }
+1162-    );
+1163-  }
+1164-}
+===== إصدار الصفقة الجديدة =====
+1-import { NextResponse } from "next/server";
+2-import { createClient } from "@supabase/supabase-js";
+3-
+4-export const runtime = "nodejs";
+5-export const dynamic = "force-dynamic";
+6-export const revalidate = 0;
+7-
+8-type DataRecord = Record<string, unknown>;
+9-
+10-type SpxSignal = {
+11-  ok: boolean;
+12-  status: string;
+13-  message?: string;
+14-  market?: {
+15-    stockPrice?: number;
+16-  } | null;
+17-  gamma?: {
+18-    zeroGamma?: number;
+19-    callWall?: number;
+20-    putWall?: number;
+21-    magnet?: number;
+22-  } | null;
+23:  bestContract?: {
+24-    ticker: string;
+25:    side: "CALL" | "PUT";
+26-    strike: number;
+27-    expiration: string;
+28-    ask: number;
+29-    bid: number;
+30-    midpoint: number;
+31-    price: number;
+32-    finalScore: number;
+33-    quality: string;
+34-  } | null;
+35-};
+36-
+37-type SpxSignalWithExecution =
+38-  SpxSignal & {
+39:    executionContract?:
+40:      SpxSignal["bestContract"];
+41-  };
+42-
+43-
+44-function record(value: unknown): DataRecord {
+45-  return value !== null &&
+46-    typeof value === "object" &&
+47-    !Array.isArray(value)
+48-    ? (value as DataRecord)
+49-    : {};
+50-}
+51-
+52-function numberValue(value: unknown, fallback = 0) {
+53-  const parsed = Number(value);
+54-
+55-  return Number.isFinite(parsed)
+56-    ? parsed
+57-    : fallback;
+58-}
+59-
+60-function textValue(value: unknown) {
+61-  return typeof value === "string"
+62-    ? value.trim()
+63-    : "";
+64-}
+65-
+66-function round(value: number, digits = 2) {
+67-  const factor = 10 ** digits;
+68-
+69-  return (
+70-    Math.round((value + Number.EPSILON) * factor) /
+71-    factor
+72-  );
+73-}
+74-
+75-
+76-function todayNewYork() {
+77-  return new Intl.DateTimeFormat("en-CA", {
+78-    timeZone: "America/New_York",
+79-    year: "numeric",
+80-    month: "2-digit",
+81-    day: "2-digit",
+82-  }).format(new Date());
+83-}
+84-
+85-
+86-function isSpxDailyWindowOpen() {
+87-  const parts = new Intl.DateTimeFormat("en-US", {
+88-    timeZone: "America/New_York",
+89-    weekday: "short",
+90-    hour: "2-digit",
+91-    minute: "2-digit",
+92-    hourCycle: "h23",
+93-  }).formatToParts(new Date());
+94-
+95-  const weekday =
+96-    parts.find(
+97-      (part) => part.type === "weekday"
+98-    )?.value || "";
+99-
+100-  const hour = Number(
+101-    parts.find(
+102-      (part) => part.type === "hour"
+103-    )?.value || 0
+104-  );
+105-
+106-  const minute = Number(
+107-    parts.find(
+108-      (part) => part.type === "minute"
+109-    )?.value || 0
+110-  );
+111-
+112-  const totalMinutes =
+113-    hour * 60 + minute;
+114-
+115-  const morningTradingDay =
+116-    ["Mon", "Tue", "Wed", "Thu", "Fri"].includes(
+117-      weekday
+118-    );
+119-
+120-  const eveningTradingDay =
+121-    ["Sun", "Mon", "Tue", "Wed", "Thu"].includes(
+122-      weekday
+123-    );
+124-
+125-  // جلسة GTH:
+126-  // 20:15 مساءً حتى 09:25 صباحًا بتوقيت نيويورك.
+127-  const globalSessionOpen =
+128-    (
+129-      eveningTradingDay &&
+130-      totalMinutes >= 20 * 60 + 15
+131-    ) ||
+132-    (
+133-      morningTradingDay &&
+134-      totalMinutes < 9 * 60 + 25
+135-    );
+136-
+137-  // جلسة RTH لعقد SPXW المنتهي في اليوم نفسه:
+138-  // 09:30 صباحًا حتى 16:00 مساءً بتوقيت نيويورك.
+139-  const regularZeroDteSessionOpen =
+140-    morningTradingDay &&
+141-    totalMinutes >= 9 * 60 + 30 &&
+142-    totalMinutes < 16 * 60;
+143-
+144-  return (
+145-    globalSessionOpen ||
+146-    regularZeroDteSessionOpen
+147-  );
+148-}
+149-
+150-function createAdminClient() {
+151-  const url =
+152-    process.env.SUPABASE_URL ||
+153-    process.env.NEXT_PUBLIC_SUPABASE_URL;
+154-
+155-  const secret =
+156-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+157-    process.env.SUPABASE_SECRET_KEY;
+158-
+159-  if (!url || !secret) {
+160-    throw new Error(
+161-      "متغيرات Supabase الخاصة بالسيرفر غير مكتملة"
+162-    );
+163-  }
+164-
+165-  return createClient(url, secret, {
+166-    auth: {
+167-      persistSession: false,
+168-      autoRefreshToken: false,
+169-    },
+170-  });
+171-}
+172-
+173-async function fetchSpxSignal(
+174-  request: Request
+175-): Promise<SpxSignalWithExecution> {
+176-  const requestOrigin =
+177-    new URL(request.url).origin;
+178-
+179-  const internalOrigin =
+180-    process.env.NODE_ENV === "development"
+181-      ? `http://127.0.0.1:${process.env.PORT || "3000"}`
+182-      : requestOrigin;
+183-
+184-  const response = await fetch(
+185-    `${internalOrigin}/api/spx-0dte`,
+186-    {
+187-      cache: "no-store",
+188-      headers: {
+189-        cookie:
+190-          request.headers.get("cookie") || "",
+191-      },
+192-    }
+193-  );
+194-
+195-  if (!response.ok) {
+196-    throw new Error(
+197-      `تعذر جلب تحليل SPX: ${response.status}`
+198-    );
+199-  }
+200-
+201-  return response.json();
+202-}
+203-
+204-async function fetchContractSnapshot(
+205-  contractTicker: string,
+206-  apiKey: string
+207-) {
+208-  const normalizedTicker =
+209-    contractTicker.startsWith("O:")
+210-      ? contractTicker
+211-      : `O:${contractTicker}`;
+212-
+213-  const url =
+214-    `https://api.massive.com/v3/snapshot/options/` +
+215-    `I%3ASPX/${encodeURIComponent(normalizedTicker)}` +
+216-    `?apiKey=${encodeURIComponent(apiKey)}`;
+217-
+218-  const response = await fetch(url, {
+219-    cache: "no-store",
+220-  });
+--
+233-  const quote = record(result.last_quote);
+234-  const trade = record(result.last_trade);
+235-
+236-  const bid = numberValue(quote.bid);
+237-  const ask = numberValue(quote.ask);
+238-
+239-  const midpoint =
+240-    numberValue(quote.midpoint) > 0
+241-      ? numberValue(quote.midpoint)
+242-      : bid > 0 && ask > 0
+243-        ? (bid + ask) / 2
+244-        : 0;
+245-
+246-  const lastPrice =
+247-    numberValue(trade.price);
+248-
+249-  const currentPrice =
+250-    bid > 0
+251-      ? bid
+252-      : midpoint > 0
+253-        ? midpoint
+254-        : lastPrice;
+255-
+256-  if (currentPrice <= 0) {
+257-    throw new Error(
+258-      "لم يرجع Massive سعرًا صالحًا للعقد"
+259-    );
+260-  }
+261-
+262-  return {
+263-    bid: round(bid),
+264-    ask: round(ask),
+265-    midpoint: round(midpoint),
+266-    currentPrice: round(currentPrice),
+267-    quoteAt:
+268-      new Date().toISOString(),
+269-  };
+270-}
+271-
+272-function chooseInvalidationLevel(input: {
+273:  side: "CALL" | "PUT";
+274-  stockPrice: number;
+275-  gamma: NonNullable<SpxSignal["gamma"]>;
+276-}) {
+277-  const {
+278:    side,
+279-    stockPrice,
+280-    gamma,
+281-  } = input;
+282-
+283-  const candidates =
+284:    side === "CALL"
+285-      ? [
+286-          gamma.putWall,
+287-          gamma.zeroGamma,
+288-          gamma.magnet,
+289-        ]
+290-          .map(Number)
+291-          .filter(
+292-            (level) =>
+293-              Number.isFinite(level) &&
+294-              level > 0 &&
+295-              level < stockPrice
+296-          )
+297-          .sort((a, b) => b - a)
+298-      : [
+299-          gamma.callWall,
+300-          gamma.zeroGamma,
+301-          gamma.magnet,
+302-        ]
+303-          .map(Number)
+304-          .filter(
+305-            (level) =>
+306-              Number.isFinite(level) &&
+307-              level > stockPrice
+308-          )
+309-          .sort((a, b) => a - b);
+310-
+311-  return candidates[0] || 0;
+312-}
+313-
+314-export async function GET(
+315-  request: Request
+316-) {
+317-  try {
+318-    const massiveApiKey =
+319-      process.env.MASSIVE_API_KEY;
+320-
+321-    if (!massiveApiKey) {
+322-      throw new Error(
+323-        "متغير MASSIVE_API_KEY غير موجود"
+324-      );
+325-    }
+326-
+327-    const supabase =
+328-      createAdminClient();
+329-
+330-
+331-    const nowIso =
+332-      new Date().toISOString();
+333-
+334-
+335-    const today =
+336-      todayNewYork();
+337-
+338-    const stoppedCutoff =
+339-      new Date(
+340-        Date.now() -
+341-          30 * 60 * 1000
+342-      ).toISOString();
+343-
+344-    /*
+345-      تنظيف صفقات SPX القديمة:
+346-      1) عقود الأيام السابقة تختفي فورًا.
+347-      2) الصفقات التي ضربت الوقف تختفي بعد 30 دقيقة.
+348-    */
+349-    const {
+350-      error: expiredCleanupError,
+351-    } = await supabase
+352-      .from("spx_trade_setups")
+353-      .update({
+354-        status: "EXPIRED",
+355-        hidden_after: nowIso,
+356-        last_error:
+357-          "انتهى تاريخ عقد SPX",
+358-      })
+359-      .in("status", [
+360-        "WATCH",
+361-        "ACTIVE",
+362-      ])
+363-      .lt("expiration", today);
+364-
+365-    if (expiredCleanupError) {
+366-      throw expiredCleanupError;
+367-    }
+368-
+369-    const {
+370-      error: stoppedCleanupError,
+371-    } = await supabase
+372-      .from("spx_trade_setups")
+373-      .update({
+374-        hidden_after: nowIso,
+375-      })
+376-      .eq("status", "STOPPED")
+377-      .lt(
+378-        "stopped_at",
+379-        stoppedCutoff
+380-      );
+381-
+382-    if (stoppedCleanupError) {
+383-      throw stoppedCleanupError;
+384-    }
+385-
+386-
+387-    const {
+388-      data: visibleTrades,
+389-      error: visibleError,
+390-    } = await supabase
+391-      .from("spx_trade_setups")
+392-      .select("*")
+393-      .or(
+394-        `status.in.(WATCH,ACTIVE),and(status.eq.STOPPED,hidden_after.gt.${nowIso})`
+395-      )
+396:      .order("created_at", {
+397-        ascending: false,
+398-      })
+399-      .limit(20);
+400-
+401-    if (visibleError) {
+402-      throw visibleError;
+403-    }
+404-
+405-    const liveTrade =
+406-      (visibleTrades || []).find(
+407-        (row) =>
+408-          row.status === "WATCH" ||
+409-          row.status === "ACTIVE"
+410-      );
+411-
+412-    const sessionOrigin =
+413-      process.env.NODE_ENV === "development"
+414-        ? `http://127.0.0.1:${process.env.PORT || "3000"}`
+415-        : new URL(request.url).origin;
+416-
+417-    const sessionResponse =
+418-      await fetch(
+419-        `${sessionOrigin}/api/market-session`,
+420-        {
+421-          cache: "no-store",
+422-          headers: {
+423-            cookie:
+424-              request.headers.get("cookie") || "",
+425-          },
+426-        }
+427-      );
+428-
+429-    const session =
+430-      await sessionResponse.json();
+431-
+432-    const regularSessionOpen =
+433-      session?.isOpen === true &&
+434-      session?.phase === "REGULAR";
+435-
+436-    /*
+437-      نستمر في جلب التحليل خارج الجلسة الرسمية
+438-      لعرض Flow والقاما والمستويات فقط.
+439-
+440-      لكن بيانات أسعار العقود خارج REGULAR
+441-      لا تُستخدم لإصدار أو متابعة أي صفقة.
+442-    */
+443-    const signal =
+444-      await fetchSpxSignal(request);
+445-
+446-    if (!regularSessionOpen) {
+447-      /*
+448-        عند انتهاء الجلسة الرسمية:
+449-        - إغلاق جميع صفقات SPX المفتوحة.
+450-        - إخفاؤها فورًا من الصفحة.
+451-        - عدم إصدار أي صفقة جديدة حتى REGULAR التالية.
+452-      */
+453-      const {
+454-        error: sessionCloseError,
+455-      } = await supabase
+456-        .from("spx_trade_setups")
+457-        .update({
+458-          status: "EXPIRED",
+459-          hidden_after: nowIso,
+460-          last_error:
+461-            "انتهت الجلسة الرسمية وتم إغلاق المتابعة تلقائيًا",
+462-        })
+463-        .in("status", [
+464-          "ACTIVE",
+465-          "WATCH",
+466-        ]);
+467-
+468-      if (sessionCloseError) {
+469-        throw sessionCloseError;
+470-      }
+471-
+472-      return NextResponse.json(
+473-        {
+474-          ok: true,
+475:          created: false,
+476-          activeTrade: null,
+477-          trades: [],
+478-          signal,
+479-          executionEnabled: false,
+480-          message:
+481-            "السوق خارج الجلسة الرسمية — التحليل متاح، لكن أسعار العقود غير معتمدة ولا يتم إصدار أو متابعة صفقات حتى افتتاح الجلسة الرئيسية.",
+482-          marketSession:
+483-            session,
+484-          updatedAt:
+485-            nowIso,
+486-        },
+487-        {
+488-          headers: {
+489-            "Cache-Control":
+490-              "private, no-store, max-age=0",
+491-          },
+492-        }
+493-      );
+494-    }
+495-
+496-    if (liveTrade) {
+497-      const entryPrice =
+498-        numberValue(
+499-          liveTrade.entry_price
+500-        );
+501-
+502-      let snapshotErrorMessage:
+503-        string | null = null;
+504-
+505-      let snapshot = {
+506-        bid: numberValue(
+507-          liveTrade.current_bid
+508-        ),
+509-        ask: numberValue(
+510-          liveTrade.current_ask
+511-        ),
+512-        midpoint: numberValue(
+513-          liveTrade.current_price,
+514-          entryPrice
+515-        ),
+516-        currentPrice: numberValue(
+517-          liveTrade.current_price,
+518-          entryPrice
+519-        ),
+520-        quoteAt:
+521-          textValue(
+522-            liveTrade.last_quote_at
+523-          ) || nowIso,
+524-      };
+525-
+526-      try {
+527-        snapshot =
+528-          await fetchContractSnapshot(
+529-            textValue(
+530-              liveTrade.option_ticker
+531-            ),
+532-            massiveApiKey
+533-          );
+534-      } catch (snapshotError) {
+535-        snapshotErrorMessage =
+536-          snapshotError instanceof Error
+537-            ? snapshotError.message
+538-            : "تعذر تحديث سعر العقد مؤقتًا";
+539-
+540-        console.warn(
+541-          "SPX contract snapshot unavailable:",
+542-          {
+543-            ticker:
+544-              liveTrade.option_ticker,
+545-            error:
+546-              snapshotErrorMessage,
+547-          }
+548-        );
+549-      }
+550-
+551-      const currentPrice =
+552-        snapshot.currentPrice;
+553-
+554-      const previousBest =
+555-        numberValue(
+556-          liveTrade.best_price,
+557-          entryPrice
+558-        );
+559-
+560-      const previousLowest =
+561-        numberValue(
+562-          liveTrade.lowest_price,
+563-          entryPrice
+564-        );
+565-
+566-      const bestPrice =
+567-        Math.max(
+568-          previousBest,
+569-          currentPrice
+570-        );
+571-
+572-      const lowestPrice =
+573-        Math.min(
+574-          previousLowest,
+575-          currentPrice
+576-        );
+577-
+578-      const currentProfitDollars =
+579-        round(
+580-          (currentPrice - entryPrice) *
+581-            100
+582-        );
+583-
+584-      const currentProfitPct =
+585-        entryPrice > 0
+586-          ? round(
+587-              ((currentPrice -
+588-                entryPrice) /
+589-                entryPrice) *
+590-                100
+591-            )
+592-          : 0;
+593-
+594-      const bestProfitDollars =
+595-        round(
+596-          (bestPrice - entryPrice) *
+597-            100
+598-        );
+599-
+600-      const bestProfitPct =
+601-        entryPrice > 0
+602-          ? round(
+603-              ((bestPrice -
+604-                entryPrice) /
+605-                entryPrice) *
+606-                100
+607-            )
+608-          : 0;
+609-
+610-      const spxCurrentPrice =
+611-        numberValue(
+612-          signal.market?.stockPrice
+613-        );
+614-
+615-      const invalidationLevel =
+616-        numberValue(
+617-          liveTrade.invalidation_level
+618-        );
+619-
+620:      const side =
+621-        textValue(
+622:          liveTrade.side
+623-        ).toUpperCase();
+624-
+625-      const stopped =
+626-        invalidationLevel > 0 &&
+627-        spxCurrentPrice > 0 &&
+628-        (
+629-          (
+630:            side === "CALL" &&
+631-            spxCurrentPrice <=
+632-              invalidationLevel
+633-          ) ||
+634-          (
+635:            side === "PUT" &&
+636-            spxCurrentPrice >=
+637-              invalidationLevel
+638-          )
+639-        );
+640-
+641-      const stoppedAt =
+642-        stopped ? nowIso : null;
+643-
+644-      const hiddenAfter =
+645-        stopped
+646-          ? new Date(
+647-              Date.now() +
+648-                30 *
+649-                  60 *
+650-                  1000
+651-            ).toISOString()
+652-          : null;
+653-
+654-      const updatePayload = {
+655-        current_price:
+656-          currentPrice,
+657-
+658-        current_bid:
+659-          snapshot.bid,
+660-
+661-        current_ask:
+662-          snapshot.ask,
+663-
+664-        best_price:
+665-          bestPrice,
+666-
+667-        lowest_price:
+668-          lowestPrice,
+669-
+670-        best_price_at:
+671-          bestPrice >
+672-          previousBest
+673-            ? snapshot.quoteAt
+674-            : liveTrade.best_price_at,
+675-
+676-        current_profit_dollars:
+677-          currentProfitDollars,
+678-
+679-        current_profit_pct:
+680-          currentProfitPct,
+681-
+682-        best_profit_dollars:
+683-          bestProfitDollars,
+684-
+685-        best_profit_pct:
+686-          bestProfitPct,
+687-
+688-        spx_current_price:
+689-          spxCurrentPrice || null,
+690-
+691-        last_quote_at:
+692-          snapshot.quoteAt,
+693-
+694-        last_error:
+695-          snapshotErrorMessage,
+696-
+697-        ...(stopped
+698-          ? {
+699-              status: "STOPPED",
+700-              stopped_at:
+701-                stoppedAt,
+702-              closed_at:
+703-                stoppedAt,
+704-              hidden_after:
+705-                hiddenAfter,
+706-              stop_contract_price:
+707-                currentPrice,
+708-              stop_profit_dollars:
+709-                currentProfitDollars,
+710-              stop_profit_pct:
+711-                currentProfitPct,
+712-              stop_reason:
+713-                `كسر الوقف ${invalidationLevel}`,
+714-              close_reason:
+715-                "SPX_INVALIDATION",
+716-            }
+717-          : {
+718-              status: "ACTIVE",
+719-            }),
+720-      };
+721-
+722-      const {
+723-        data: updatedTrade,
+724-        error: updateError,
+725-      } = await supabase
+726-        .from("spx_trade_setups")
+727-        .update(updatePayload)
+728-        .eq("id", liveTrade.id)
+729-        .select("*")
+730-        .single();
+731-
+732-      if (
+733-        updateError ||
+734-        !updatedTrade
+735-      ) {
+736-        throw (
+737-          updateError ||
+738-          new Error(
+739-            "تعذر تحديث صفقة SPX"
+740-          )
+741-        );
+742-      }
+743-
+744-      await supabase
+745-        .from("spx_trade_updates")
+746:        .insert({
+747-          setup_id:
+748-            updatedTrade.id,
+749-
+750-          event_type:
+751-            stopped
+752-              ? "STOPPED"
+753-              : "UPDATED",
+754-
+755-          contract_price:
+756-            currentPrice,
+757-
+758-          profit_dollars:
+759-            currentProfitDollars,
+760-
+761-          profit_pct:
+762-            currentProfitPct,
+763-
+764-          message:
+765-            stopped
+766-              ? `ضرب وقف SPX عند مستوى ${invalidationLevel}`
+767-              : "تم تحديث صفقة SPX",
+768-
+769-          metadata: {
+770-            spxCurrentPrice,
+771-            invalidationLevel,
+772-            bid: snapshot.bid,
+773-            ask: snapshot.ask,
+774-            bestPrice,
+775-            bestProfitDollars,
+776-            bestProfitPct,
+777-          },
+778-        });
+779-
+780-      const {
+781-        data: latestTrades,
+782-        error: latestError,
+783-      } = await supabase
+784-        .from("spx_trade_setups")
+785-        .select("*")
+786-        .or(
+787-          `status.in.(WATCH,ACTIVE),and(status.eq.STOPPED,hidden_after.gt.${nowIso})`
+788-        )
+789:        .order("created_at", {
+790-          ascending: false,
+791-        })
+792-        .limit(20);
+793-
+794-      if (latestError) {
+795-        throw latestError;
+796-      }
+797-
+798-      return NextResponse.json(
+799-        {
+800-          ok: true,
+801:          created: false,
+802-          stopped,
+803-          activeTrade:
+804-            stopped
+805-              ? null
+806-              : updatedTrade,
+807-          trades:
+808-            latestTrades || [],
+809-          signal,
+810-          updatedAt: nowIso,
+811-        },
+812-        {
+813-          headers: {
+814-            "Cache-Control":
+815-              "private, no-store, max-age=0",
+816-          },
+817-        }
+818-      );
+819-    }
+820-
+821-    if (
+822:      signal.status !== "ACTIVE" ||
+823:      !signal.bestContract ||
+824-      !signal.market ||
+825-      !signal.gamma
+826-    ) {
+827-      return NextResponse.json(
+828-        {
+829-          ok: true,
+830:          created: false,
+831-          activeTrade: null,
+832-          trades:
+833-            visibleTrades || [],
+834-          signal,
+835-          message:
+836:            signal.message ||
+837-            "لا توجد فرصة SPX مفعّلة حاليًا.",
+838-          updatedAt: nowIso,
+839-        },
+840-        {
+841-          headers: {
+842-            "Cache-Control":
+843-              "private, no-store, max-age=0",
+844-          },
+845-        }
+846-      );
+847-    }
+848-
+849-    const analyticalContract =
+850:      signal.bestContract;
+851-
+852-    const contract =
+853:      signal.executionContract ||
+854-      analyticalContract;
+855-
+856-    /*
+857-      لا نغيّر اختيار الفرصة أو تقييمها.
+858-      فقط نمنع إعادة إنشاء نفس العقد لمدة 30 دقيقة
+859-      إذا تم إغلاقه يدويًا للاختبار.
+860-    */
+861-    const manualCloseCutoff =
+862-      new Date(
+863-        Date.now() -
+864-          30 * 60 * 1000
+865-      ).toISOString();
+866-
+867-    const {
+868-      data: recentlyClosedSameContract,
+869-      error: recentlyClosedError,
+870-    } = await supabase
+871-      .from("spx_trade_setups")
+872-      .select("id, option_ticker, hidden_after")
+873-      .eq(
+874-        "option_ticker",
+875-        contract.ticker
+876-      )
+877-      .eq("status", "EXPIRED")
+878-      .ilike(
+879-        "last_error",
+880-        "%إغلاق يدوي%"
+881-      )
+882-      .gte(
+883-        "hidden_after",
+884-        manualCloseCutoff
+885-      )
+886-      .order("hidden_after", {
+887-        ascending: false,
+888-      })
+889-      .limit(1)
+890-      .maybeSingle();
+891-
+892-    if (recentlyClosedError) {
+893-      throw recentlyClosedError;
+894-    }
+895-
+896-    if (recentlyClosedSameContract) {
+897-      return NextResponse.json(
+898-        {
+899-          ok: true,
+900:          created: false,
+901-          activeTrade: null,
+902-          trades:
+903-            visibleTrades || [],
+904-          signal,
+905-          message:
+906-            "تم إغلاق هذا العقد يدويًا — لن يعاد تفعيله لمدة 30 دقيقة.",
+907-          updatedAt: nowIso,
+908-        },
+909-        {
+910-          headers: {
+911-            "Cache-Control":
+912-              "private, no-store, max-age=0",
+913-          },
+914-        }
+915-      );
+916-    }
+917-
+918-    const spxEntryPrice =
+919-      numberValue(
+920-        signal.market.stockPrice
+921-      );
+922-
+923-    const invalidationLevel =
+924-      chooseInvalidationLevel({
+925:        side:
+926:          contract.side,
+927-
+928-        stockPrice:
+929-          spxEntryPrice,
+930-
+931-        gamma:
+932-          signal.gamma,
+933-      });
+934-
+935-    if (
+936-      spxEntryPrice <= 0 ||
+937-      invalidationLevel <= 0
+938-    ) {
+939-      return NextResponse.json(
+940-        {
+941-          ok: true,
+942:          created: false,
+943-          activeTrade: null,
+944-          trades:
+945-            visibleTrades || [],
+946-          signal,
+947-          message:
+948-            "ظهرت فرصة لكن لم يتوفر وقف صالح من بيانات القاما.",
+949-          updatedAt: nowIso,
+950-        },
+951-        {
+952-          headers: {
+953-            "Cache-Control":
+954-              "private, no-store, max-age=0",
+955-          },
+956-        }
+957-      );
+958-    }
+959-
+960-    const entryPrice =
+961-      numberValue(
+962-        contract.midpoint,
+963-        numberValue(
+964-          contract.ask,
+965-          numberValue(
+966-            contract.price
+967-          )
+968-        )
+969-      );
+970-
+971-    const {
+972:      data: createdTrade,
+973-      error: createError,
+974-    } = await supabase
+975-      .from("spx_trade_setups")
+976:      .insert({
+977-        option_ticker:
+978-          contract.ticker,
+979-
+980:        side:
+981:          contract.side,
+982-
+983-        strike:
+984-          contract.strike,
+985-
+986-        expiration:
+987-          contract.expiration,
+988-
+989-        entry_price:
+990-          entryPrice,
+991-
+992-        current_price:
+993-          entryPrice,
+994-
+995-        current_bid:
+996-          contract.bid,
+997-
+998-        current_ask:
+999-          contract.ask,
+1000-
+1001-        best_price:
+1002-          entryPrice,
+1003-
+1004-        lowest_price:
+1005-          entryPrice,
+1006-
+1007-        best_price_at:
+1008-          nowIso,
+1009-
+1010-        current_profit_dollars:
+1011-          0,
+1012-
+1013-        current_profit_pct:
+1014-          0,
+1015-
+1016-        best_profit_dollars:
+1017-          0,
+1018-
+1019-        best_profit_pct:
+1020-          0,
+1021-
+1022-        spx_entry_price:
+1023-          spxEntryPrice,
+1024-
+1025-        spx_current_price:
+1026-          spxEntryPrice,
+1027-
+1028-        invalidation_level:
+1029-          invalidationLevel,
+1030-
+1031-        score:
+1032-          analyticalContract.finalScore,
+1033-
+1034-        quality:
+1035-          analyticalContract.quality,
+1036-
+1037-        analysis_snapshot: {
+1038-          ...signal,
+1039-          analyticalContract,
+1040:          executionContract:
+1041-            contract,
+1042-        },
+1043-
+1044-        status:
+1045-          "ACTIVE",
+1046-
+1047-        activated_at:
+1048-          nowIso,
+1049-
+1050-        last_quote_at:
+1051-          nowIso,
+1052-      })
+1053-      .select("*")
+1054-      .single();
+1055-
+1056-    if (
+1057-      createError ||
+1058:      !createdTrade
+1059-    ) {
+1060-      throw (
+1061-        createError ||
+1062-        new Error(
+1063-          "تعذر إنشاء صفقة SPX"
+1064-        )
+1065-      );
+1066-    }
+1067-
+1068-    await supabase
+1069-      .from("spx_trade_updates")
+1070:      .insert({
+1071-        setup_id:
+1072:          createdTrade.id,
+1073-
+1074-        event_type:
+1075-          "CREATED",
+1076-
+1077-        contract_price:
+1078-          entryPrice,
+1079-
+1080-        profit_dollars:
+1081-          0,
+1082-
+1083-        profit_pct:
+1084-          0,
+1085-
+1086-        message:
+1087:          `تم تفعيل صفقة ${contract.side} عند وقف ${invalidationLevel}`,
+1088-
+1089-        metadata: {
+1090-          score:
+1091-            analyticalContract.finalScore,
+1092-          quality:
+1093-            analyticalContract.quality,
+1094-          analyticalTicker:
+1095-            analyticalContract.ticker,
+1096-          analyticalStrike:
+1097-            analyticalContract.strike,
+1098-          analyticalPrice:
+1099-            analyticalContract.price,
+1100-          executionTicker:
+1101-            contract.ticker,
+1102-          executionStrike:
+1103-            contract.strike,
+1104-          executionPrice:
+1105-            entryPrice,
+1106-          usedAffordableAlternative:
+1107-            contract.ticker !==
+1108-            analyticalContract.ticker,
+1109-          spxEntryPrice,
+1110-          invalidationLevel,
+1111-        },
+1112-      });
+1113-
+1114-    const {
+1115-      data: latestTrades,
+1116-      error: latestError,
+1117-    } = await supabase
+1118-      .from("spx_trade_setups")
+1119-      .select("*")
+1120-      .or(
+1121-        `status.in.(WATCH,ACTIVE),and(status.eq.STOPPED,hidden_after.gt.${nowIso})`
+1122-      )
+1123:      .order("created_at", {
+1124-        ascending: false,
+1125-      })
+1126-      .limit(20);
+1127-
+1128-    if (latestError) {
+1129-      throw latestError;
+1130-    }
+1131-
+1132-    return NextResponse.json(
+1133-      {
+1134-        ok: true,
+1135:        created: true,
+1136-        activeTrade:
+1137:          createdTrade,
+1138-        trades:
+1139-          latestTrades || [],
+1140-        signal,
+1141-        updatedAt: nowIso,
+1142-      },
+1143-      {
+1144-        headers: {
+1145-          "Cache-Control":
+1146-            "private, no-store, max-age=0",
+1147-        },
+1148-      }
+1149-    );
+1150-  } catch (error) {
+1151-    return NextResponse.json(
+1152-      {
+1153-        ok: false,
+1154-        error:
+1155-          error instanceof Error
+1156-            ? error.message
+1157-            : "حدث خطأ غير معروف",
+1158-      },
+1159-      {
+1160-        status: 500,
+1161-      }
+1162-    );
+1163-  }
+1164-}
