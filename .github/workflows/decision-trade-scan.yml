@@ -289,38 +289,9 @@ jobs:
 
               if [ "${bot_http_code}" = "200" ]; then
                 echo "✅ ${symbol} — محرك قرار البوتات"
-
-                python3 - "${bot_response_file}" <<'PYBOT'
-          import json
-          import sys
-          from pathlib import Path
-
-          result_path = Path(sys.argv[1])
-
-          try:
-              data = json.loads(result_path.read_text())
-          except Exception as exc:
-              print(f"تعذر قراءة نتيجة محرك البوتات: {exc}")
-          else:
-              decision = data.get("decision") or {}
-              watching = data.get("watching") or {}
-
-              print(
-                  "نتيجة القرار:",
-                  "مؤهلة" if decision.get("qualifies") else "غير مؤهلة"
-              )
-
-              if decision.get("side"):
-                  print(f"الاتجاه: {decision.get('side')}")
-
-              if decision.get("score") is not None:
-                  print(f"الدرجة: {decision.get('score')} / 10")
-
-              print(
-                  "حالة المراقبة:",
-                  watching.get("message", "لا توجد")
-              )
-          PYBOT
+                echo "===== نتيجة محرك قرار البوتات ====="
+                head -c 1200 "${bot_response_file}" 2>/dev/null || true
+                echo
               else
                 echo "⚠️ ${symbol} — محرك قرار البوتات: HTTP ${bot_http_code}"
                 head -c 700 "${bot_response_file}" 2>/dev/null || true
@@ -365,38 +336,9 @@ jobs:
 
           if [ "${monitor_code}" = "200" ]; then
             echo "✅ تمت متابعة فرص المراقبة"
-
-            python3 - <<'PYMONITOR'
-          import json
-          from pathlib import Path
-
-          result_path = Path(
-              "/tmp/bot-decision-monitor.json"
-          )
-
-          try:
-              data = json.loads(
-                  result_path.read_text()
-              )
-          except Exception as exc:
-              print(
-                  f"تعذر قراءة نتيجة المتابعة: {exc}"
-              )
-          else:
-              print(
-                  f"تم فحص: {data.get('checked', 0)}"
-              )
-              print(
-                  f"تم تفعيل: {data.get('activated', 0)}"
-              )
-              print(
-                  "ما زالت تحت المراقبة: "
-                  f"{data.get('watching', 0)}"
-              )
-              print(
-                  f"فشل: {data.get('failed', 0)}"
-              )
-          PYMONITOR
+            echo "===== نتيجة متابعة المراقبة ====="
+            head -c 1200 "${monitor_file}" 2>/dev/null || true
+            echo
           else
             echo "⚠️ فشل مسار المتابعة: HTTP ${monitor_code}"
             head -c 700 "${monitor_file}" 2>/dev/null || true
