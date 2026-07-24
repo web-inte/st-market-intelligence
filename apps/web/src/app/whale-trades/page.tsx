@@ -194,8 +194,10 @@ function getContractClasses(contractType: string) {
 
 function getExecutionLabel(location?: string | null) {
   switch (String(location || "").toUpperCase()) {
+    case "ASK":
     case "AT_ASK":
       return "عند Ask";
+    case "BID":
     case "AT_BID":
       return "عند Bid";
     case "ABOVE_MID":
@@ -276,14 +278,14 @@ async function getWhaleTrades(): Promise<WhaleTrade[]> {
         : [];
 
     /*
-     * لا نعرض إلا الفرص التي تم تجهيز عقد متابعة
-     * لها بسعر دخول لا يتجاوز 3.00 دولار.
+     * نعرض الفرص التي تم تجهيز عقد متابعة لها،
+     * وكذلك فرص V2 الجديدة وهي بانتظار تثبيت الدخول،
+     * بشرط أن يكون سعر الدخول أو Ask أو سعر العقد
+     * الحالي لا يتجاوز 3.00 دولارات.
      */
     const setupsUrl =
       `${supabaseUrl.replace(/\/+$/, "")}/rest/v1/whale_trade_setups` +
-      "?select=whale_trade_id,entry_price" +
-      "&entry_price=gt.0" +
-      "&entry_price=lte.3";
+      "?select=whale_trade_id,entry_price,original_contract_price,source_snapshot,status";
 
     const setupsResponse =
       await fetch(setupsUrl, {
@@ -314,19 +316,87 @@ async function getWhaleTrades(): Promise<WhaleTrade[]> {
           Array.isArray(setupsData)
             ? setupsData
             : []
-        ).map(
-          (
-            setup: {
-              whale_trade_id?:
-                | number
-                | string
-                | null;
+        )
+          .filter(
+            (
+              setup: {
+                whale_trade_id?:
+                  | number
+                  | string
+                  | null;
+                entry_price?:
+                  | number
+                  | string
+                  | null;
+                original_contract_price?:
+                  | number
+                  | string
+                  | null;
+                source_snapshot?:
+                  | Record<string, unknown>
+                  | null;
+                status?: string | null;
+              },
+            ) => {
+              const entryPrice =
+                safeNumber(
+                  setup.entry_price,
+                );
+
+              const originalPrice =
+                safeNumber(
+                  setup.original_contract_price,
+                );
+
+              const snapshot =
+                setup.source_snapshot &&
+                typeof setup.source_snapshot === "object"
+                  ? setup.source_snapshot
+                  : {};
+
+              const snapshotAsk =
+                safeNumber(
+                  snapshot.ask,
+                );
+
+              const snapshotContractPrice =
+                safeNumber(
+                  snapshot.contract_price,
+                );
+
+              const executablePrices = [
+                entryPrice,
+                snapshotAsk,
+                snapshotContractPrice,
+                originalPrice,
+              ].filter(
+                (price) =>
+                  price > 0 &&
+                  price <= 3,
+              );
+
+              return (
+                executablePrices.length > 0 &&
+                String(
+                  setup.status || "",
+                ).toUpperCase() !==
+                  "ERROR"
+              );
             },
-          ) =>
-            String(
-              setup.whale_trade_id ?? "",
-            ),
-        ),
+          )
+          .map(
+            (
+              setup: {
+                whale_trade_id?:
+                  | number
+                  | string
+                  | null;
+              },
+            ) =>
+              String(
+                setup.whale_trade_id ?? "",
+              ),
+          ),
       );
 
     return whaleTrades.filter(
