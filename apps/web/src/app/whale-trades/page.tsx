@@ -401,18 +401,10 @@ async function getWhaleTrades(): Promise<WhaleTrade[]> {
 
     return whaleTrades.filter(
       (trade) => {
-        const tradeId =
-          String(trade.id);
-
         /*
          * صفقات النظام القديم تستمر بالاعتماد
          * على وجود Setup مؤهل.
          */
-        const hasEligibleSetup =
-          eligibleTradeIds.has(
-            tradeId,
-          );
-
         /*
          * فرص V2 المؤسسية تظهر مباشرة لأنها
          * اجتازت أصلًا:
@@ -440,10 +432,12 @@ async function getWhaleTrades(): Promise<WhaleTrade[]> {
             "ASK" &&
           score >= 75;
 
-        return (
-          hasEligibleSetup ||
-          isInstitutionalV2
-        );
+        /*
+         * صفحة صفقات الحيتان أصبحت تعتمد
+         * على محرك Institutional Flow V2 فقط.
+         * لا يتم عرض نتائج النظام القديم.
+         */
+        return isInstitutionalV2;
       },
     );
   } catch (error) {
