@@ -207,7 +207,6 @@ type WhaleTradeRow = {
   is_block?: boolean;
   estimated_side?: "BUY" | "SELL" | "UNKNOWN";
   execution_location?: "ASK" | "BID" | "MID" | "UNKNOWN";
-  trade_size?: number;
   estimated_premium?: number;
   sweep_count?: number;
   repeat_count?: number;
@@ -2473,8 +2472,6 @@ export async function GET(
                       execution_location:
                         result.executionSide,
 
-                      trade_size:
-                        result.totalSize,
                       estimated_premium:
                         result.totalPremium,
 
