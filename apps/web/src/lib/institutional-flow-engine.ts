@@ -3,6 +3,16 @@ export type InstitutionalTrade = {
   size: number;
   timestampNs: bigint;
   exchange?: number;
+
+  /*
+   * جهة التنفيذ محسوبة من أقرب Historical Quote
+   * لهذا التنفيذ نفسه.
+   */
+  historicalSide?:
+    | "ASK"
+    | "BID"
+    | "MID"
+    | "UNKNOWN";
 };
 
 export type InstitutionalContractContext = {
@@ -95,6 +105,59 @@ function getExecutionSide(
   }
 
   return "MID";
+}
+
+function getGroupedHistoricalSide(
+  trades: InstitutionalTrade[]
+): InstitutionalExecutionSide | null {
+  let askSize = 0;
+  let bidSize = 0;
+  let midSize = 0;
+  let matchedSize = 0;
+
+  for (const trade of trades) {
+    const side =
+      trade.historicalSide;
+
+    if (
+      !side ||
+      side === "UNKNOWN"
+    ) {
+      continue;
+    }
+
+    matchedSize += trade.size;
+
+    if (side === "ASK") {
+      askSize += trade.size;
+    } else if (side === "BID") {
+      bidSize += trade.size;
+    } else {
+      midSize += trade.size;
+    }
+  }
+
+  if (matchedSize <= 0) {
+    return null;
+  }
+
+  if (
+    askSize / matchedSize >= 0.55
+  ) {
+    return "ASK";
+  }
+
+  if (
+    bidSize / matchedSize >= 0.55
+  ) {
+    return "BID";
+  }
+
+  if (midSize > 0) {
+    return "MID";
+  }
+
+  return "UNKNOWN";
 }
 
 function getOpeningStatus(
@@ -227,6 +290,9 @@ function buildResult(
     ).size;
 
   const executionSide =
+    getGroupedHistoricalSide(
+      sortedTrades
+    ) ??
     context.historicalExecutionSide ??
     getExecutionSide(
       averagePrice,
