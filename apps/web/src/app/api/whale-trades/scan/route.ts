@@ -198,6 +198,19 @@ type WhaleTradeRow = {
   reason: string;
   last_seen_at: string;
   is_active: boolean;
+
+  /*
+   * حقول تعتمد عليها صفحة صفقات الحيتان
+   * لتصنيف وعرض Sweep / Block.
+   */
+  is_sweep?: boolean;
+  is_block?: boolean;
+  estimated_side?: "BUY" | "SELL" | "UNKNOWN";
+  execution_location?: "ASK" | "BID" | "MID" | "UNKNOWN";
+  trade_size?: number;
+  estimated_premium?: number;
+  sweep_count?: number;
+  repeat_count?: number;
 };
 
 function safeNumber(
@@ -2447,6 +2460,32 @@ export async function GET(
                         new Date()
                           .toISOString(),
                       is_active: true,
+
+                      is_sweep:
+                        result.activityType ===
+                        "SWEEP",
+                      is_block:
+                        result.activityType ===
+                        "BLOCK",
+
+                      estimated_side:
+                        "BUY",
+                      execution_location:
+                        result.executionSide,
+
+                      trade_size:
+                        result.totalSize,
+                      estimated_premium:
+                        result.totalPremium,
+
+                      sweep_count:
+                        result.activityType ===
+                        "SWEEP"
+                          ? result.tradeCount
+                          : 0,
+
+                      repeat_count:
+                        result.tradeCount,
                     });
                   }
                 }
