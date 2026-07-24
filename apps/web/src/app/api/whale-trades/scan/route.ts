@@ -143,6 +143,19 @@ type MassiveTradesResponse = {
   error?: string;
 };
 
+type MassiveOptionQuote = {
+  bid_price?: number;
+  ask_price?: number;
+  sip_timestamp?: number | string;
+};
+
+type MassiveQuotesResponse = {
+  results?: MassiveOptionQuote[];
+  next_url?: string;
+  status?: string;
+  error?: string;
+};
+
 type WhaleTradeRow = {
   symbol: string;
   option_ticker: string;
@@ -957,6 +970,197 @@ async function fetchRecentOptionTrades(
   }
 
   return data.results || [];
+}
+
+async function fetchRecentOptionQuotes(
+  optionTicker: string,
+  apiKey: string
+) {
+  const lookbackMilliseconds =
+    Date.now() -
+    TRADE_LOOKBACK_MINUTES *
+      60_000;
+
+  const timestampGte =
+    (
+      BigInt(lookbackMilliseconds) *
+      BigInt(1_000_000)
+    ).toString();
+
+  const url =
+    `https://api.massive.com/v3/quotes/${encodeURIComponent(
+      optionTicker
+    )}` +
+    `?timestamp.gte=${timestampGte}` +
+    `&sort=timestamp` +
+    `&order=desc` +
+    `&limit=250` +
+    `&apiKey=${encodeURIComponent(
+      apiKey
+    )}`;
+
+  const response = await fetch(url, {
+    cache: "no-store",
+  });
+
+  const responseText =
+    await response.text();
+
+  if (!responseText.trim()) {
+    return [];
+  }
+
+  const data = JSON.parse(
+    responseText
+  ) as MassiveQuotesResponse;
+
+  if (!response.ok) {
+    throw new Error(
+      data.error ||
+        `فشل جلب Quotes التاريخية للعقد ${optionTicker}`
+    );
+  }
+
+  return data.results || [];
+}
+
+function determineHistoricalExecutionSide(
+  trades: InstitutionalTrade[],
+  quotes: MassiveOptionQuote[]
+):
+  | "ASK"
+  | "BID"
+  | "MID"
+  | "UNKNOWN" {
+  if (
+    trades.length === 0 ||
+    quotes.length === 0
+  ) {
+    return "UNKNOWN";
+  }
+
+  let askSize = 0;
+  let bidSize = 0;
+  let midSize = 0;
+  let matchedSize = 0;
+
+  for (const trade of trades) {
+    let nearest:
+      | MassiveOptionQuote
+      | null = null;
+
+    let nearestDistance:
+      | bigint
+      | null = null;
+
+    for (const quote of quotes) {
+      const rawTimestamp =
+        quote.sip_timestamp;
+
+      if (
+        rawTimestamp === undefined ||
+        rawTimestamp === null
+      ) {
+        continue;
+      }
+
+      let quoteTimestamp: bigint;
+
+      try {
+        quoteTimestamp =
+          BigInt(
+            String(rawTimestamp)
+          );
+      } catch {
+        continue;
+      }
+
+      const distance =
+        quoteTimestamp >=
+        trade.timestampNs
+          ? quoteTimestamp -
+            trade.timestampNs
+          : trade.timestampNs -
+            quoteTimestamp;
+
+      if (
+        nearestDistance === null ||
+        distance <
+          nearestDistance
+      ) {
+        nearest = quote;
+        nearestDistance =
+          distance;
+      }
+    }
+
+    if (!nearest) {
+      continue;
+    }
+
+    const bid =
+      safeNumber(
+        nearest.bid_price
+      );
+
+    const ask =
+      safeNumber(
+        nearest.ask_price
+      );
+
+    if (
+      bid <= 0 ||
+      ask <= bid
+    ) {
+      continue;
+    }
+
+    const position =
+      (
+        (trade.price - bid) /
+        (ask - bid)
+      ) * 100;
+
+    matchedSize += trade.size;
+
+    if (position >= 55) {
+      askSize += trade.size;
+    } else if (
+      position <= 35
+    ) {
+      bidSize += trade.size;
+    } else {
+      midSize += trade.size;
+    }
+  }
+
+  if (matchedSize <= 0) {
+    return "UNKNOWN";
+  }
+
+  const askPct =
+    (askSize /
+      matchedSize) *
+    100;
+
+  const bidPct =
+    (bidSize /
+      matchedSize) *
+    100;
+
+  if (askPct >= 55) {
+    return "ASK";
+  }
+
+  if (bidPct >= 55) {
+    return "BID";
+  }
+
+  if (midSize > 0) {
+    return "MID";
+  }
+
+  return "UNKNOWN";
 }
 
 function findLargestRecentTrade(
@@ -1990,6 +2194,18 @@ export async function GET(
                     ask
                   );
 
+                const historicalQuotes =
+                  await fetchRecentOptionQuotes(
+                    optionTicker,
+                    massiveApiKey
+                  );
+
+                const historicalExecutionSide =
+                  determineHistoricalExecutionSide(
+                    institutionalTrades,
+                    historicalQuotes
+                  );
+
                 const v2Results =
                   detectInstitutionalFlow(
                     institutionalTrades,
@@ -2001,6 +2217,7 @@ export async function GET(
                         "call",
                       bid,
                       ask,
+                      historicalExecutionSide,
                       dayVolume:
                         safeNumber(
                           contract.day?.volume

@@ -10,6 +10,7 @@ export type InstitutionalContractContext = {
   contractType: "call" | "put";
   bid: number;
   ask: number;
+  historicalExecutionSide?: InstitutionalExecutionSide;
   dayVolume: number;
   openInterest: number;
   gamma: number;
@@ -226,6 +227,7 @@ function buildResult(
     ).size;
 
   const executionSide =
+    context.historicalExecutionSide ??
     getExecutionSide(
       averagePrice,
       context.bid,
