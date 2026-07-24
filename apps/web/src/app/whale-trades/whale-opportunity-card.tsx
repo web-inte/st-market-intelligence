@@ -147,6 +147,32 @@ function getExecutionLabel(
   }
 }
 
+function getMarketBiasLabel(
+  value?: string | null,
+) {
+  const normalized = String(
+    value || "",
+  )
+    .trim()
+    .toUpperCase();
+
+  switch (normalized) {
+    case "BULLISH":
+      return "اتجاه صاعد";
+
+    case "BEARISH":
+      return "اتجاه هابط";
+
+    case "NEUTRAL":
+      return "اتجاه محايد";
+
+    default:
+      return value
+        ? "اتجاه غير محسوم"
+        : "—";
+  }
+}
+
 function getContractType(
   trade: WhaleOpportunity,
 ) {
@@ -518,9 +544,9 @@ export default function WhaleOpportunityCard({
                 </p>
 
                 <p className="mt-1 font-black">
-                  {String(
-                    trade.market_bias || "—",
-                  ).toUpperCase()}
+                  {getMarketBiasLabel(
+                    trade.market_bias,
+                  )}
                 </p>
               </div>
 
