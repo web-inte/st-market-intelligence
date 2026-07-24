@@ -500,9 +500,15 @@ export default async function WhaleTradesPage({
   );
 
   const hydratedTrades = Array.isArray(trades)
-    ? trades.map((trade) =>
-        hydrateWhaleTrade(trade)
-      )
+    ? trades.map((trade) => ({
+        ...hydrateWhaleTrade(trade),
+
+        /*
+         * الحقول المحفوظة مباشرة من محرك V2
+         * يجب أن تتغلب على أي قيم قديمة داخل raw.
+         */
+        ...trade,
+      }))
     : [];
 
   const filteredTrades = hydratedTrades.filter((trade) => {
