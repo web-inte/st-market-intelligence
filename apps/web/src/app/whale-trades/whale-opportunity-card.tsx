@@ -1,5 +1,3 @@
-import LiveWhaleTracking from "./live-whale-tracking";
-
 type NumericValue =
   | number
   | string
@@ -381,7 +379,7 @@ export default function WhaleOpportunityCard({
             </p>
 
             <p className="mt-2 text-xs text-slate-500">
-              سترايك{" "}
+              السترايك الأقوى{" "}
               {formatNumber(
                 trade.strike,
                 0,
@@ -444,10 +442,6 @@ export default function WhaleOpportunityCard({
             </div>
           )}
         </section>
-
-        <LiveWhaleTracking
-          whaleTradeId={trade.id}
-        />
 
         <details className="group overflow-hidden rounded-2xl border border-white/10 bg-black/20">
           <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-4 py-4 text-sm font-black text-slate-200">
