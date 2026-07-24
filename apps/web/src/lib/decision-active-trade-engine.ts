@@ -743,6 +743,70 @@ export async function syncDecisionActiveTrade(
               contract.gamma,
           },
           optionStop,
+
+          /*
+            بيانات تشخيص لحظة دخول محرك D.
+            للتقييم فقط ولا تدخل في شروط
+            التأهل أو الوقف أو الأهداف.
+          */
+          entryDiagnostics: {
+            changePct:
+              Number(
+                analysis.quote.changePct
+              ) || 0,
+
+            open:
+              Number(
+                analysis.quote.open
+              ) || 0,
+
+            high:
+              Number(
+                analysis.quote.high
+              ) || 0,
+
+            low:
+              Number(
+                analysis.quote.low
+              ) || 0,
+
+            previousClose:
+              Number(
+                analysis.quote.previousClose
+              ) || 0,
+
+            nearestSupportStrike:
+              Number(
+                analysis.options
+                  .gammaStructure
+                  .nearestSupport
+                  ?.strike
+              ) || null,
+
+            nearestSupportDistancePct:
+              Number(
+                analysis.options
+                  .gammaStructure
+                  .nearestSupport
+                  ?.distancePct
+              ) || null,
+
+            nearestResistanceStrike:
+              Number(
+                analysis.options
+                  .gammaStructure
+                  .nearestResistance
+                  ?.strike
+              ) || null,
+
+            nearestResistanceDistancePct:
+              Number(
+                analysis.options
+                  .gammaStructure
+                  .nearestResistance
+                  ?.distancePct
+              ) || null,
+          },
         },
         first_seen_at:
           nowIso,
