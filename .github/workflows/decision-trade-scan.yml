@@ -370,17 +370,32 @@ jobs:
             import json
             from pathlib import Path
 
-            result_path = Path("/tmp/bot-decision-monitor.json")
+            result_path = Path(
+                "/tmp/bot-decision-monitor.json"
+            )
 
             try:
-                data = json.loads(result_path.read_text())
+                data = json.loads(
+                    result_path.read_text()
+                )
             except Exception as exc:
-                print(f"تعذر قراءة نتيجة المتابعة: {exc}")
+                print(
+                    f"تعذر قراءة نتيجة المتابعة: {exc}"
+                )
             else:
-                print(f"تم فحص: {data.get('checked', 0)}")
-                print(f"تم تفعيل: {data.get('activated', 0)}")
-                print(f"ما زالت تحت المراقبة: {data.get('watching', 0)}")
-                print(f"فشل: {data.get('failed', 0)}")
+                print(
+                    f"تم فحص: {data.get('checked', 0)}"
+                )
+                print(
+                    f"تم تفعيل: {data.get('activated', 0)}"
+                )
+                print(
+                    "ما زالت تحت المراقبة: "
+                    f"{data.get('watching', 0)}"
+                )
+                print(
+                    f"فشل: {data.get('failed', 0)}"
+                )
             PYMONITOR
           else
             echo "⚠️ فشل مسار المتابعة: HTTP ${monitor_code}"
