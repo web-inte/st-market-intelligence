@@ -8,24 +8,6 @@ on:
         required: true
         default: "1"
 
-  schedule:
-    # الدورة الأولى: 9:30 ثم كل 15 دقيقة
-    - cron: "30,45 9 * * 1-5"
-      timezone: "America/New_York"
-    - cron: "0,15,30,45 10-15 * * 1-5"
-      timezone: "America/New_York"
-
-    # الدورة الثانية: بعد الأولى بخمس دقائق
-    - cron: "35,50 9 * * 1-5"
-      timezone: "America/New_York"
-    - cron: "5,20,35,50 10-15 * * 1-5"
-      timezone: "America/New_York"
-
-    # الدورة الثالثة: بعد الثانية بخمس دقائق
-    - cron: "40,55 9 * * 1-5"
-      timezone: "America/New_York"
-    - cron: "10,25,40,55 10-15 * * 1-5"
-      timezone: "America/New_York"
 
 permissions:
   contents: read

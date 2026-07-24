@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 
 import AdminPanel from "./admin-panel";
 import AdminUsersTable from "./users-table";
+import DecisionScannerControl from "./DecisionScannerControl";
 
 export const dynamic = "force-dynamic";
 
@@ -63,6 +64,10 @@ export default async function AdminPage() {
 
         <AdminUsersTable />
       </div>
-    </main>
+
+        <div className="mt-8">
+          <DecisionScannerControl />
+        </div>
+</main>
   );
 }
