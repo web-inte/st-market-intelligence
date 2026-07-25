@@ -361,7 +361,7 @@ export async function POST(
         {
           ok: false,
           error:
-            `فشل تشغيل البحث: GitHub HTTP ${response.status}`,
+            `فشل تشغيل البحث: GitHub HTTP ${response.status} — ${githubError}`,
         },
         {
           status: 502,
