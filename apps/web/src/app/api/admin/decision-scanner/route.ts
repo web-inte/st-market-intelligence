@@ -124,27 +124,10 @@ export async function POST(
     const body =
       await request.json();
 
-    const round =
+    const action =
       String(
-        body?.round || ""
-      ) as RoundNumber;
-
-    if (
-      !["1", "2", "3", "4"].includes(
-        round
-      )
-    ) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            "رقم الدائرة غير صحيح",
-        },
-        {
-          status: 400,
-        }
+        body?.action || "start"
       );
-    }
 
     const githubToken =
       process.env
@@ -167,6 +150,177 @@ export async function POST(
       process.env
         .GITHUB_ACTIONS_REPOSITORY ||
       "web-inte/st-market-intelligence";
+
+    if (action === "stop") {
+      const runsResponse =
+        await fetch(
+          `https://api.github.com/repos/${repository}/actions/workflows/decision-trade-scan.yml/runs?event=workflow_dispatch&per_page=20`,
+          {
+            headers: {
+              Accept:
+                "application/vnd.github+json",
+              Authorization:
+                `Bearer ${githubToken}`,
+              "X-GitHub-Api-Version":
+                "2022-11-28",
+            },
+            cache: "no-store",
+          }
+        );
+
+      if (!runsResponse.ok) {
+        const githubError =
+          await runsResponse.text();
+
+        console.error(
+          "GitHub workflow runs lookup failed:",
+          runsResponse.status,
+          githubError
+        );
+
+        return NextResponse.json(
+          {
+            ok: false,
+            error:
+              `تعذر البحث عن التشغيل الجاري: GitHub HTTP ${runsResponse.status}`,
+          },
+          {
+            status: 502,
+          }
+        );
+      }
+
+      const runsPayload =
+        await runsResponse.json() as {
+          workflow_runs?: Array<{
+            id: number;
+            status: string;
+            created_at?: string;
+          }>;
+        };
+
+      const activeRun =
+        (
+          runsPayload.workflow_runs ||
+          []
+        )
+          .filter((run) =>
+            [
+              "queued",
+              "in_progress",
+              "pending",
+              "waiting",
+              "requested",
+            ].includes(
+              String(
+                run.status || ""
+              )
+            )
+          )
+          .sort((a, b) =>
+            String(
+              b.created_at || ""
+            ).localeCompare(
+              String(
+                a.created_at || ""
+              )
+            )
+          )[0];
+
+      if (!activeRun) {
+        return NextResponse.json({
+          ok: true,
+          stopped: false,
+          message:
+            "لا يوجد بحث جارٍ لإيقافه",
+        });
+      }
+
+      const cancelResponse =
+        await fetch(
+          `https://api.github.com/repos/${repository}/actions/runs/${activeRun.id}/cancel`,
+          {
+            method: "POST",
+            headers: {
+              Accept:
+                "application/vnd.github+json",
+              Authorization:
+                `Bearer ${githubToken}`,
+              "X-GitHub-Api-Version":
+                "2022-11-28",
+            },
+            cache: "no-store",
+          }
+        );
+
+      if (!cancelResponse.ok) {
+        const githubError =
+          await cancelResponse.text();
+
+        console.error(
+          "GitHub workflow cancellation failed:",
+          cancelResponse.status,
+          githubError
+        );
+
+        return NextResponse.json(
+          {
+            ok: false,
+            error:
+              `فشل إيقاف البحث: GitHub HTTP ${cancelResponse.status}`,
+          },
+          {
+            status: 502,
+          }
+        );
+      }
+
+      return NextResponse.json({
+        ok: true,
+        stopped: true,
+        message:
+          "تم إرسال أمر إيقاف البحث",
+        stoppedBy:
+          admin.email || admin.id,
+        stoppedAt:
+          new Date().toISOString(),
+      });
+    }
+
+    if (action !== "start") {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "إجراء البحث غير صحيح",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    const round =
+      String(
+        body?.round || ""
+      ) as RoundNumber;
+
+    if (
+      !["1", "2", "3", "4"].includes(
+        round
+      )
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "رقم الدائرة غير صحيح",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
 
     const response =
       await fetch(

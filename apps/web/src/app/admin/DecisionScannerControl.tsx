@@ -64,6 +64,11 @@ export default function DecisionScannerControl() {
   ] = useState(false);
 
   const [
+    stopping,
+    setStopping,
+  ] = useState(false);
+
+  const [
     message,
     setMessage,
   ] = useState("");
@@ -111,6 +116,7 @@ export default function DecisionScannerControl() {
                 `Bearer ${accessToken}`,
             },
             body: JSON.stringify({
+              action: "start",
               round:
                 selectedRound,
             }),
@@ -142,6 +148,80 @@ export default function DecisionScannerControl() {
       );
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function stopScan() {
+    if (
+      loading ||
+      stopping
+    ) {
+      return;
+    }
+
+    setStopping(true);
+    setMessage("");
+    setError("");
+
+    try {
+      const {
+        data: sessionData,
+      } =
+        await supabase.auth
+          .getSession();
+
+      const accessToken =
+        sessionData.session
+          ?.access_token;
+
+      if (!accessToken) {
+        throw new Error(
+          "انتهت جلسة الدخول، سجّل الدخول من جديد"
+        );
+      }
+
+      const response =
+        await fetch(
+          "/api/admin/decision-scanner",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type":
+                "application/json",
+              Authorization:
+                `Bearer ${accessToken}`,
+            },
+            body: JSON.stringify({
+              action: "stop",
+            }),
+          }
+        );
+
+      const result =
+        await response.json();
+
+      if (
+        !response.ok ||
+        !result.ok
+      ) {
+        throw new Error(
+          result.error ||
+          "تعذر إيقاف البحث"
+        );
+      }
+
+      setMessage(
+        result.message ||
+        "تم إرسال أمر إيقاف البحث"
+      );
+    } catch (stopError) {
+      setError(
+        stopError instanceof Error
+          ? stopError.message
+          : "تعذر إيقاف البحث"
+      );
+    } finally {
+      setStopping(false);
     }
   }
 
@@ -200,16 +280,35 @@ export default function DecisionScannerControl() {
         })}
       </div>
 
-      <button
-        type="button"
-        disabled={loading}
-        onClick={startScan}
-        className="mt-5 w-full rounded-2xl bg-cyan-400 px-5 py-3 text-sm font-black text-slate-950 transition hover:bg-cyan-300 disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        {loading
-          ? "جارٍ إرسال أمر البحث..."
-          : `بدء بحث الدائرة ${selectedRound}`}
-      </button>
+      <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(160px,1fr)]">
+        <button
+          type="button"
+          disabled={
+            loading ||
+            stopping
+          }
+          onClick={startScan}
+          className="min-w-0 rounded-2xl bg-cyan-400 px-3 py-3 text-sm font-black text-slate-950 transition hover:bg-cyan-300 disabled:cursor-not-allowed disabled:opacity-50 sm:px-5"
+        >
+          {loading
+            ? "جارٍ بدء البحث..."
+            : `بدء بحث الدائرة ${selectedRound}`}
+        </button>
+
+        <button
+          type="button"
+          disabled={
+            loading ||
+            stopping
+          }
+          onClick={stopScan}
+          className="min-w-0 rounded-2xl border border-rose-400/40 bg-rose-500/10 px-3 py-3 text-sm font-black text-rose-300 transition hover:border-rose-400/70 hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-50 sm:px-5"
+        >
+          {stopping
+            ? "جارٍ الإيقاف..."
+            : "إيقاف البحث"}
+        </button>
+      </div>
 
       {message ? (
         <div className="mt-4 rounded-2xl border border-emerald-400/20 bg-emerald-400/[0.07] px-4 py-3 text-sm font-bold text-emerald-300">
