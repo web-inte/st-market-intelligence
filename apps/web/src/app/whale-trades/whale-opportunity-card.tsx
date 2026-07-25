@@ -51,6 +51,7 @@ export type WhaleOpportunity = {
   hedge_flag?: boolean | null;
 
   trade_timestamp?: string | null;
+  first_seen_at?: string | null;
   last_seen_at?: string | null;
 };
 
@@ -145,6 +146,155 @@ function getExecutionLabel(
         ? "موقع التنفيذ غير مصنّف بوضوح."
         : "موقع التنفيذ غير متوفر.";
   }
+}
+
+function formatRelativeMinutes(
+  minutes: number,
+) {
+  const safeMinutes = Math.max(
+    0,
+    Math.floor(minutes),
+  );
+
+  if (safeMinutes < 1) {
+    return "أقل من دقيقة";
+  }
+
+  if (safeMinutes < 60) {
+    return `${safeMinutes} دقيقة`;
+  }
+
+  const hours = Math.floor(
+    safeMinutes / 60,
+  );
+
+  const remainingMinutes =
+    safeMinutes % 60;
+
+  if (remainingMinutes === 0) {
+    return `${hours} ساعة`;
+  }
+
+  return `${hours} ساعة و${remainingMinutes} دقيقة`;
+}
+
+function getDetectionStatus(
+  firstSeenValue?: string | null,
+  lastSeenValue?: string | null,
+) {
+  const nowMs = Date.now();
+
+  const firstSeenDate = new Date(
+    firstSeenValue ||
+    lastSeenValue ||
+    "",
+  );
+
+  const lastSeenDate = new Date(
+    lastSeenValue ||
+    firstSeenValue ||
+    "",
+  );
+
+  if (
+    Number.isNaN(firstSeenDate.getTime()) ||
+    Number.isNaN(lastSeenDate.getTime())
+  ) {
+    return {
+      label: "حالة الرصد غير متوفرة",
+      description:
+        "لا يتوفر وقت كافٍ لتحديد صلاحية الرصد.",
+      ageLabel: "—",
+      lastUpdateLabel: "—",
+      expiresAtLabel: "—",
+      tone:
+        "border-slate-400/20 bg-slate-400/[0.05] text-slate-300",
+    };
+  }
+
+  const ageMinutes =
+    (
+      nowMs -
+      firstSeenDate.getTime()
+    ) / 60_000;
+
+  const lastUpdateMinutes =
+    (
+      nowMs -
+      lastSeenDate.getTime()
+    ) / 60_000;
+
+  const expiresAt =
+    new Date(
+      lastSeenDate.getTime() +
+      30 * 60_000,
+    );
+
+  const expiresAtLabel =
+    new Intl.DateTimeFormat(
+      "ar-SA",
+      {
+        timeZone: "Asia/Riyadh",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+      },
+    ).format(expiresAt);
+
+  if (lastUpdateMinutes <= 15) {
+    return {
+      label: "الرصد نشط",
+      description:
+        "النشاط المؤسسي حديث، مع ضرورة تأكيد حركة السهم وعدم مطاردة سعر العقد.",
+      ageLabel:
+        formatRelativeMinutes(
+          ageMinutes,
+        ),
+      lastUpdateLabel:
+        `منذ ${formatRelativeMinutes(
+          lastUpdateMinutes,
+        )}`,
+      expiresAtLabel,
+      tone:
+        "border-emerald-400/25 bg-emerald-400/[0.07] text-emerald-300",
+    };
+  }
+
+  if (lastUpdateMinutes <= 30) {
+    return {
+      label: "الرصد تحت المراقبة",
+      description:
+        "لم يظهر تحديث حديث كافٍ؛ لا تدخل بعد ابتعاد سعر العقد عن سعر الرصد.",
+      ageLabel:
+        formatRelativeMinutes(
+          ageMinutes,
+        ),
+      lastUpdateLabel:
+        `منذ ${formatRelativeMinutes(
+          lastUpdateMinutes,
+        )}`,
+      expiresAtLabel,
+      tone:
+        "border-amber-400/25 bg-amber-400/[0.07] text-amber-300",
+    };
+  }
+
+  return {
+    label: "انتهت صلاحية الرصد",
+    description:
+      "لم يظهر نشاط مؤسسي جديد خلال 30 دقيقة، لذلك لا يُعتمد هذا الرصد للدخول الآن.",
+    ageLabel:
+      formatRelativeMinutes(
+        ageMinutes,
+      ),
+    lastUpdateLabel:
+      `منذ ${formatRelativeMinutes(
+        lastUpdateMinutes,
+      )}`,
+    expiresAtLabel,
+    tone:
+      "border-rose-400/25 bg-rose-400/[0.07] text-rose-300",
+  };
 }
 
 function formatDetectionDateTime(
@@ -495,9 +645,28 @@ export default function WhaleOpportunityCard({
 
   const detectionDateTime =
     formatDetectionDateTime(
+      trade.first_seen_at ||
+      trade.trade_timestamp ||
+      trade.last_seen_at,
+    );
+
+  const detectionStatus =
+    getDetectionStatus(
+      trade.first_seen_at ||
+      trade.trade_timestamp,
       trade.last_seen_at ||
       trade.trade_timestamp,
     );
+
+  const observedContractPrice =
+    safeNumber(
+      trade.contract_price,
+    );
+
+  const maximumTrackingPrice =
+    observedContractPrice > 0
+      ? observedContractPrice * 1.1
+      : 0;
 
   return (
     <article
@@ -546,6 +715,64 @@ export default function WhaleOpportunityCard({
                 {detectionDateTime.time}
               </span>
             </p>
+
+            <div
+              className={`mt-4 rounded-2xl border p-4 ${detectionStatus.tone}`}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="font-black">
+                  حالة الرصد:{" "}
+                  {detectionStatus.label}
+                </p>
+
+                <p className="text-xs font-bold">
+                  عمر الرصد:{" "}
+                  {detectionStatus.ageLabel}
+                </p>
+              </div>
+
+              <div className="mt-3 grid gap-2 text-xs leading-6 sm:grid-cols-2">
+                <p>
+                  آخر تحديث:{" "}
+                  <span className="font-bold">
+                    {detectionStatus.lastUpdateLabel}
+                  </span>
+                </p>
+
+                <p>
+                  تنتهي الصلاحية عند:{" "}
+                  <span className="font-bold">
+                    {detectionStatus.expiresAtLabel}
+                  </span>
+                </p>
+
+                <p>
+                  سعر العقد وقت الرصد:{" "}
+                  <span className="font-bold">
+                    {observedContractPrice > 0
+                      ? `$${formatNumber(
+                          observedContractPrice,
+                        )}`
+                      : "—"}
+                  </span>
+                </p>
+
+                <p>
+                  السعر الأعلى للمتابعة:{" "}
+                  <span className="font-bold">
+                    {maximumTrackingPrice > 0
+                      ? `$${formatNumber(
+                          maximumTrackingPrice,
+                        )}`
+                      : "—"}
+                  </span>
+                </p>
+              </div>
+
+              <p className="mt-3 text-xs leading-6">
+                {detectionStatus.description}
+              </p>
+            </div>
           </div>
 
           <div className="min-w-24 rounded-2xl border border-cyan-400/25 bg-cyan-400/[0.08] px-4 py-3 text-center">
