@@ -360,58 +360,7 @@ export async function updateSession(
     ? rawPlan[0]
     : rawPlan;
 
-  const planCode = String(
-    plan?.code || ""
-  ).toLowerCase();
-
-  const requiresPlus = matchesRoute(
-    pathname,
-    PLUS_ONLY_ROUTES
-  );
-
-  if (
-    requiresPlus &&
-    planCode !== "plus"
-  ) {
-    if (isApi) {
-      return copyCookies(
-        response,
-        NextResponse.json(
-          {
-            error:
-              "هذه الميزة متاحة لمشتركي Plus فقط",
-            code: "PLUS_REQUIRED",
-          },
-          {
-            status: 403,
-          }
-        )
-      );
-    }
-
-    const upgradeUrl =
-      new URL(
-        "/subscriptions",
-        request.url
-      );
-
-    upgradeUrl.searchParams.set(
-      "upgrade",
-      "plus"
-    );
-
-    upgradeUrl.searchParams.set(
-      "next",
-      `${pathname}${request.nextUrl.search}`
-    );
-
-    return copyCookies(
-      response,
-      NextResponse.redirect(
-        upgradeUrl
-      )
-    );
-  }
-
+  // جميع المشتركين النشطين يحصلون على مزايا Premium كاملة.
   return response;
+
 }

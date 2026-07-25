@@ -733,7 +733,7 @@ export async function PATCH(
           ok: true,
           message:
             planCode === "plus"
-              ? "المستخدم مشترك بالفعل في Plus"
+              ? "المستخدم مشترك بالفعل في Premium"
               : "المستخدم مشترك بالفعل في منصة",
         });
       }
@@ -783,7 +783,7 @@ export async function PATCH(
 
           note:
             planCode === "plus"
-              ? "تم تحويل الباقة إلى Plus"
+              ? "تم تحويل الباقة إلى Premium"
               : "تم تحويل الباقة إلى منصة",
         });
 
@@ -799,7 +799,7 @@ export async function PATCH(
 
         message:
           planCode === "plus"
-            ? "تم تحويل الاشتراك إلى Plus"
+            ? "تم تحويل الاشتراك إلى Premium"
             : "تم تحويل الاشتراك إلى منصة",
       });
     }

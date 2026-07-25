@@ -9,13 +9,13 @@ import { createAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
 
-type PlanCode = "platform" | "plus";
+type PlanCode = "plus";
 
 const PRODUCT_PLAN_MAP: Record<
   string,
   PlanCode
 > = {
-  "1066244002": "platform",
+  // ST MARKET Premium — 249 ريال شهريًا
   "2122436443": "plus",
 };
 

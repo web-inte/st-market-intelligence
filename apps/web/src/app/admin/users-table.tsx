@@ -423,86 +423,8 @@ export default function AdminUsersTable() {
                         </p>
                       </div>
 
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          disabled={
-                            working ||
-                            user.subscription
-                              .planCode ===
-                              "platform"
-                          }
-                          onClick={() => {
-                            if (
-                              window.confirm(
-                                "تحويل اشتراك هذا المستخدم إلى باقة منصة؟"
-                              )
-                            ) {
-                              void runAction(
-                                user.id,
-                                "set_plan",
-                                {
-                                  planCode:
-                                    "platform",
-                                }
-                              );
-                            }
-                          }}
-                          className={[
-                            "rounded-xl border px-4 py-2 text-sm font-black transition disabled:cursor-not-allowed",
-                            user.subscription
-                              .planCode ===
-                            "platform"
-                              ? "border-cyan-300 bg-cyan-400 text-slate-950 shadow-lg shadow-cyan-500/20"
-                              : "border-cyan-400/30 bg-cyan-400/10 text-cyan-300 hover:bg-cyan-400/20 disabled:opacity-100",
-                          ].join(" ")}
-                        >
-                          {user.subscription
-                            .planCode ===
-                          "platform"
-                            ? "✓ منصة"
-                            : "منصة"}
-                        </button>
-
-                        <button
-                          type="button"
-                          disabled={
-                            working ||
-                            user.subscription
-                              .planCode ===
-                              "plus"
-                          }
-                          onClick={() => {
-                            if (
-                              window.confirm(
-                                "تحويل اشتراك هذا المستخدم إلى باقة Plus؟"
-                              )
-                            ) {
-                              void runAction(
-                                user.id,
-                                "set_plan",
-                                {
-                                  planCode:
-                                    "plus",
-                                }
-                              );
-                            }
-                          }}
-                          className={[
-                            "rounded-xl border px-4 py-2 text-sm font-black transition disabled:cursor-not-allowed",
-                            user.subscription
-                              .planCode ===
-                            "plus"
-                              ? "border-violet-300 bg-violet-400 text-slate-950 shadow-lg shadow-violet-500/20"
-                              : "border-violet-400/30 bg-violet-400/10 text-violet-300 hover:bg-violet-400/20 disabled:opacity-100",
-                          ].join(" ")}
-                        >
-                          {user.subscription
-                            .planCode ===
-                          "plus"
-                            ? "✓ Plus"
-                            : "Plus"}
-                        </button>
+                      <div className="mt-3 inline-flex rounded-xl border border-emerald-300/30 bg-emerald-400/10 px-4 py-2 text-sm font-black text-emerald-300">
+                        ✓ Premium
                       </div>
                     </div>
 
