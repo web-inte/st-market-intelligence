@@ -287,26 +287,7 @@ jobs:
                 blocked_symbol_map["${blocked_symbol}"]=1
               fi
             done < <(
-              python3 - "${blocked_file}" <<'PYBLOCKED'
-import json
-import sys
-
-path = sys.argv[1]
-
-try:
-    with open(path, "r", encoding="utf-8") as file:
-        payload = json.load(file)
-
-    for symbol in payload.get("symbols", []):
-        symbol = str(symbol).strip().upper()
-        if symbol:
-            print(symbol)
-except Exception as error:
-    print(
-        f"تعذر قراءة الرموز المستبعدة: {error}",
-        file=sys.stderr,
-    )
-PYBLOCKED
+              python3 -c 'import json,sys; payload=json.load(open(sys.argv[1], encoding="utf-8")); [print(str(symbol).strip().upper()) for symbol in payload.get("symbols", []) if str(symbol).strip()]' "${blocked_file}"
             )
 
             echo "عدد الرموز المستبعدة: ${#blocked_symbol_map[@]}"
