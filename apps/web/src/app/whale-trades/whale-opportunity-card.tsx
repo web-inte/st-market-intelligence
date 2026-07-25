@@ -53,6 +53,7 @@ export type WhaleOpportunity = {
   trade_timestamp?: string | null;
   first_seen_at?: string | null;
   last_seen_at?: string | null;
+  raw?: Record<string, unknown> | null;
 };
 
 type Props = {
@@ -295,6 +296,119 @@ function getDetectionStatus(
     tone:
       "border-rose-400/25 bg-rose-400/[0.07] text-rose-300",
   };
+}
+
+type ActivityTrackingView = {
+  status?: string;
+  status_label?: string;
+  status_reason?: string;
+  first_seen_at?: string;
+  last_activity_at?: string;
+  last_scan_at?: string;
+  scan_count?: number;
+  initial_premium?: number;
+  previous_premium?: number;
+  current_premium?: number;
+  premium_change?: number;
+  premium_change_from_start?: number;
+  initial_size?: number;
+  previous_size?: number;
+  current_size?: number;
+  size_change?: number;
+  size_change_from_start?: number;
+  initial_trade_count?: number;
+  previous_trade_count?: number;
+  current_trade_count?: number;
+  trade_count_change?: number;
+  trade_count_change_from_start?: number;
+  minutes_since_growth?: number;
+};
+
+function getActivityTracking(
+  trade: WhaleOpportunity,
+): ActivityTrackingView | null {
+  const raw =
+    trade.raw;
+
+  if (
+    !raw ||
+    typeof raw !== "object" ||
+    Array.isArray(raw)
+  ) {
+    return null;
+  }
+
+  const tracking =
+    raw.activity_tracking;
+
+  if (
+    !tracking ||
+    typeof tracking !== "object" ||
+    Array.isArray(tracking)
+  ) {
+    return null;
+  }
+
+  return tracking as
+    ActivityTrackingView;
+}
+
+function getActivityTone(
+  status?: string,
+) {
+  switch (
+    String(
+      status || ""
+    ).toUpperCase()
+  ) {
+    case "NEW":
+    case "INCREASING":
+      return "border-emerald-400/25 bg-emerald-400/[0.07] text-emerald-300";
+
+    case "CONTINUING":
+      return "border-cyan-400/25 bg-cyan-400/[0.07] text-cyan-300";
+
+    case "STABLE":
+      return "border-amber-400/25 bg-amber-400/[0.07] text-amber-300";
+
+    case "WEAKENING":
+    case "OPPOSITE_FLOW":
+    case "EXPIRED":
+      return "border-rose-400/25 bg-rose-400/[0.07] text-rose-300";
+
+    default:
+      return "border-slate-400/20 bg-slate-400/[0.05] text-slate-300";
+  }
+}
+
+function formatSignedInteger(
+  value: NumericValue,
+) {
+  const number =
+    safeNumber(value);
+
+  if (number === 0) {
+    return "بدون تغير";
+  }
+
+  return `${number > 0 ? "+" : ""}${Math.round(
+    number
+  ).toLocaleString("en-US")}`;
+}
+
+function formatSignedMoney(
+  value: NumericValue,
+) {
+  const number =
+    safeNumber(value);
+
+  if (number === 0) {
+    return "بدون تغير";
+  }
+
+  return `${number > 0 ? "+" : "-"}$${formatMoney(
+    Math.abs(number)
+  )}`;
 }
 
 function formatDetectionDateTime(
@@ -650,6 +764,16 @@ export default function WhaleOpportunityCard({
       trade.last_seen_at,
     );
 
+  const activityTracking =
+    getActivityTracking(
+      trade,
+    );
+
+  const activityTone =
+    getActivityTone(
+      activityTracking?.status,
+    );
+
   const detectionStatus =
     getDetectionStatus(
       trade.first_seen_at ||
@@ -715,6 +839,118 @@ export default function WhaleOpportunityCard({
                 {detectionDateTime.time}
               </span>
             </p>
+
+            {activityTracking && (
+              <div
+                className={`mt-4 rounded-2xl border p-4 ${activityTone}`}
+              >
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-bold opacity-80">
+                      حالة التدفق المؤسسي
+                    </p>
+
+                    <p className="mt-1 text-base font-black">
+                      {activityTracking.status_label ||
+                        "حالة النشاط غير متوفرة"}
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl border border-current/20 px-3 py-2 text-center">
+                    <p className="text-[10px] opacity-70">
+                      مرات الرصد
+                    </p>
+
+                    <p className="font-black">
+                      {formatInteger(
+                        activityTracking.scan_count,
+                      )}
+                    </p>
+                  </div>
+                </div>
+
+                <p className="mt-3 text-xs leading-6 opacity-90">
+                  {activityTracking.status_reason ||
+                    "تتم مقارنة القراءة الحالية بالقراءة السابقة للعقد."}
+                </p>
+
+                <div className="mt-4 grid grid-cols-2 gap-3 text-xs sm:grid-cols-3">
+                  <div className="rounded-xl bg-black/15 p-3">
+                    <p className="opacity-70">
+                      تغير القيمة
+                    </p>
+
+                    <p className="mt-1 font-black">
+                      {formatSignedMoney(
+                        activityTracking.premium_change,
+                      )}
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl bg-black/15 p-3">
+                    <p className="opacity-70">
+                      تغير العقود
+                    </p>
+
+                    <p className="mt-1 font-black">
+                      {formatSignedInteger(
+                        activityTracking.size_change,
+                      )}
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl bg-black/15 p-3">
+                    <p className="opacity-70">
+                      تغير التنفيذات
+                    </p>
+
+                    <p className="mt-1 font-black">
+                      {formatSignedInteger(
+                        activityTracking.trade_count_change,
+                      )}
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl bg-black/15 p-3">
+                    <p className="opacity-70">
+                      القيمة منذ أول رصد
+                    </p>
+
+                    <p className="mt-1 font-black">
+                      {formatSignedMoney(
+                        activityTracking.premium_change_from_start,
+                      )}
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl bg-black/15 p-3">
+                    <p className="opacity-70">
+                      العقود منذ أول رصد
+                    </p>
+
+                    <p className="mt-1 font-black">
+                      {formatSignedInteger(
+                        activityTracking.size_change_from_start,
+                      )}
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl bg-black/15 p-3">
+                    <p className="opacity-70">
+                      آخر نمو فعلي
+                    </p>
+
+                    <p className="mt-1 font-black">
+                      منذ{" "}
+                      {formatInteger(
+                        activityTracking.minutes_since_growth,
+                      )}{" "}
+                      دقيقة
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div
               className={`mt-4 rounded-2xl border p-4 ${detectionStatus.tone}`}

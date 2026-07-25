@@ -196,8 +196,10 @@ type WhaleTradeRow = {
   gamma_status: string;
 
   reason: string;
+  first_seen_at?: string;
   last_seen_at: string;
   is_active: boolean;
+  raw?: Record<string, unknown>;
 
   /*
    * حقول تعتمد عليها صفحة صفقات الحيتان
@@ -1879,6 +1881,575 @@ if (
   };
 }
 
+type PreviousWhaleTradeRow = {
+  option_ticker?: string | null;
+  premium_value?: number | string | null;
+  volume_change?: number | string | null;
+  repeat_count?: number | string | null;
+  estimated_side?: string | null;
+  execution_location?: string | null;
+  first_seen_at?: string | null;
+  last_seen_at?: string | null;
+  expiration?: string | null;
+  raw?: Record<string, unknown> | null;
+};
+
+type WhaleActivityTracking = {
+  status:
+    | "NEW"
+    | "INCREASING"
+    | "CONTINUING"
+    | "STABLE"
+    | "WEAKENING"
+    | "OPPOSITE_FLOW"
+    | "EXPIRED";
+
+  status_label: string;
+  status_reason: string;
+
+  first_seen_at: string;
+  last_activity_at: string;
+  last_scan_at: string;
+
+  scan_count: number;
+
+  initial_premium: number;
+  previous_premium: number;
+  current_premium: number;
+  premium_change: number;
+  premium_change_from_start: number;
+
+  initial_size: number;
+  previous_size: number;
+  current_size: number;
+  size_change: number;
+  size_change_from_start: number;
+
+  initial_trade_count: number;
+  previous_trade_count: number;
+  current_trade_count: number;
+  trade_count_change: number;
+  trade_count_change_from_start: number;
+
+  previous_side: string;
+  current_side: string;
+  previous_location: string;
+  current_location: string;
+
+  minutes_since_growth: number;
+};
+
+function getObjectRecord(
+  value: unknown
+): Record<string, unknown> {
+  return (
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  )
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function getPreviousTracking(
+  value: unknown
+): Partial<WhaleActivityTracking> {
+  const raw =
+    getObjectRecord(value);
+
+  return getObjectRecord(
+    raw.activity_tracking
+  ) as Partial<WhaleActivityTracking>;
+}
+
+function isExpirationFinished(
+  expiration: string | null | undefined,
+  now: Date
+) {
+  if (!expiration) {
+    return false;
+  }
+
+  const expirationDate =
+    new Date(
+      `${expiration}T23:59:59-04:00`
+    );
+
+  return (
+    Number.isFinite(
+      expirationDate.getTime()
+    ) &&
+    expirationDate.getTime() <
+      now.getTime()
+  );
+}
+
+async function addWhaleActivityTracking(
+  rows: WhaleTradeRow[],
+  supabaseUrl: string,
+  supabaseSecret: string
+): Promise<WhaleTradeRow[]> {
+  if (rows.length === 0) {
+    return rows;
+  }
+
+  const optionTickers =
+    Array.from(
+      new Set(
+        rows
+          .map(
+            (row) =>
+              String(
+                row.option_ticker || ""
+              ).trim()
+          )
+          .filter(Boolean)
+      )
+    );
+
+  const previousByTicker =
+    new Map<
+      string,
+      PreviousWhaleTradeRow
+    >();
+
+  if (optionTickers.length > 0) {
+    const inFilter =
+      optionTickers
+        .map(
+          (ticker) =>
+            `"${ticker.replaceAll(
+              '"',
+              ""
+            )}"`
+        )
+        .join(",");
+
+    const previousUrl =
+      `${supabaseUrl}/rest/v1/whale_trades` +
+      "?select=" +
+      [
+        "option_ticker",
+        "premium_value",
+        "volume_change",
+        "repeat_count",
+        "estimated_side",
+        "execution_location",
+        "first_seen_at",
+        "last_seen_at",
+        "expiration",
+        "raw",
+      ].join(",") +
+      `&option_ticker=in.(${encodeURIComponent(
+        inFilter
+      )})`;
+
+    const previousResponse =
+      await fetch(
+        previousUrl,
+        {
+          headers: {
+            apikey:
+              supabaseSecret,
+            Authorization:
+              `Bearer ${supabaseSecret}`,
+          },
+          cache: "no-store",
+        }
+      );
+
+    if (previousResponse.ok) {
+      const previousRows =
+        await previousResponse.json();
+
+      if (Array.isArray(previousRows)) {
+        for (
+          const previousRow
+          of previousRows
+        ) {
+          const ticker =
+            String(
+              previousRow
+                ?.option_ticker ||
+              ""
+            );
+
+          if (ticker) {
+            previousByTicker.set(
+              ticker,
+              previousRow
+            );
+          }
+        }
+      }
+    } else {
+      console.error(
+        "تعذر جلب دورة حياة عقود الحيتان:",
+        previousResponse.status,
+        await previousResponse.text()
+      );
+    }
+  }
+
+  const now =
+    new Date();
+
+  const nowIso =
+    now.toISOString();
+
+  return rows.map((row) => {
+    const previous =
+      previousByTicker.get(
+        row.option_ticker
+      );
+
+    const previousRaw =
+      getObjectRecord(
+        previous?.raw
+      );
+
+    const previousTracking =
+      getPreviousTracking(
+        previous?.raw
+      );
+
+    const currentPremium =
+      safeNumber(
+        row.premium_value
+      );
+
+    const currentSize =
+      safeNumber(
+        row.volume_change
+      );
+
+    const currentTradeCount =
+      safeNumber(
+        row.repeat_count
+      );
+
+    const previousPremium =
+      previous
+        ? safeNumber(
+            previous.premium_value
+          )
+        : currentPremium;
+
+    const previousSize =
+      previous
+        ? safeNumber(
+            previous.volume_change
+          )
+        : currentSize;
+
+    const previousTradeCount =
+      previous
+        ? safeNumber(
+            previous.repeat_count
+          )
+        : currentTradeCount;
+
+    const initialPremium =
+      safeNumber(
+        previousTracking
+          .initial_premium,
+        previousPremium
+      );
+
+    const initialSize =
+      safeNumber(
+        previousTracking
+          .initial_size,
+        previousSize
+      );
+
+    const initialTradeCount =
+      safeNumber(
+        previousTracking
+          .initial_trade_count,
+        previousTradeCount
+      );
+
+    const premiumChange =
+      currentPremium -
+      previousPremium;
+
+    const sizeChange =
+      currentSize -
+      previousSize;
+
+    const tradeCountChange =
+      currentTradeCount -
+      previousTradeCount;
+
+    const hasGrowth =
+      premiumChange > 0 ||
+      sizeChange > 0 ||
+      tradeCountChange > 0;
+
+    const currentSide =
+      String(
+        row.estimated_side ||
+        row.execution_side ||
+        "UNKNOWN"
+      ).toUpperCase();
+
+    const previousSide =
+      String(
+        previous?.estimated_side ||
+        previousTracking
+          .current_side ||
+        "UNKNOWN"
+      ).toUpperCase();
+
+    const currentLocation =
+      String(
+        row.execution_location ||
+        "UNKNOWN"
+      ).toUpperCase();
+
+    const previousLocation =
+      String(
+        previous
+          ?.execution_location ||
+        previousTracking
+          .current_location ||
+        "UNKNOWN"
+      ).toUpperCase();
+
+    const hasOppositeFlow =
+      Boolean(previous) &&
+      previousSide !== "UNKNOWN" &&
+      currentSide !== "UNKNOWN" &&
+      previousSide !== currentSide;
+
+    const firstSeenAt =
+      String(
+        previous
+          ?.first_seen_at ||
+        previousTracking
+          .first_seen_at ||
+        nowIso
+      );
+
+    const previousActivityAt =
+      String(
+        previousTracking
+          .last_activity_at ||
+        previous?.last_seen_at ||
+        firstSeenAt
+      );
+
+    const lastActivityAt =
+      (
+        !previous ||
+        hasGrowth ||
+        hasOppositeFlow
+      )
+        ? nowIso
+        : previousActivityAt;
+
+    const lastActivityMs =
+      new Date(
+        lastActivityAt
+      ).getTime();
+
+    const minutesSinceGrowth =
+      Number.isFinite(
+        lastActivityMs
+      )
+        ? Math.max(
+            0,
+            Math.floor(
+              (
+                now.getTime() -
+                lastActivityMs
+              ) /
+                60_000
+            )
+          )
+        : 0;
+
+    const expired =
+      isExpirationFinished(
+        row.expiration,
+        now
+      );
+
+    let status:
+      WhaleActivityTracking["status"];
+
+    let statusLabel:
+      string;
+
+    let statusReason:
+      string;
+
+    if (expired) {
+      status =
+        "EXPIRED";
+      statusLabel =
+        "الرصد منتهي";
+      statusReason =
+        "انتهى تاريخ العقد.";
+    } else if (hasOppositeFlow) {
+      status =
+        "OPPOSITE_FLOW";
+      statusLabel =
+        "ظهر تدفق معاكس";
+      statusReason =
+        `تغيرت جهة التنفيذ من ${previousSide} إلى ${currentSide}.`;
+    } else if (!previous) {
+      status =
+        "NEW";
+      statusLabel =
+        currentSide === "BUY"
+          ? "شراء مؤسسي جديد"
+          : currentSide === "SELL"
+            ? "بيع مؤسسي جديد"
+            : "نشاط مؤسسي جديد";
+      statusReason =
+        "هذه أول قراءة مؤهلة للعقد.";
+    } else if (hasGrowth) {
+      status =
+        "INCREASING";
+      statusLabel =
+        currentSide === "BUY"
+          ? "الشراء المؤسسي يتزايد"
+          : currentSide === "SELL"
+            ? "البيع المؤسسي يتزايد"
+            : "النشاط المؤسسي يتزايد";
+      statusReason =
+        "زادت القيمة أو الكمية أو عدد التنفيذات مقارنة بالقراءة السابقة.";
+    } else if (
+      minutesSinceGrowth <= 30
+    ) {
+      status =
+        "CONTINUING";
+      statusLabel =
+        currentSide === "BUY"
+          ? "الشراء المؤسسي مستمر"
+          : currentSide === "SELL"
+            ? "البيع المؤسسي مستمر"
+            : "النشاط المؤسسي مستمر";
+      statusReason =
+        "العقد ما زال يظهر بنفس جهة التنفيذ دون تدفق معاكس.";
+    } else if (
+      minutesSinceGrowth <= 120
+    ) {
+      status =
+        "STABLE";
+      statusLabel =
+        "النشاط مستقر";
+      statusReason =
+        "لا توجد زيادة جديدة حاليًا، ولم يظهر تدفق معاكس.";
+    } else {
+      status =
+        "WEAKENING";
+      statusLabel =
+        "النشاط يضعف";
+      statusReason =
+        "لم ترتفع القيمة أو الكمية أو عدد التنفيذات منذ فترة.";
+    }
+
+    const scanCount =
+      Math.max(
+        0,
+        safeNumber(
+          previousTracking
+            .scan_count
+        )
+      ) + 1;
+
+    const tracking:
+      WhaleActivityTracking = {
+        status,
+        status_label:
+          statusLabel,
+        status_reason:
+          statusReason,
+
+        first_seen_at:
+          firstSeenAt,
+        last_activity_at:
+          lastActivityAt,
+        last_scan_at:
+          nowIso,
+
+        scan_count:
+          scanCount,
+
+        initial_premium:
+          initialPremium,
+        previous_premium:
+          previousPremium,
+        current_premium:
+          currentPremium,
+        premium_change:
+          premiumChange,
+        premium_change_from_start:
+          currentPremium -
+          initialPremium,
+
+        initial_size:
+          initialSize,
+        previous_size:
+          previousSize,
+        current_size:
+          currentSize,
+        size_change:
+          sizeChange,
+        size_change_from_start:
+          currentSize -
+          initialSize,
+
+        initial_trade_count:
+          initialTradeCount,
+        previous_trade_count:
+          previousTradeCount,
+        current_trade_count:
+          currentTradeCount,
+        trade_count_change:
+          tradeCountChange,
+        trade_count_change_from_start:
+          currentTradeCount -
+          initialTradeCount,
+
+        previous_side:
+          previousSide,
+        current_side:
+          currentSide,
+        previous_location:
+          previousLocation,
+        current_location:
+          currentLocation,
+
+        minutes_since_growth:
+          minutesSinceGrowth,
+      };
+
+    return {
+      ...row,
+      first_seen_at:
+        firstSeenAt,
+
+      /*
+       * last_seen_at هنا يمثل آخر مرة
+       * تغير فيها النشاط فعليًا،
+       * وليس مجرد وقت تشغيل الماسح.
+       */
+      last_seen_at:
+        lastActivityAt,
+
+      raw: {
+        ...previousRaw,
+        activity_tracking:
+          tracking,
+      },
+    };
+  });
+}
+
 async function saveWhaleTrades(
   rows: WhaleTradeRow[],
   supabaseUrl: string,
@@ -2557,13 +3128,23 @@ export async function GET(
     )
     .slice(0, 50);
 
+  const normalizedSupabaseUrl =
+    supabaseUrl.replace(
+      /\/+$/,
+      ""
+    );
+
+  const trackedRows =
+    await addWhaleActivityTracking(
+      uniqueRows,
+      normalizedSupabaseUrl,
+      supabaseSecret
+    );
+
   const savedRows =
     await saveWhaleTrades(
-      uniqueRows,
-      supabaseUrl.replace(
-        /\/+$/,
-        ""
-      ),
+      trackedRows,
+      normalizedSupabaseUrl,
       supabaseSecret
     );
 
@@ -2603,7 +3184,7 @@ export async function GET(
           .slice(0, 20),
     },
 
-    results: uniqueRows,
+    results: trackedRows,
     capturedAt:
       new Date().toISOString(),
   });
