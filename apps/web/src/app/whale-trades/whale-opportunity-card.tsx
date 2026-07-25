@@ -147,6 +147,49 @@ function getExecutionLabel(
   }
 }
 
+function formatDetectionDateTime(
+  value?: string | null,
+) {
+  if (!value) {
+    return {
+      date: "—",
+      time: "—",
+    };
+  }
+
+  const parsedDate = new Date(value);
+
+  if (Number.isNaN(parsedDate.getTime())) {
+    return {
+      date: "—",
+      time: "—",
+    };
+  }
+
+  return {
+    date: new Intl.DateTimeFormat(
+      "ar-SA-u-ca-gregory",
+      {
+        timeZone: "Asia/Riyadh",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      },
+    ).format(parsedDate),
+
+    time: new Intl.DateTimeFormat(
+      "ar-SA",
+      {
+        timeZone: "Asia/Riyadh",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: true,
+      },
+    ).format(parsedDate),
+  };
+}
+
 function getFlowTypeLabel(
   trade: WhaleOpportunity,
 ) {
@@ -450,6 +493,12 @@ export default function WhaleOpportunityCard({
     safeNumber(trade.volume_change) ||
     safeNumber(trade.volume);
 
+  const detectionDateTime =
+    formatDetectionDateTime(
+      trade.last_seen_at ||
+      trade.trade_timestamp,
+    );
+
   return (
     <article
       className={`overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-b ${decision.cardTone} shadow-2xl shadow-black/25`}
@@ -485,6 +534,17 @@ export default function WhaleOpportunityCard({
               )}{" "}
               — الانتهاء{" "}
               {trade.expiration || "—"}
+            </p>
+
+            <p className="mt-2 text-xs leading-6 text-slate-400">
+              تاريخ الرصد:{" "}
+              <span className="font-bold text-slate-200">
+                {detectionDateTime.date}
+              </span>
+              {" "}— وقت الرصد:{" "}
+              <span className="font-bold text-cyan-300">
+                {detectionDateTime.time}
+              </span>
             </p>
           </div>
 
