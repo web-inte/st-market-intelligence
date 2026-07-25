@@ -13,7 +13,8 @@ export const dynamic =
 type RoundNumber =
   | "1"
   | "2"
-  | "3";
+  | "3"
+  | "4";
 
 function createAdminClient() {
   const url =
@@ -129,7 +130,7 @@ export async function POST(
       ) as RoundNumber;
 
     if (
-      !["1", "2", "3"].includes(
+      !["1", "2", "3", "4"].includes(
         round
       )
     ) {

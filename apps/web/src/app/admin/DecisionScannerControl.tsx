@@ -12,7 +12,8 @@ import {
 type RoundNumber =
   | "1"
   | "2"
-  | "3";
+  | "3"
+  | "4";
 
 const ROUNDS: Array<{
   value: RoundNumber;
@@ -36,6 +37,12 @@ const ROUNDS: Array<{
     label: "الدائرة الثالثة",
     description:
       "تشغيل رموز المجموعة الثالثة",
+  },
+  {
+    value: "4",
+    label: "الدائرة الرابعة",
+    description:
+      "تشغيل رموز المجموعة الرابعة",
   },
 ];
 
@@ -159,7 +166,7 @@ export default function DecisionScannerControl() {
         </p>
       </div>
 
-      <div className="mt-5 grid gap-3 md:grid-cols-3">
+      <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         {ROUNDS.map((round) => {
           const selected =
             selectedRound ===

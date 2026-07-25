@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       round:
-        description: "Round 1, 2, or 3"
+        description: "Round 1, 2, 3, or 4"
         required: true
         default: "1"
 
@@ -188,6 +188,50 @@ jobs:
                 "GWW"
               )
               ;;
+            4)
+              symbols=(
+                "OXY"
+                "SLB"
+                "CVX"
+                "COP"
+                "MPC"
+                "FCX"
+                "NEM"
+                "AA"
+                "NUE"
+                "CEG"
+                "VST"
+                "NEE"
+                "PLD"
+                "AMT"
+                "EQIX"
+                "SPG"
+                "WMT"
+                "COST"
+                "TGT"
+                "PM"
+                "LLY"
+                "UNH"
+                "PFE"
+                "CVS"
+                "AMGN"
+                "SOFI"
+                "AFRM"
+                "C"
+                "WFC"
+                "GS"
+                "SCHW"
+                "NKE"
+                "SBUX"
+                "CCL"
+                "RCL"
+                "UAL"
+                "DAL"
+                "RDDT"
+                "SNAP"
+                "DELL"
+              )
+              ;;
             *)
               echo "Invalid round: ${round_number}"
               exit 1
@@ -203,18 +247,81 @@ jobs:
           # دورة 1 → الدائرة الأولى
           # دورة 2 → الدائرة الثانية
           # دورة 3 → الدائرة الثالثة
+          # دورة 4 → الدائرة الرابعة
           #
           # في التشغيل اليدوي، الدائرة المختارة تمر على المحركات الثلاثة.
           if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
             bot_engine_round="${round_number}"
           else
             cycle_index=$(( $(date +%s) / 900 ))
-            bot_engine_round=$(( cycle_index % 3 + 1 ))
+            bot_engine_round=$(( cycle_index % 4 + 1 ))
           fi
 
           echo "دائرة محرك قرار البوتات في هذه الدورة: ${bot_engine_round}"
 
+          echo "===== جلب الرموز المستبعدة قبل البحث ====="
+
+          blocked_file="/tmp/blocked-symbols.json"
+
+          blocked_http_code=$(
+            curl \
+              --silent \
+              --show-error \
+              --location \
+              --connect-timeout 8 \
+              --max-time 40 \
+              --output "${blocked_file}" \
+              --write-out "%{http_code}" \
+              --header "Authorization: Bearer ${DECISION_SCAN_SECRET}" \
+              "${BASE_URL}/api/bot-decision/blocked-symbols" \
+              || printf "000"
+          )
+
+          blocked_http_code="${blocked_http_code: -3}"
+
+          declare -A blocked_symbol_map=()
+
+          if [ "${blocked_http_code}" = "200" ]; then
+            while IFS= read -r blocked_symbol; do
+              if [ -n "${blocked_symbol}" ]; then
+                blocked_symbol_map["${blocked_symbol}"]=1
+              fi
+            done < <(
+              python3 - "${blocked_file}" <<'PYBLOCKED'
+import json
+import sys
+
+path = sys.argv[1]
+
+try:
+    with open(path, "r", encoding="utf-8") as file:
+        payload = json.load(file)
+
+    for symbol in payload.get("symbols", []):
+        symbol = str(symbol).strip().upper()
+        if symbol:
+            print(symbol)
+except Exception as error:
+    print(
+        f"تعذر قراءة الرموز المستبعدة: {error}",
+        file=sys.stderr,
+    )
+PYBLOCKED
+            )
+
+            echo "عدد الرموز المستبعدة: ${#blocked_symbol_map[@]}"
+          else
+            echo "⚠️ تعذر جلب الرموز المستبعدة: HTTP ${blocked_http_code}"
+            head -c 700 "${blocked_file}" 2>/dev/null || true
+            echo
+            echo "سيستمر البحث مع بقاء حماية منع التكرار داخل المحرك."
+          fi
+
           for symbol in "${symbols[@]}"; do
+            if [ -n "${blocked_symbol_map[$symbol]:-}" ]; then
+              echo "⏭️ ${symbol} — مستبعد قبل البحث لوجود مراقبة أو صفقة مفتوحة"
+              continue
+            fi
             echo "===== ${symbol} ====="
 
             response_file="/tmp/${symbol}.json"
