@@ -238,7 +238,9 @@ export async function POST(
       event !==
         "order.payment.updated" &&
       event !==
-        "order.status.updated"
+        "order.status.updated" &&
+      event !==
+        "invoice.created"
     ) {
       return NextResponse.json({
         ok: true,
@@ -248,14 +250,38 @@ export async function POST(
       });
     }
 
-    const data = asRecord(
+    const rawData = asRecord(
       payload?.data
     );
+
+    /*
+      حدث invoice.created قد يضع بيانات الطلب
+      داخل data.order، بينما أحداث الطلب تضعها
+      مباشرة داخل data.
+    */
+    const invoiceOrder = asRecord(
+      rawData.order
+    );
+
+    const data =
+      event === "invoice.created" &&
+      Object.keys(invoiceOrder).length > 0
+        ? {
+            ...invoiceOrder,
+            invoice: rawData,
+          }
+        : rawData;
 
     const paymentStatus =
       extractPaymentStatus(data);
 
+    /*
+      invoice.created لا يصدر إلا عند اكتمال
+      الطلب أو استعادته، لذلك لا نعتمد على وجود
+      payment.status داخل حمولة الفاتورة.
+    */
     if (
+      event !== "invoice.created" &&
       !isPaidStatus(paymentStatus)
     ) {
       return NextResponse.json({
