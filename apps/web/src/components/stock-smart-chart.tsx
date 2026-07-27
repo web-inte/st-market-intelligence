@@ -613,6 +613,11 @@ export default function StockSmartChart({
   ] = useState(false);
 
   const [
+    isPriceScaleManual,
+    setIsPriceScaleManual,
+  ] = useState(false);
+
+  const [
     clockNow,
     setClockNow,
   ] = useState(
@@ -1298,10 +1303,10 @@ export default function StockSmartChart({
           horzTouchDrag: true,
 
           /*
-            نترك السحب العمودي للجوال
-            لتمرير الصفحة بصورة طبيعية.
+            داخل الشارت يسمح بتحريك
+            النطاق السعري للأعلى والأسفل.
           */
-          vertTouchDrag: false,
+          vertTouchDrag: true,
         },
 
         handleScale: {
@@ -1319,12 +1324,28 @@ export default function StockSmartChart({
         },
 
         rightPriceScale: {
+          visible: true,
+          borderVisible: true,
           borderColor:
-            "rgba(148, 163, 184, 0.18)",
+            "rgba(148, 163, 184, 0.28)",
+
+          autoScale: true,
+
+          /*
+            فراغ أعلى وأسفل حتى لا تلتصق
+            الشموع والمستويات بالحواف.
+          */
           scaleMargins: {
-            top: 0.12,
-            bottom: 0.12,
+            top: 0.1,
+            bottom: 0.1,
           },
+
+          /*
+            إبقاء علامات السعر ظاهرة
+            بوضوح عند أطراف المقياس.
+          */
+          ensureEdgeTickMarksVisible:
+            true,
         },
         timeScale: {
           borderColor:
@@ -1378,7 +1399,26 @@ export default function StockSmartChart({
       container
     );
 
+    function markPriceScaleManual() {
+      setIsPriceScaleManual(
+        true
+      );
+    }
+
+    /*
+      أي سحب أو لمس داخل منطقة
+      مقياس السعر يعتبر تحكمًا يدويًا.
+    */
+    container.addEventListener(
+      "pointerdown",
+      markPriceScaleManual
+    );
+
     return () => {
+      container.removeEventListener(
+        "pointerdown",
+        markPriceScaleManual
+      );
       resizeObserver.disconnect();
 
       chart.remove();
@@ -1771,6 +1811,40 @@ export default function StockSmartChart({
       .scrollToRealTime();
   }
 
+  function resetPriceScale() {
+    const chart =
+      chartRef.current;
+
+    if (!chart) {
+      return;
+    }
+
+    chart
+      .priceScale("right")
+      .setAutoScale(true);
+
+    setIsPriceScaleManual(
+      false
+    );
+  }
+
+  function enableManualPriceScale() {
+    const chart =
+      chartRef.current;
+
+    if (!chart) {
+      return;
+    }
+
+    chart
+      .priceScale("right")
+      .setAutoScale(false);
+
+    setIsPriceScaleManual(
+      true
+    );
+  }
+
   const intervalSeconds =
     interval * 60;
 
@@ -1972,6 +2046,31 @@ export default function StockSmartChart({
 
           <button
             type="button"
+            onClick={
+              enableManualPriceScale
+            }
+            className={[
+              "rounded-xl border px-3 py-2 text-xs font-black transition",
+              isPriceScaleManual
+                ? "border-amber-400/30 bg-amber-400/10 text-amber-300"
+                : "border-white/[0.08] bg-slate-900/70 text-slate-300 hover:border-amber-400/30 hover:text-amber-300",
+            ].join(" ")}
+            title="تفعيل التحكم اليدوي في نطاق الأسعار"
+          >
+            تحكم السعر
+          </button>
+
+          <button
+            type="button"
+            onClick={resetPriceScale}
+            className="rounded-xl border border-white/[0.08] bg-slate-900/70 px-3 py-2 text-xs font-black text-slate-300 transition hover:border-emerald-400/30 hover:text-emerald-300"
+            title="إعادة مقياس السعر للوضع التلقائي"
+          >
+            ضبط السعر
+          </button>
+
+          <button
+            type="button"
             onClick={() =>
               setIsExpanded(
                 (current) => !current
@@ -1994,6 +2093,10 @@ export default function StockSmartChart({
               : "تكبير"}
           </button>
         </div>
+      </div>
+
+      <div className="border-b border-white/[0.05] px-5 py-2 text-right text-[11px] font-bold leading-5 text-slate-500 sm:px-6">
+        اسحب تدريج الأسعار في يمين الشارت لتكبير أو تصغير النطاق السعري، واسحب الشارت لتحريكه، واستخدم إصبعين للتكبير على الجوال.
       </div>
 
       {side === "NEUTRAL" ? (
