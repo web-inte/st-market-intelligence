@@ -1,0 +1,122 @@
+name: Market News Scanner
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/5 11-20 * * 1-5"
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Scan all market news symbols
+        env:
+          MARKET_NEWS_SCAN_URL: ${{ secrets.MARKET_NEWS_SCAN_URL }}
+          MARKET_NEWS_CRON_SECRET: ${{ secrets.MARKET_NEWS_CRON_SECRET }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${MARKET_NEWS_SCAN_URL:-}" ]; then
+            echo "MARKET_NEWS_SCAN_URL is missing"
+            exit 1
+          fi
+
+          if [ -z "${MARKET_NEWS_CRON_SECRET:-}" ]; then
+            echo "MARKET_NEWS_CRON_SECRET is missing"
+            exit 1
+          fi
+
+          cursor=0
+          limit=15
+          total_saved=0
+          total_material=0
+          total_fetched=0
+
+          while true; do
+            echo "===== Scanning cursor ${cursor} ====="
+
+            response_file="$(mktemp)"
+
+            http_code="$(
+              curl --silent --show-error --location \
+                --max-time 120 \
+                --output "${response_file}" \
+                --write-out "%{http_code}" \
+                -H "Authorization: Bearer ${MARKET_NEWS_CRON_SECRET}" \
+                "${MARKET_NEWS_SCAN_URL}?cursor=${cursor}&limit=${limit}"
+            )"
+
+            echo "HTTP_STATUS=${http_code}"
+            cat "${response_file}"
+            echo
+
+            if [ "${http_code}" -lt 200 ] || [ "${http_code}" -ge 300 ]; then
+              exit 1
+            fi
+
+            ok="$(
+              python3 -c '
+import json,sys
+data=json.load(open(sys.argv[1]))
+print("1" if data.get("ok") is True else "0")
+' "${response_file}"
+            )"
+
+            if [ "${ok}" != "1" ]; then
+              echo "Scanner returned ok=false"
+              exit 1
+            fi
+
+            fetched="$(
+              python3 -c '
+import json,sys
+data=json.load(open(sys.argv[1]))
+print(int(data.get("fetchedNews") or 0))
+' "${response_file}"
+            )"
+
+            material="$(
+              python3 -c '
+import json,sys
+data=json.load(open(sys.argv[1]))
+print(int(data.get("materialNews") or 0))
+' "${response_file}"
+            )"
+
+            saved="$(
+              python3 -c '
+import json,sys
+data=json.load(open(sys.argv[1]))
+print(int(data.get("savedRows") or 0))
+' "${response_file}"
+            )"
+
+            next_cursor="$(
+              python3 -c '
+import json,sys
+data=json.load(open(sys.argv[1]))
+value=data.get("nextCursor")
+print("" if value is None else value)
+' "${response_file}"
+            )"
+
+            total_fetched=$((total_fetched + fetched))
+            total_material=$((total_material + material))
+            total_saved=$((total_saved + saved))
+
+            rm -f "${response_file}"
+
+            if [ -z "${next_cursor}" ]; then
+              break
+            fi
+
+            cursor="${next_cursor}"
+            sleep 2
+          done
+
+          echo "===== Scan completed ====="
+          echo "TOTAL_FETCHED=${total_fetched}"
+          echo "TOTAL_MATERIAL=${total_material}"
+          echo "TOTAL_SAVED=${total_saved}"
