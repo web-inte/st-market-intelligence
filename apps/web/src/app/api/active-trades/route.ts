@@ -839,6 +839,18 @@ if (!massiveApiKey) {
           return rawRow;
         }
 
+        /*
+          بعد اعتماد الوقف النهائي من بوت القرار،
+          تتجمّد بيانات العقد عند سعر الإغلاق المحفوظ.
+          لا نطلب سعرًا حيًا ولا نعيد حساب الربح والخسارة.
+        */
+        if (
+          savedStatus === "STOPPED" ||
+          savedContractStatus === "STOPPED"
+        ) {
+          return rawRow;
+        }
+
         try {
           const live =
             await fetchMassiveContractLivePrice(
