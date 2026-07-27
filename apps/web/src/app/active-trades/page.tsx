@@ -1408,6 +1408,13 @@ export default function ActiveTradesPage() {
                         trade.contractTicker
                       }
                     </p>
+
+                    <Link
+                      href={`/stocks/${trade.symbol}`}
+                      className="mt-4 flex w-full items-center justify-center rounded-2xl border border-cyan-400/25 bg-cyan-400/[0.08] px-4 py-3 text-sm font-black text-cyan-200 transition duration-200 hover:border-cyan-300/50 hover:bg-cyan-400/[0.14]"
+                    >
+                      📊 تحليل السهم
+                    </Link>
                   </article>
                 )
               )}
