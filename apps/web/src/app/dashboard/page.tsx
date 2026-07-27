@@ -1637,6 +1637,30 @@ ${url}`);
 
           <button
             type="button"
+            onClick={() => router.push("/market-news")}
+            className="group flex items-center justify-between gap-4 rounded-3xl border border-sky-400/20 bg-gradient-to-br from-sky-500/10 via-slate-950/80 to-cyan-500/10 p-5 text-right shadow-2xl shadow-sky-950/20 backdrop-blur-xl transition duration-300 hover:-translate-y-1 hover:border-sky-400/40 sm:p-6"
+          >
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.15em] text-sky-400">
+                محركات السوق
+              </p>
+
+              <h2 className="mt-2 text-xl font-black text-white">
+                أهم أخبار السوق
+              </h2>
+
+              <p className="mt-2 text-sm leading-6 text-slate-400">
+                تابع الأرباح والعقود والاستحواذات والأخبار التي قد تحرك الأسهم.
+              </p>
+            </div>
+
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-sky-400/20 bg-sky-400/10 text-xl text-sky-300 transition group-hover:-translate-x-1">
+              ←
+            </div>
+          </button>
+
+          <button
+            type="button"
             onClick={() => router.push("/spx-whales")}
             className="group flex items-center justify-between gap-4 rounded-3xl border border-fuchsia-400/20 bg-gradient-to-br from-fuchsia-500/10 via-slate-950/80 to-violet-500/10 p-5 text-right shadow-2xl shadow-fuchsia-950/20 backdrop-blur-xl transition duration-300 hover:-translate-y-1 hover:border-fuchsia-400/40 sm:p-6"
           >
