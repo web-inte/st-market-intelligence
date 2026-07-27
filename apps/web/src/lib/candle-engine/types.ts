@@ -25,7 +25,12 @@ export type CandleEngineResult = {
   timezone: "America/New_York";
   candles: Candle[];
   sourceBars: number;
-  source: "massive-1-minute" | "massive-1-day";
+  source:
+    | "finnhub-intraday"
+    | "finnhub-daily"
+    | "finnhub-60-minute-aggregated-4h"
+    | "massive-1-minute"
+    | "massive-1-day";
   cached: boolean;
   updatedAt: string;
 };

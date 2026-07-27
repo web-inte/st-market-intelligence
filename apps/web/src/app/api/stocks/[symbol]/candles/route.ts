@@ -69,13 +69,13 @@ export async function GET(
     }
 
     const apiKey =
-      process.env.MASSIVE_API_KEY;
+      process.env.FINNHUB_API_KEY;
 
     if (!apiKey) {
       return NextResponse.json(
         {
           error:
-            "MASSIVE_API_KEY غير موجود.",
+            "FINNHUB_API_KEY غير موجود.",
         },
         { status: 500 }
       );
@@ -101,7 +101,7 @@ export async function GET(
     const fallbackBusyMessage =
       "تعذر تجهيز الشموع حاليًا بسبب ضغط البيانات. حاول مرة أخرى.";
     const providerRateLimitMessage =
-      "تم تجاوز حد طلبات مزود البيانات. انتظر قليلًا ثم أعد المحاولة.";
+      "تم تجاوز حد طلبات Finnhub. انتظر قليلًا ثم أعد المحاولة.";
 
     if (!(error instanceof Error)) {
       return NextResponse.json(
