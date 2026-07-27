@@ -613,6 +613,13 @@ export default function StockSmartChart({
   ] = useState(false);
 
   const [
+    clockNow,
+    setClockNow,
+  ] = useState(
+    () => Date.now()
+  );
+
+  const [
     candlesLoading,
     setCandlesLoading,
   ] = useState(true);
@@ -633,6 +640,24 @@ export default function StockSmartChart({
     intervalRef.current =
       interval;
   }, [interval]);
+
+  useEffect(() => {
+    const timer =
+      window.setInterval(
+        () => {
+          setClockNow(
+            Date.now()
+          );
+        },
+        1_000
+      );
+
+    return () => {
+      window.clearInterval(
+        timer
+      );
+    };
+  }, []);
 
   useEffect(() => {
     if (!isExpanded) {
@@ -1746,6 +1771,87 @@ export default function StockSmartChart({
       .scrollToRealTime();
   }
 
+  const intervalSeconds =
+    interval * 60;
+
+  const nowSeconds =
+    Math.floor(
+      clockNow / 1000
+    );
+
+  const currentBucketStart =
+    Math.floor(
+      nowSeconds /
+        intervalSeconds
+    ) * intervalSeconds;
+
+  const candleCloseTime =
+    currentBucketStart +
+    intervalSeconds;
+
+  const secondsRemaining =
+    Math.max(
+      0,
+      candleCloseTime -
+        nowSeconds
+    );
+
+  const countdownHours =
+    Math.floor(
+      secondsRemaining /
+        3_600
+    );
+
+  const countdownMinutes =
+    Math.floor(
+      (
+        secondsRemaining %
+        3_600
+      ) / 60
+    );
+
+  const countdownSeconds =
+    secondsRemaining % 60;
+
+  const candleCountdown =
+    countdownHours > 0
+      ? [
+          countdownHours,
+          countdownMinutes,
+          countdownSeconds,
+        ]
+          .map((value) =>
+            String(value).padStart(
+              2,
+              "0"
+            )
+          )
+          .join(":")
+      : [
+          countdownMinutes,
+          countdownSeconds,
+        ]
+          .map((value) =>
+            String(value).padStart(
+              2,
+              "0"
+            )
+          )
+          .join(":");
+
+  const intervalLabel =
+    interval === 1440
+      ? "1D"
+      : interval === 240
+        ? "4H"
+        : interval === 60
+          ? "1H"
+          : `${interval}m`;
+
+  const displayedLivePrice =
+    livePrice ??
+    currentPrice;
+
   const directionLabel =
     side === "CALL"
       ? "سيناريو صاعد — صفقة CALL"
@@ -1771,6 +1877,28 @@ export default function StockSmartChart({
           <h2 className="mt-2 text-2xl font-black text-white">
             {symbol} — حركة السعر والمستويات
           </h2>
+
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span className="rounded-xl border border-emerald-400/25 bg-emerald-400/[0.08] px-3 py-1.5 text-sm font-black text-emerald-300">
+              مباشر $
+              {priceFormat(
+                displayedLivePrice
+              )}
+            </span>
+
+            <span className="rounded-xl border border-cyan-400/25 bg-cyan-400/[0.08] px-3 py-1.5 text-xs font-black text-cyan-300">
+              فريم {intervalLabel}
+            </span>
+
+            <span
+              className="rounded-xl border border-amber-400/25 bg-amber-400/[0.08] px-3 py-1.5 font-mono text-xs font-black tabular-nums text-amber-300"
+              title="الوقت المتبقي حتى إغلاق الشمعة الحالية"
+              dir="ltr"
+            >
+              إغلاق الشمعة خلال{" "}
+              {candleCountdown}
+            </span>
+          </div>
 
           <p
             className={[
@@ -1875,10 +2003,6 @@ export default function StockSmartChart({
       ) : null}
 
       <div className="relative">
-        <div className="mx-5 mt-5 rounded-2xl border border-cyan-300/20 bg-slate-900/55 px-4 py-3 text-right text-xs leading-6 text-slate-300 backdrop-blur-sm sm:mx-6">
-          يفضّل رسم مستويات الدخول والوقف والأهداف على الشارت الفعلي في TradingView، ومتابعة حركة السهم من هناك للحصول على تحديث أدق وأسرع.
-        </div>
-
         <div
           className={[
             "relative w-full",
