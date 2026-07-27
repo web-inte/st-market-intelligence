@@ -569,8 +569,12 @@ export async function GET(
       .upsert(rows, {
         onConflict:
           "external_id",
+        /*
+         * الأخبار الموجودة لا يتم تحديثها
+         * أو احتسابها كمحفوظة من جديد.
+         */
         ignoreDuplicates:
-          false,
+          true,
       })
       .select("external_id");
 
