@@ -4,6 +4,7 @@ import Link from "next/link";
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -288,8 +289,44 @@ function TargetList({
 }
 
 export default function ActiveTradesPage() {
-  const [trades, setTrades] =
-    useState<ActiveTrade[]>([]);
+    const [
+    trades,
+    setTrades,
+  ] = useState<ActiveTrade[]>([]);
+
+  const [
+    tradeSymbolSearch,
+    setTradeSymbolSearch,
+  ] = useState("");
+
+  const normalizedTradeSymbolSearch =
+    tradeSymbolSearch
+      .trim()
+      .toUpperCase();
+
+  const filteredTrades =
+    useMemo(
+      () => {
+        if (
+          !normalizedTradeSymbolSearch
+        ) {
+          return trades;
+        }
+
+        return trades.filter(
+          (trade) =>
+            trade.symbol
+              .toUpperCase()
+              .includes(
+                normalizedTradeSymbolSearch
+              )
+        );
+      },
+      [
+        trades,
+        normalizedTradeSymbolSearch,
+      ]
+    );
 
   const [loading, setLoading] =
     useState(true);
@@ -788,6 +825,63 @@ export default function ActiveTradesPage() {
           </div>
         </div>
 
+        <div className="mb-6 rounded-3xl border border-slate-800 bg-slate-900/70 p-4 sm:p-5">
+          <label
+            htmlFor="active-trade-symbol-search"
+            className="mb-3 block text-sm font-black text-white"
+          >
+            البحث عن صفقة
+          </label>
+
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1">
+              <input
+                id="active-trade-symbol-search"
+                type="text"
+                inputMode="text"
+                autoComplete="off"
+                spellCheck={false}
+                value={tradeSymbolSearch}
+                onChange={(event) =>
+                  setTradeSymbolSearch(
+                    event.target.value
+                      .replace(
+                        /[^a-zA-Z0-9.-]/g,
+                        ""
+                      )
+                      .toUpperCase()
+                  )
+                }
+                placeholder="ابحث عن رمز صفقة مثل NVDA أو TSLA"
+                className="h-12 w-full rounded-2xl border border-slate-700 bg-slate-950/70 px-4 pl-12 text-left text-sm font-black uppercase tracking-wide text-white outline-none transition placeholder:text-right placeholder:font-normal placeholder:tracking-normal placeholder:text-slate-500 focus:border-cyan-400/60 focus:ring-2 focus:ring-cyan-400/10"
+                dir="ltr"
+              />
+
+              {tradeSymbolSearch ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setTradeSymbolSearch("")
+                  }
+                  aria-label="مسح البحث"
+                  className="absolute left-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-xl text-lg font-black text-slate-400 transition hover:bg-slate-800 hover:text-white"
+                >
+                  ×
+                </button>
+              ) : null}
+            </div>
+          </div>
+
+          {normalizedTradeSymbolSearch ? (
+            <p className="mt-3 text-xs font-bold text-slate-400">
+              عدد الصفقات المطابقة:{" "}
+              <span className="text-cyan-300">
+                {filteredTrades.length}
+              </span>
+            </p>
+          ) : null}
+        </div>
+
         {updatedAt ? (
           <p className="mb-4 text-xs text-slate-500">
             آخر تحديث:{" "}
@@ -823,7 +917,38 @@ export default function ActiveTradesPage() {
           </div>
         ) : (
           <>
-            <div className="hidden overflow-hidden rounded-3xl border border-slate-800 bg-slate-900/70 xl:block">
+            {normalizedTradeSymbolSearch &&
+            filteredTrades.length === 0 ? (
+              <div className="mb-6 rounded-3xl border border-amber-400/20 bg-amber-400/[0.06] p-8 text-center">
+                <p className="text-lg font-black text-white">
+                  لا توجد صفقة لهذا الرمز
+                </p>
+
+                <p className="mt-2 text-sm text-slate-400">
+                  البحث يعرض فقط الرموز التي لديها صفقة موجودة في هذه الصفحة.
+                </p>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setTradeSymbolSearch("")
+                  }
+                  className="mt-5 rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-bold text-slate-200 transition hover:border-slate-500"
+                >
+                  عرض جميع الصفقات
+                </button>
+              </div>
+            ) : null}
+
+            <div
+              className={[
+                "hidden overflow-hidden rounded-3xl border border-slate-800 bg-slate-900/70 xl:block",
+                normalizedTradeSymbolSearch &&
+                filteredTrades.length === 0
+                  ? "xl:hidden"
+                  : "",
+              ].join(" ")}
+            >
               <div className="overflow-x-auto">
                 <table className="min-w-[1450px] w-full text-right text-sm">
                   <thead className="border-b border-slate-800 bg-slate-900">
@@ -880,7 +1005,7 @@ export default function ActiveTradesPage() {
                   </thead>
 
                   <tbody className="divide-y divide-slate-800">
-                    {trades.map(
+                    {filteredTrades.map(
                       (trade) => (
                         <tr
                           key={trade.id}
@@ -1111,7 +1236,7 @@ export default function ActiveTradesPage() {
             </div>
 
             <div className="grid gap-4 xl:hidden">
-              {trades.map(
+              {filteredTrades.map(
                 (trade) => (
                   <article
                     key={trade.id}
