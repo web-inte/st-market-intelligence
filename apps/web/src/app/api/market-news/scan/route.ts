@@ -28,7 +28,13 @@ const DEFAULT_BATCH_SIZE = 10;
 const MAX_BATCH_SIZE = 15;
 const NEWS_LOOKBACK_DAYS = 2;
 const MAX_NEWS_PER_SYMBOL = 20;
-const FETCH_CONCURRENCY = 4;
+/*
+ * Finnhub يطبق حدًا على عدد الطلبات في الدقيقة.
+ * ننفذ الطلبات بالتتابع مع مهلة بسيطة حتى يكتمل
+ * فحص جميع الرموز دون Too many requests.
+ */
+const FETCH_CONCURRENCY = 1;
+const REQUEST_DELAY_MS = 1_200;
 
 type ScanRow = {
   external_id: string;
@@ -490,24 +496,39 @@ export async function GET(
       symbols,
       FETCH_CONCURRENCY,
       async (symbol) => {
-        const news =
-          await fetchCompanyNews(
-            symbol,
-            apiKey,
-            from,
-            to
-          );
-
-        return {
-          symbol,
-          fetched:
-            news.length,
-          rows:
-            convertNewsToRows(
+        try {
+          const news =
+            await fetchCompanyNews(
               symbol,
-              news
-            ),
-        };
+              apiKey,
+              from,
+              to
+            );
+
+          return {
+            symbol,
+            fetched:
+              news.length,
+            rows:
+              convertNewsToRows(
+                symbol,
+                news
+              ),
+          };
+        } finally {
+          /*
+           * نترك مسافة بين طلبات Finnhub حتى لا
+           * نتجاوز الحد المسموح في الدقيقة.
+           */
+          await new Promise<void>(
+            (resolve) => {
+              setTimeout(
+                resolve,
+                REQUEST_DELAY_MS
+              );
+            }
+          );
+        }
       }
     );
 
