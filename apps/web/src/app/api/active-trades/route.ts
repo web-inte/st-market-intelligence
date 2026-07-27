@@ -952,16 +952,12 @@ if (!massiveApiKey) {
               row.stop_price
             );
 
-          const stopped =
-            stopPrice > 0 &&
-            stockPrice > 0 &&
-            (side === "CALL"
-              ? stockPrice <=
-                stopPrice
-              : side === "PUT"
-                ? stockPrice >=
-                  stopPrice
-                : false);
+          /*
+            صفقة بوت القرار لا تُغلق محليًا من الموقع.
+            بوت القرار هو مصدر الحقيقة للوقف النهائي،
+            ويحدّث contract_status عند اعتماد الوقف.
+          */
+          const stopped = false;
 
           const nowIso =
             live.quoteAt;
