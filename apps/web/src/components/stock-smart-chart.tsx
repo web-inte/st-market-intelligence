@@ -577,6 +577,115 @@ function extractGammaView(
   };
 }
 
+type TechnicalIndicatorData = {
+  ok: boolean;
+  symbol: string;
+  requestedInterval: number;
+  effectiveInterval: number;
+  resolution: string;
+  fallback: boolean;
+  fallbackMessage: string | null;
+  technicalAnalysis: {
+    signal:
+      | "buy"
+      | "sell"
+      | "neutral";
+    count: {
+      buy: number;
+      neutral: number;
+      sell: number;
+      total: number;
+    };
+    percentages: {
+      buy: number;
+      neutral: number;
+      sell: number;
+    };
+  };
+  trend: {
+    adx: number;
+    trending: boolean;
+    strength:
+      | "STRONG"
+      | "TRENDING"
+      | "RANGING";
+  };
+  updatedAt: string;
+  cached: boolean;
+  error?: string;
+};
+
+const TECHNICAL_INDICATORS_STORAGE_KEY =
+  "st_market_technical_indicators_enabled";
+
+function technicalSignalLabel(
+  signal:
+    | "buy"
+    | "sell"
+    | "neutral"
+) {
+  if (signal === "buy") {
+    return "شراء";
+  }
+
+  if (signal === "sell") {
+    return "بيع";
+  }
+
+  return "محايد";
+}
+
+function technicalSignalClasses(
+  signal:
+    | "buy"
+    | "sell"
+    | "neutral"
+) {
+  if (signal === "buy") {
+    return "border-emerald-400/25 bg-emerald-400/[0.08] text-emerald-300";
+  }
+
+  if (signal === "sell") {
+    return "border-rose-400/25 bg-rose-400/[0.08] text-rose-300";
+  }
+
+  return "border-amber-400/25 bg-amber-400/[0.08] text-amber-300";
+}
+
+function trendStrengthLabel(
+  strength:
+    | "STRONG"
+    | "TRENDING"
+    | "RANGING"
+) {
+  if (strength === "STRONG") {
+    return "اتجاه قوي";
+  }
+
+  if (strength === "TRENDING") {
+    return "اتجاه قائم";
+  }
+
+  return "سوق متذبذب";
+}
+
+function trendStrengthClasses(
+  strength:
+    | "STRONG"
+    | "TRENDING"
+    | "RANGING"
+) {
+  if (strength === "STRONG") {
+    return "text-violet-300";
+  }
+
+  if (strength === "TRENDING") {
+    return "text-cyan-300";
+  }
+
+  return "text-amber-300";
+}
+
 function priceFormat(
   value: number
 ) {
@@ -635,6 +744,34 @@ export default function StockSmartChart({
   ] = useState("");
 
   const [
+    technicalIndicatorsEnabled,
+    setTechnicalIndicatorsEnabled,
+  ] = useState(true);
+
+  const [
+    technicalPreferenceLoaded,
+    setTechnicalPreferenceLoaded,
+  ] = useState(false);
+
+  const [
+    technicalIndicators,
+    setTechnicalIndicators,
+  ] =
+    useState<TechnicalIndicatorData | null>(
+      null
+    );
+
+  const [
+    technicalLoading,
+    setTechnicalLoading,
+  ] = useState(false);
+
+  const [
+    technicalError,
+    setTechnicalError,
+  ] = useState("");
+
+  const [
     interval,
     setIntervalValue,
   ] = useState<
@@ -645,6 +782,156 @@ export default function StockSmartChart({
     intervalRef.current =
       interval;
   }, [interval]);
+
+  useEffect(() => {
+    try {
+      const storedValue =
+        window.localStorage.getItem(
+          TECHNICAL_INDICATORS_STORAGE_KEY
+        );
+
+      if (storedValue === "false") {
+        setTechnicalIndicatorsEnabled(
+          false
+        );
+      } else if (
+        storedValue === "true"
+      ) {
+        setTechnicalIndicatorsEnabled(
+          true
+        );
+      }
+    } catch {
+      /*
+       * تعذر الوصول إلى التخزين المحلي.
+       * يبقى الوضع الافتراضي مفعّلًا.
+       */
+    } finally {
+      setTechnicalPreferenceLoaded(
+        true
+      );
+    }
+  }, []);
+
+  useEffect(() => {
+    if (
+      !technicalPreferenceLoaded
+    ) {
+      return;
+    }
+
+    try {
+      window.localStorage.setItem(
+        TECHNICAL_INDICATORS_STORAGE_KEY,
+        String(
+          technicalIndicatorsEnabled
+        )
+      );
+    } catch {
+      /*
+       * فشل حفظ التفضيل لا يمنع تشغيل البطاقة.
+       */
+    }
+  }, [
+    technicalIndicatorsEnabled,
+    technicalPreferenceLoaded,
+  ]);
+
+  useEffect(() => {
+    if (
+      !technicalPreferenceLoaded ||
+      !technicalIndicatorsEnabled
+    ) {
+      setTechnicalLoading(false);
+      setTechnicalError("");
+      setTechnicalIndicators(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadTechnicalIndicators() {
+      setTechnicalLoading(true);
+      setTechnicalError("");
+
+      try {
+        const response =
+          await fetch(
+            `/api/stocks/${encodeURIComponent(
+              symbol
+            )}/technical-indicators?interval=${interval}`,
+            {
+              cache: "no-store",
+            }
+          );
+
+        const result =
+          (await response.json()) as
+            TechnicalIndicatorData;
+
+        if (
+          !response.ok ||
+          result.ok === false
+        ) {
+          throw new Error(
+            result.error ||
+              "تعذر تحميل المؤشرات الفنية."
+          );
+        }
+
+        if (cancelled) {
+          return;
+        }
+
+        setTechnicalIndicators(
+          result
+        );
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        setTechnicalIndicators(
+          null
+        );
+
+        setTechnicalError(
+          error instanceof Error
+            ? error.message
+            : "تعذر تحميل المؤشرات الفنية."
+        );
+      } finally {
+        if (!cancelled) {
+          setTechnicalLoading(
+            false
+          );
+        }
+      }
+    }
+
+    void loadTechnicalIndicators();
+
+    const refreshTimer =
+      window.setInterval(
+        () => {
+          void loadTechnicalIndicators();
+        },
+        60_000
+      );
+
+    return () => {
+      cancelled = true;
+
+      window.clearInterval(
+        refreshTimer
+      );
+    };
+  }, [
+    symbol,
+    interval,
+    technicalIndicatorsEnabled,
+    technicalPreferenceLoaded,
+  ]);
 
   useEffect(() => {
     const timer =
@@ -2107,6 +2394,278 @@ export default function StockSmartChart({
 
       <div className="border-b border-white/[0.05] px-5 py-2 text-right text-[11px] font-bold leading-5 text-slate-500 sm:px-6">
         اسحب تدريج الأسعار في يمين الشارت لتكبير أو تصغير النطاق السعري، واسحب الشارت لتحريكه، واستخدم إصبعين للتكبير على الجوال.
+      </div>
+
+      <div className="border-b border-white/[0.06] px-5 py-5 sm:px-6">
+        <div className="rounded-2xl border border-violet-400/15 bg-gradient-to-br from-violet-500/[0.07] via-slate-950/70 to-cyan-500/[0.05] p-4 sm:p-5">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="text-xs font-black text-violet-300">
+                المؤشرات الفنية المجمعة
+              </p>
+
+              <h3 className="mt-2 text-lg font-black text-white">
+                القراءة الفنية — فريم {intervalLabel}
+              </h3>
+
+              <p className="mt-2 text-xs leading-6 text-slate-500">
+                أداة مستقلة للمراقبة فقط، ولا تدخل حاليًا في قرار الصفقة أو درجة التحليل.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              {technicalIndicatorsEnabled &&
+              technicalIndicators ? (
+                <span
+                  className={[
+                    "rounded-xl border px-4 py-2 text-sm font-black",
+                    technicalSignalClasses(
+                      technicalIndicators
+                        .technicalAnalysis
+                        .signal
+                    ),
+                  ].join(" ")}
+                >
+                  الإشارة:{" "}
+                  {technicalSignalLabel(
+                    technicalIndicators
+                      .technicalAnalysis
+                      .signal
+                  )}
+                </span>
+              ) : null}
+
+              <button
+                type="button"
+                onClick={() =>
+                  setTechnicalIndicatorsEnabled(
+                    (current) =>
+                      !current
+                  )
+                }
+                className={[
+                  "rounded-xl border px-4 py-2 text-xs font-black transition",
+                  technicalIndicatorsEnabled
+                    ? "border-emerald-400/25 bg-emerald-400/[0.08] text-emerald-300 hover:bg-emerald-400/[0.13]"
+                    : "border-slate-500/25 bg-slate-500/[0.08] text-slate-400 hover:border-cyan-400/25 hover:text-cyan-300",
+                ].join(" ")}
+                aria-pressed={
+                  technicalIndicatorsEnabled
+                }
+              >
+                {technicalIndicatorsEnabled
+                  ? "تعطيل المؤشرات"
+                  : "تشغيل المؤشرات"}
+              </button>
+            </div>
+          </div>
+
+          {!technicalIndicatorsEnabled ? (
+            <div className="mt-4 rounded-xl border border-white/[0.06] bg-slate-950/50 p-4 text-center">
+              <p className="text-sm font-bold text-slate-400">
+                المؤشرات الفنية متوقفة حاليًا.
+              </p>
+
+              <p className="mt-2 text-xs leading-6 text-slate-600">
+                لن يتم إرسال طلبات تحديث حتى تعيد تشغيلها.
+              </p>
+            </div>
+          ) : null}
+
+          {technicalIndicatorsEnabled &&
+          technicalLoading ? (
+            <div className="mt-4 rounded-xl border border-white/[0.06] bg-slate-950/50 p-4 text-center text-sm font-bold text-slate-400">
+              جارٍ تحميل المؤشرات الفنية...
+            </div>
+          ) : null}
+
+          {technicalIndicatorsEnabled &&
+          !technicalLoading &&
+          technicalError ? (
+            <div className="mt-4 rounded-xl border border-rose-400/20 bg-rose-400/[0.06] p-4 text-sm font-bold text-rose-300">
+              {technicalError}
+            </div>
+          ) : null}
+
+          {technicalIndicatorsEnabled &&
+          !technicalLoading &&
+          technicalIndicators ? (
+            <>
+              {technicalIndicators
+                .fallbackMessage ? (
+                <div className="mt-4 rounded-xl border border-amber-400/20 bg-amber-400/[0.06] px-4 py-3 text-xs font-bold leading-6 text-amber-200">
+                  {
+                    technicalIndicators
+                      .fallbackMessage
+                  }
+                </div>
+              ) : null}
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                <div className="rounded-2xl border border-emerald-400/15 bg-emerald-400/[0.05] p-4">
+                  <p className="text-xs text-slate-500">
+                    إشارات الشراء
+                  </p>
+
+                  <p className="mt-2 text-2xl font-black text-emerald-300">
+                    {
+                      technicalIndicators
+                        .technicalAnalysis
+                        .count.buy
+                    }
+                  </p>
+
+                  <p className="mt-1 text-xs font-bold text-emerald-400/70">
+                    {
+                      technicalIndicators
+                        .technicalAnalysis
+                        .percentages.buy
+                    }
+                    %
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-amber-400/15 bg-amber-400/[0.05] p-4">
+                  <p className="text-xs text-slate-500">
+                    إشارات الحياد
+                  </p>
+
+                  <p className="mt-2 text-2xl font-black text-amber-300">
+                    {
+                      technicalIndicators
+                        .technicalAnalysis
+                        .count.neutral
+                    }
+                  </p>
+
+                  <p className="mt-1 text-xs font-bold text-amber-400/70">
+                    {
+                      technicalIndicators
+                        .technicalAnalysis
+                        .percentages.neutral
+                    }
+                    %
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-rose-400/15 bg-rose-400/[0.05] p-4">
+                  <p className="text-xs text-slate-500">
+                    إشارات البيع
+                  </p>
+
+                  <p className="mt-2 text-2xl font-black text-rose-300">
+                    {
+                      technicalIndicators
+                        .technicalAnalysis
+                        .count.sell
+                    }
+                  </p>
+
+                  <p className="mt-1 text-xs font-bold text-rose-400/70">
+                    {
+                      technicalIndicators
+                        .technicalAnalysis
+                        .percentages.sell
+                    }
+                    %
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-cyan-400/15 bg-cyan-400/[0.05] p-4">
+                  <p className="text-xs text-slate-500">
+                    قوة الاتجاه ADX
+                  </p>
+
+                  <p className="mt-2 text-2xl font-black text-cyan-300">
+                    {
+                      technicalIndicators
+                        .trend.adx
+                    }
+                  </p>
+
+                  <p
+                    className={[
+                      "mt-1 text-xs font-black",
+                      trendStrengthClasses(
+                        technicalIndicators
+                          .trend
+                          .strength
+                      ),
+                    ].join(" ")}
+                  >
+                    {trendStrengthLabel(
+                      technicalIndicators
+                        .trend
+                        .strength
+                    )}
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-violet-400/15 bg-violet-400/[0.05] p-4">
+                  <p className="text-xs text-slate-500">
+                    حالة الحركة
+                  </p>
+
+                  <p
+                    className={[
+                      "mt-2 text-lg font-black",
+                      technicalIndicators
+                        .trend.trending
+                        ? "text-violet-300"
+                        : "text-slate-300",
+                    ].join(" ")}
+                  >
+                    {technicalIndicators
+                      .trend.trending
+                      ? "اتجاه فعّال"
+                      : "تذبذب"}
+                  </p>
+
+                  <p className="mt-1 text-xs text-slate-600">
+                    تحديث تلقائي كل دقيقة
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-4 overflow-hidden rounded-full bg-slate-800">
+                <div className="flex h-2 w-full">
+                  <div
+                    className="bg-emerald-400"
+                    style={{
+                      width: `${
+                        technicalIndicators
+                          .technicalAnalysis
+                          .percentages.buy
+                      }%`,
+                    }}
+                  />
+
+                  <div
+                    className="bg-amber-400"
+                    style={{
+                      width: `${
+                        technicalIndicators
+                          .technicalAnalysis
+                          .percentages.neutral
+                      }%`,
+                    }}
+                  />
+
+                  <div
+                    className="bg-rose-400"
+                    style={{
+                      width: `${
+                        technicalIndicators
+                          .technicalAnalysis
+                          .percentages.sell
+                      }%`,
+                    }}
+                  />
+                </div>
+              </div>
+            </>
+          ) : null}
+        </div>
       </div>
 
       {side === "NEUTRAL" ? (
