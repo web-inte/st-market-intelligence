@@ -1926,6 +1926,24 @@ export default function StockSmartChart({
     livePrice ??
     currentPrice;
 
+  useEffect(() => {
+    const series =
+      seriesRef.current;
+
+    if (!series) {
+      return;
+    }
+
+    /*
+      يظهر عداد إغلاق الشمعة ملاصقًا
+      لعلامة آخر سعر في يمين الشارت.
+    */
+    series.applyOptions({
+      title: candleCountdown,
+      lastValueVisible: true,
+    });
+  }, [candleCountdown]);
+
   const directionLabel =
     side === "CALL"
       ? "سيناريو صاعد — صفقة CALL"
@@ -1964,14 +1982,6 @@ export default function StockSmartChart({
               فريم {intervalLabel}
             </span>
 
-            <span
-              className="rounded-xl border border-amber-400/25 bg-amber-400/[0.08] px-3 py-1.5 font-mono text-xs font-black tabular-nums text-amber-300"
-              title="الوقت المتبقي حتى إغلاق الشمعة الحالية"
-              dir="ltr"
-            >
-              إغلاق الشمعة خلال{" "}
-              {candleCountdown}
-            </span>
           </div>
 
           <p
