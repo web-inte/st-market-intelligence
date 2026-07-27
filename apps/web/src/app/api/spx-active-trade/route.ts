@@ -753,8 +753,9 @@ export async function GET(
         1) كسر وقف SPX المعتاد.
         2) بعد تحقيق ربح 100$ أو أكثر:
            إذا رجع العقد إلى خسارة 100$ أو أكثر.
-        3) بعد تحقيق ربح 100$ أو أكثر:
-           إذا ظهرت فرصة مؤكدة في الاتجاه المعاكس.
+        3) إذا ظهرت فرصة ACTIVE مؤكدة
+           في الاتجاه المعاكس، تُغلق الصفقة فورًا
+           حتى لو لم تحقق ربحًا سابقًا.
       */
       /*
         وقف SPX يعتمد على إغلاق شمعة 5 دقائق
@@ -817,7 +818,7 @@ export async function GET(
           : null;
 
       const oppositeDirectionStopped =
-        reachedProfitProtection &&
+        signal.status === "ACTIVE" &&
         signalSide !== null &&
         signalSide !== side;
 
