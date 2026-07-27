@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useMemo, useState } from "react";
 
+import { getDeviceSecurityData } from "@/lib/device-security";
 import { createClient } from "@/lib/supabase/client";
 
 export default function RegisterPage() {
@@ -35,6 +36,12 @@ export default function RegisterPage() {
 
     setLoading(true);
 
+    const {
+      deviceHash,
+      fingerprintHash,
+    } =
+      await getDeviceSecurityData();
+
     const { data, error: signupError } =
       await supabase.auth.signUp({
         email: email.trim(),
@@ -44,6 +51,9 @@ export default function RegisterPage() {
             `${window.location.origin}/auth/callback?next=/account`,
           data: {
             full_name: fullName.trim(),
+            device_hash: deviceHash,
+            fingerprint_hash:
+              fingerprintHash,
           },
         },
       });
@@ -59,6 +69,25 @@ export default function RegisterPage() {
     }
 
     if (data.session) {
+      const {
+        error: deviceError,
+      } = await supabase.rpc(
+        "claim_login_device",
+        {
+          p_device_hash: deviceHash,
+        }
+      );
+
+      if (deviceError) {
+        await supabase.auth.signOut();
+
+        setError(
+          "تم إنشاء الحساب، لكن تعذر ربط الجهاز. سجل الدخول مرة أخرى."
+        );
+        setLoading(false);
+        return;
+      }
+
       router.replace("/account");
       router.refresh();
       return;

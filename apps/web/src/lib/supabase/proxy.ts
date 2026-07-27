@@ -235,7 +235,9 @@ export async function updateSession(
     error: profileError,
   } = await supabase
     .from("profiles")
-    .select("role")
+    .select(
+      "role,active_device_hash"
+    )
     .eq("id", userId)
     .maybeSingle();
 
@@ -248,6 +250,68 @@ export async function updateSession(
 
   if (profile?.role === "admin") {
     return response;
+  }
+
+  const requestDeviceHash =
+    request.cookies.get(
+      "st_device_hash"
+    )?.value || "";
+
+  if (
+    profile?.active_device_hash &&
+    requestDeviceHash !==
+      profile.active_device_hash
+  ) {
+    if (isApi) {
+      return copyCookies(
+        response,
+        NextResponse.json(
+          {
+            error:
+              "تم تسجيل الدخول إلى الحساب من جهاز آخر.",
+            code:
+              "DEVICE_SESSION_REPLACED",
+          },
+          {
+            status: 401,
+          }
+        )
+      );
+    }
+
+    const loginUrl =
+      new URL("/login", request.url);
+
+    loginUrl.searchParams.set(
+      "reason",
+      "device-replaced"
+    );
+
+    const replacedResponse =
+      NextResponse.redirect(loginUrl);
+
+    request.cookies
+      .getAll()
+      .filter((cookie) =>
+        cookie.name.includes(
+          "auth-token"
+        )
+      )
+      .forEach((cookie) => {
+        replacedResponse.cookies.set(
+          cookie.name,
+          "",
+          {
+            path: "/",
+            maxAge: 0,
+          }
+        );
+      });
+
+    return copyCookies(
+      response,
+      replacedResponse
+    );
   }
 
   if (

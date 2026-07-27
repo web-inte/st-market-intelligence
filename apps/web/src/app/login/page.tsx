@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useMemo, useState } from "react";
 
+import { getDeviceSecurityData } from "@/lib/device-security";
 import { createClient } from "@/lib/supabase/client";
 
 export default function LoginPage() {
@@ -20,7 +21,15 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
 
-    const { error: loginError } =
+    const {
+      deviceHash,
+    } =
+      await getDeviceSecurityData();
+
+    const {
+      data: loginData,
+      error: loginError,
+    } =
       await supabase.auth.signInWithPassword({
         email: email.trim(),
         password,
@@ -31,6 +40,33 @@ export default function LoginPage() {
         loginError.message.toLowerCase().includes("invalid")
           ? "البريد الإلكتروني أو كلمة المرور غير صحيحة."
           : loginError.message
+      );
+      setLoading(false);
+      return;
+    }
+
+    if (!loginData.user) {
+      setError(
+        "تعذر التحقق من الحساب."
+      );
+      setLoading(false);
+      return;
+    }
+
+    const {
+      error: deviceError,
+    } = await supabase.rpc(
+      "claim_login_device",
+      {
+        p_device_hash: deviceHash,
+      }
+    );
+
+    if (deviceError) {
+      await supabase.auth.signOut();
+
+      setError(
+        "تعذر ربط هذا الجهاز بالحساب. حاول مرة أخرى."
       );
       setLoading(false);
       return;
