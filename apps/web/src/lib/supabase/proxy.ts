@@ -72,9 +72,22 @@ export async function updateSession(
    * باستخدام CRON_SECRET، ولا يحتاج جلسة مستخدم.
    * التحقق النهائي من السر يتم داخل route.ts نفسه.
    */
+  /*
+   * ماسح أخبار السوق لا يحتاج جلسة مستخدم.
+   * التحقق من Bearer Secret يتم داخل route.ts نفسه.
+   */
   if (
-    pathname === "/api/whale-trades/scan" ||
     pathname === "/api/market-news/scan"
+  ) {
+    return response;
+  }
+
+  /*
+   * مسار فحص الحيتان يعمل من Cron أو GitHub Actions
+   * باستخدام CRON_SECRET، ولا يحتاج جلسة مستخدم.
+   */
+  if (
+    pathname === "/api/whale-trades/scan"
   ) {
     const cronSecret =
       process.env.CRON_SECRET;
