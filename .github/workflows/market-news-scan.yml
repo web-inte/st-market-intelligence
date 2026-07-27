@@ -19,20 +19,20 @@ jobs:
           set -euo pipefail
 
           if [ -z "${MARKET_NEWS_SCAN_URL:-}" ]; then
-            echo "MARKET_NEWS_SCAN_URL is missing"
+            echo "❌ MARKET_NEWS_SCAN_URL is missing"
             exit 1
           fi
 
           if [ -z "${MARKET_NEWS_CRON_SECRET:-}" ]; then
-            echo "MARKET_NEWS_CRON_SECRET is missing"
+            echo "❌ MARKET_NEWS_CRON_SECRET is missing"
             exit 1
           fi
 
           cursor=0
           limit=15
-          total_saved=0
-          total_material=0
           total_fetched=0
+          total_material=0
+          total_saved=0
 
           while true; do
             echo "===== Scanning cursor ${cursor} ====="
@@ -53,54 +53,20 @@ jobs:
             echo
 
             if [ "${http_code}" -lt 200 ] || [ "${http_code}" -ge 300 ]; then
+              rm -f "${response_file}"
               exit 1
             fi
 
-            ok="$(
-              python3 -c '
-import json,sys
-data=json.load(open(sys.argv[1]))
-print("1" if data.get("ok") is True else "0")
-' "${response_file}"
-            )"
-
-            if [ "${ok}" != "1" ]; then
-              echo "Scanner returned ok=false"
+            if [ "$(jq -r '.ok // false' "${response_file}")" != "true" ]; then
+              echo "❌ Scanner returned ok=false"
+              rm -f "${response_file}"
               exit 1
             fi
 
-            fetched="$(
-              python3 -c '
-import json,sys
-data=json.load(open(sys.argv[1]))
-print(int(data.get("fetchedNews") or 0))
-' "${response_file}"
-            )"
-
-            material="$(
-              python3 -c '
-import json,sys
-data=json.load(open(sys.argv[1]))
-print(int(data.get("materialNews") or 0))
-' "${response_file}"
-            )"
-
-            saved="$(
-              python3 -c '
-import json,sys
-data=json.load(open(sys.argv[1]))
-print(int(data.get("savedRows") or 0))
-' "${response_file}"
-            )"
-
-            next_cursor="$(
-              python3 -c '
-import json,sys
-data=json.load(open(sys.argv[1]))
-value=data.get("nextCursor")
-print("" if value is None else value)
-' "${response_file}"
-            )"
+            fetched="$(jq -r '.fetchedNews // 0' "${response_file}")"
+            material="$(jq -r '.materialNews // 0' "${response_file}")"
+            saved="$(jq -r '.savedRows // 0' "${response_file}")"
+            next_cursor="$(jq -r '.nextCursor // empty' "${response_file}")"
 
             total_fetched=$((total_fetched + fetched))
             total_material=$((total_material + material))
