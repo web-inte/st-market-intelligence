@@ -608,6 +608,11 @@ export default function StockSmartChart({
     );
 
   const [
+    isExpanded,
+    setIsExpanded,
+  ] = useState(false);
+
+  const [
     candlesLoading,
     setCandlesLoading,
   ] = useState(true);
@@ -628,6 +633,41 @@ export default function StockSmartChart({
     intervalRef.current =
       interval;
   }, [interval]);
+
+  useEffect(() => {
+    if (!isExpanded) {
+      return;
+    }
+
+    const previousOverflow =
+      document.body.style.overflow;
+
+    document.body.style.overflow =
+      "hidden";
+
+    function handleEscape(
+      event: KeyboardEvent
+    ) {
+      if (event.key === "Escape") {
+        setIsExpanded(false);
+      }
+    }
+
+    window.addEventListener(
+      "keydown",
+      handleEscape
+    );
+
+    return () => {
+      document.body.style.overflow =
+        previousOverflow;
+
+      window.removeEventListener(
+        "keydown",
+        handleEscape
+      );
+    };
+  }, [isExpanded]);
 
   const {
     price: livePrice,
@@ -1226,6 +1266,33 @@ export default function StockSmartChart({
           mode:
             CrosshairMode.Normal,
         },
+
+        handleScroll: {
+          mouseWheel: true,
+          pressedMouseMove: true,
+          horzTouchDrag: true,
+
+          /*
+            نترك السحب العمودي للجوال
+            لتمرير الصفحة بصورة طبيعية.
+          */
+          vertTouchDrag: false,
+        },
+
+        handleScale: {
+          axisPressedMouseMove: {
+            time: true,
+            price: true,
+          },
+          mouseWheel: true,
+          pinch: true,
+        },
+
+        kineticScroll: {
+          mouse: true,
+          touch: true,
+        },
+
         rightPriceScale: {
           borderColor:
             "rgba(148, 163, 184, 0.18)",
@@ -1277,6 +1344,8 @@ export default function StockSmartChart({
         chart.applyOptions({
           width:
             container.clientWidth,
+          height:
+            container.clientHeight,
         });
       });
 
@@ -1635,6 +1704,48 @@ export default function StockSmartChart({
     };
   }, [inlineGammaLevels]);
 
+  useEffect(() => {
+    const chart =
+      chartRef.current;
+
+    const container =
+      containerRef.current;
+
+    if (!chart || !container) {
+      return;
+    }
+
+    const frame =
+      window.requestAnimationFrame(
+        () => {
+          chart.applyOptions({
+            width:
+              container.clientWidth,
+            height:
+              container.clientHeight,
+          });
+        }
+      );
+
+    return () => {
+      window.cancelAnimationFrame(
+        frame
+      );
+    };
+  }, [isExpanded]);
+
+  function fitChartContent() {
+    chartRef.current
+      ?.timeScale()
+      .fitContent();
+  }
+
+  function scrollToLatestCandle() {
+    chartRef.current
+      ?.timeScale()
+      .scrollToRealTime();
+  }
+
   const directionLabel =
     side === "CALL"
       ? "سيناريو صاعد — صفقة CALL"
@@ -1643,7 +1754,14 @@ export default function StockSmartChart({
         : "اتجاه محايد — لا توجد صفقة حتى يتحول الاتجاه إلى CALL أو PUT";
 
   return (
-    <section className="mb-5 overflow-hidden rounded-3xl border border-cyan-400/15 bg-slate-950 shadow-2xl shadow-cyan-950/10">
+    <section
+      className={[
+        "overflow-hidden border border-cyan-400/15 bg-slate-950 shadow-2xl shadow-cyan-950/10",
+        isExpanded
+          ? "fixed inset-0 z-[100] m-0 rounded-none"
+          : "mb-5 rounded-3xl",
+      ].join(" ")}
+    >
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/[0.06] p-5 sm:p-6">
         <div>
           <p className="text-xs font-bold text-cyan-400">
@@ -1701,6 +1819,52 @@ export default function StockSmartChart({
               </button>
             )
           )}
+
+          <span className="mx-1 hidden h-8 w-px bg-white/[0.08] sm:block" />
+
+          <button
+            type="button"
+            onClick={fitChartContent}
+            className="rounded-xl border border-white/[0.08] bg-slate-900/70 px-3 py-2 text-xs font-black text-slate-300 transition hover:border-cyan-400/30 hover:text-cyan-300"
+            title="إظهار جميع الشموع"
+          >
+            ملاءمة
+          </button>
+
+          <button
+            type="button"
+            onClick={
+              scrollToLatestCandle
+            }
+            className="rounded-xl border border-white/[0.08] bg-slate-900/70 px-3 py-2 text-xs font-black text-slate-300 transition hover:border-cyan-400/30 hover:text-cyan-300"
+            title="العودة إلى آخر شمعة"
+          >
+            آخر شمعة
+          </button>
+
+          <button
+            type="button"
+            onClick={() =>
+              setIsExpanded(
+                (current) => !current
+              )
+            }
+            className={[
+              "rounded-xl border px-3 py-2 text-xs font-black transition",
+              isExpanded
+                ? "border-rose-400/30 bg-rose-400/10 text-rose-300"
+                : "border-white/[0.08] bg-slate-900/70 text-slate-300 hover:border-cyan-400/30 hover:text-cyan-300",
+            ].join(" ")}
+            title={
+              isExpanded
+                ? "إغلاق وضع الشاشة الكاملة"
+                : "تكبير الشارت"
+            }
+          >
+            {isExpanded
+              ? "إغلاق"
+              : "تكبير"}
+          </button>
         </div>
       </div>
 
@@ -1715,7 +1879,14 @@ export default function StockSmartChart({
           يفضّل رسم مستويات الدخول والوقف والأهداف على الشارت الفعلي في TradingView، ومتابعة حركة السهم من هناك للحصول على تحديث أدق وأسرع.
         </div>
 
-        <div className="relative h-[480px] w-full">
+        <div
+          className={[
+            "relative w-full",
+            isExpanded
+              ? "h-[calc(100dvh-190px)] min-h-[420px]"
+              : "h-[420px] sm:h-[480px] lg:h-[560px]",
+          ].join(" ")}
+        >
           {candlesLoading ? (
             <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-slate-950/35 text-sm font-bold text-slate-300">
               جارٍ تحميل الشموع...
