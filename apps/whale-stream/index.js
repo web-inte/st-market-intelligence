@@ -38,12 +38,61 @@ const http = require("http");
 const WebSocket = require("ws");
 const { createClient } = require("@supabase/supabase-js");
 
+const {
+  setPrice: setLiveStockPrice,
+  getPriceCacheStats,
+} = require("./live-market/cache/prices");
+
+const {
+  createFinnhubProvider,
+} = require("./live-market/providers/finnhub");
+
+const {
+  createLiveMarketWebSocketServer,
+} = require("./live-market/server/websocket");
+
 /* =========================================================
    الإعدادات
 ========================================================= */
 
 const CFG = {
   massiveApiKey: process.env.MASSIVE_API_KEY,
+
+  finnhubApiKey:
+    process.env.FINNHUB_API_KEY,
+
+  finnhubWebSocketUrl:
+    process.env.FINNHUB_WS_URL ||
+    "wss://ws.finnhub.io",
+
+  liveMarketSymbols: (
+    process.env.LIVE_MARKET_SYMBOLS ||
+    [
+      "SPY",
+      "QQQ",
+      "NVDA",
+      "TSLA",
+      "AAPL",
+      "AMD",
+      "AVGO",
+      "META",
+      "MSFT",
+      "PLTR",
+    ].join(",")
+  )
+    .split(",")
+    .map((value) =>
+      value.trim().toUpperCase()
+    )
+    .filter(Boolean),
+
+  liveMarketPath:
+    process.env.LIVE_MARKET_WS_PATH ||
+    "/live-market",
+
+  liveMarketAllowedOrigins:
+    process.env.LIVE_MARKET_ALLOWED_ORIGINS ||
+    "",
 
   supabaseUrl: process.env.SUPABASE_URL,
 
@@ -114,6 +163,10 @@ const missingVariables = [];
 
 if (!CFG.massiveApiKey) {
   missingVariables.push("MASSIVE_API_KEY");
+}
+
+if (!CFG.finnhubApiKey) {
+  missingVariables.push("FINNHUB_API_KEY");
 }
 
 if (!CFG.supabaseUrl) {
@@ -1922,6 +1975,118 @@ async function deactivateOldTrades() {
 }
 
 /* =========================================================
+   سوق الأسهم اللحظي
+========================================================= */
+
+const liveMarketSymbolCounts =
+  new Map();
+
+let finnhubProvider = null;
+
+const liveMarketServer =
+  createLiveMarketWebSocketServer({
+    path: CFG.liveMarketPath,
+
+    allowedOrigins:
+      CFG.liveMarketAllowedOrigins,
+
+    onSymbolSubscribe(symbol) {
+      const currentCount =
+        liveMarketSymbolCounts.get(symbol) ||
+        0;
+
+      liveMarketSymbolCounts.set(
+        symbol,
+        currentCount + 1,
+      );
+
+      finnhubProvider?.subscribe(symbol);
+    },
+
+    onSymbolUnsubscribe(symbol) {
+      const currentCount =
+        liveMarketSymbolCounts.get(symbol) ||
+        0;
+
+      const nextCount =
+        Math.max(
+          0,
+          currentCount - 1,
+        );
+
+      if (nextCount === 0) {
+        liveMarketSymbolCounts.delete(
+          symbol,
+        );
+
+        /*
+          الرموز الأساسية تبقى مشتركة دائمًا.
+          الرموز التي طلبتها الصفحات فقط
+          يتم إلغاء اشتراكها عند آخر مستخدم.
+        */
+        if (
+          !CFG.liveMarketSymbols.includes(
+            symbol,
+          )
+        ) {
+          finnhubProvider?.unsubscribe(
+            symbol,
+          );
+        }
+      } else {
+        liveMarketSymbolCounts.set(
+          symbol,
+          nextCount,
+        );
+      }
+    },
+  });
+
+finnhubProvider =
+  createFinnhubProvider({
+    apiKey: CFG.finnhubApiKey,
+
+    websocketUrl:
+      CFG.finnhubWebSocketUrl,
+
+    onTrade(trade) {
+      try {
+        const quote =
+          setLiveStockPrice(trade);
+
+        liveMarketServer.broadcastQuote(
+          quote,
+        );
+      } catch (error) {
+        log(
+          "فشل معالجة سعر Finnhub",
+          error,
+        );
+      }
+    },
+
+    onStatus(event) {
+      log(
+        `Finnhub: ${event.status}`,
+      );
+    },
+
+    onError(error) {
+      log(
+        "Finnhub WebSocket error",
+        error,
+      );
+    },
+  });
+
+for (
+  const symbol
+  of CFG.liveMarketSymbols
+) {
+  finnhubProvider.subscribe(symbol);
+}
+
+/* =========================================================
    Health Server لـ Railway
 ========================================================= */
 
@@ -1952,6 +2117,17 @@ const healthServer =
               authenticated:
                 metrics.authenticated,
 
+              liveMarket: {
+                finnhub:
+                  finnhubProvider.getStatus(),
+
+                websocket:
+                  liveMarketServer.getStatus(),
+
+                priceCache:
+                  getPriceCacheStats(),
+              },
+
               queueLength:
                 processingQueue.length,
 
@@ -1975,6 +2151,12 @@ const healthServer =
 
                 underlyings:
                   CFG.underlyings,
+
+                liveMarketSymbols:
+                  CFG.liveMarketSymbols,
+
+                liveMarketPath:
+                  CFG.liveMarketPath,
               },
 
               updatedAt:
@@ -1998,6 +2180,22 @@ const healthServer =
       );
     },
   );
+
+healthServer.on(
+  "upgrade",
+  (request, socket, head) => {
+    const handled =
+      liveMarketServer.handleUpgrade(
+        request,
+        socket,
+        head,
+      );
+
+    if (!handled) {
+      socket.destroy();
+    }
+  },
+);
 
 healthServer.listen(
   CFG.port,
@@ -2027,6 +2225,8 @@ setInterval(
 
 void deactivateOldTrades();
 
+finnhubProvider.start();
+
 connectWebSocket();
 
 /* =========================================================
@@ -2045,6 +2245,9 @@ async function shutdown(signal) {
   clearInterval(
     heartbeatTimer,
   );
+
+  finnhubProvider.stop();
+  liveMarketServer.stop();
 
   if (
     websocket &&

@@ -13,6 +13,10 @@ import {
 } from "../../lib/supabase/client";
 
 import {
+  useLiveStockPrices,
+} from "../../lib/live-market";
+
+import {
   createOpportunity,
   type AnalysisResponse,
   type Opportunity,
@@ -554,6 +558,22 @@ export default function Home() {
 
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [tickerOpportunities, setTickerOpportunities] = useState<Opportunity[]>([]);
+
+  const tickerLiveSymbols =
+    useMemo(
+      () =>
+        tickerOpportunities.map(
+          (item) => item.symbol
+        ),
+      [tickerOpportunities]
+    );
+
+  const {
+    quotes: liveTickerQuotes,
+  } =
+    useLiveStockPrices(
+      tickerLiveSymbols
+    );
 
   const [marketOverview, setMarketOverview] =
     useState<MarketOverviewResponse | null>(null);
@@ -1151,6 +1171,15 @@ ${url}`);
               {tickerItems.length > 0 ? (
                 <div className="market-ticker-track flex w-max items-center py-4">
                   {tickerItems.map((item, index) => {
+                    const livePrice =
+                      liveTickerQuotes[
+                        item.symbol
+                      ]?.price;
+
+                    const displayedPrice =
+                      livePrice ??
+                      item.price;
+
                     const isPositive = item.changePct > 0;
 
                     const isNegative = item.changePct < 0;
@@ -1183,7 +1212,7 @@ ${url}`);
                         </span>
 
                         <span className="font-semibold tabular-nums text-slate-300">
-                          ${item.price.toFixed(2)}
+                          ${displayedPrice.toFixed(2)}
                         </span>
 
                         <span

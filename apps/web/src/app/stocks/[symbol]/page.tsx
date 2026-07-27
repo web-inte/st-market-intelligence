@@ -1,4 +1,5 @@
 import ShareAnalysisMenu from "./ShareAnalysisMenu";
+import LiveStockPrice from "./LiveStockPrice";
 import { cookies } from "next/headers";
 import StockSmartChart from "../../../components/stock-smart-chart";
 import {
@@ -809,9 +810,13 @@ export default async function StockAnalysisPage({
             </h1>
 
             <div className="mt-3 flex flex-wrap items-center gap-3">
-              <span className="text-2xl font-semibold">
-                ${priceFormat(quote.price)}
-              </span>
+              <LiveStockPrice
+                symbol={analysis.symbol}
+                fallbackPrice={
+                  Number(quote.price)
+                }
+                className="text-2xl font-semibold"
+              />
 
               <span
                 className={
