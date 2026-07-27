@@ -4,7 +4,7 @@ import {
   ColorType,
   CrosshairMode,
   LineStyle,
-  LineSeries,
+  CandlestickSeries,
   createChart,
   type IChartApi,
   type IPriceLine,
@@ -15,7 +15,12 @@ import {
   useEffect,
   useMemo,
   useRef,
+  useState,
 } from "react";
+
+import {
+  useLiveStockPrice,
+} from "../lib/live-market";
 
 type TargetLevel = {
   index: number;
@@ -45,6 +50,19 @@ type ChartLevel = {
 type GammaLevel = {
   price: number;
   strength: number;
+};
+
+type TechnicalLevels = {
+  support: number[];
+  resistance: number[];
+};
+
+type ChartCandle = {
+  time: UTCTimestamp;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
 };
 
 const INLINE_GAMMA_LABEL_KEYS =
@@ -583,17 +601,261 @@ export default function StockSmartChart({
     useRef<IChartApi | null>(null);
 
   const seriesRef =
-    useRef<ISeriesApi<"Line"> | null>(
+    useRef<
+      ISeriesApi<"Candlestick"> | null
+    >(
       null
     );
 
+  const [
+    candlesLoading,
+    setCandlesLoading,
+  ] = useState(true);
+
+  const [
+    candlesError,
+    setCandlesError,
+  ] = useState("");
+
+  const [
+    interval,
+    setIntervalValue,
+  ] = useState<
+    5 | 15 | 30 | 60 | 240 | 1440
+  >(15);
+
+  useEffect(() => {
+    intervalRef.current =
+      interval;
+  }, [interval]);
+
+  const {
+    price: livePrice,
+    quote: liveQuote,
+  } =
+    useLiveStockPrice(symbol);
+
+  const effectiveCurrentPrice =
+    livePrice ??
+    currentPrice;
+
+  const [
+    rawTechnicalLevels,
+    setRawTechnicalLevels,
+  ] =
+    useState<number[]>([]);
+
+  const [
+    supportResistanceRefresh,
+    setSupportResistanceRefresh,
+  ] = useState(0);
+
   const priceLinesRef =
     useRef<IPriceLine[]>([]);
+
+  const lastCandleRef =
+    useRef<ChartCandle | null>(
+      null
+    );
+
+  const intervalRef =
+    useRef<
+      5 | 15 | 30 | 60 | 240 | 1440
+    >(15);
 
   const gammaLabelsLayerRef =
     useRef<HTMLDivElement | null>(
       null
     );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const resolution =
+      interval === 1440
+        ? "D"
+        : interval === 240
+          ? "60"
+          : String(interval);
+
+    async function loadSupportResistance() {
+      try {
+        const response =
+          await fetch(
+            `/api/stocks/${encodeURIComponent(
+              symbol
+            )}/support-resistance?resolution=${encodeURIComponent(
+              resolution
+            )}`,
+            {
+              cache: "no-store",
+            }
+          );
+
+        const result =
+          (await response.json()) as {
+            levels?: unknown[];
+            error?: string;
+          };
+
+        if (!response.ok) {
+          throw new Error(
+            result.error ||
+              "تعذر جلب الدعم والمقاومة"
+          );
+        }
+
+        if (cancelled) {
+          return;
+        }
+
+        const levels =
+          Array.isArray(
+            result.levels
+          )
+            ? result.levels
+                .map(Number)
+                .filter(
+                  (level) =>
+                    Number.isFinite(
+                      level
+                    ) &&
+                    level > 0
+                )
+                .sort(
+                  (
+                    first,
+                    second
+                  ) =>
+                    first -
+                    second
+                )
+            : [];
+
+        setRawTechnicalLevels(
+          levels
+        );
+      } catch (error) {
+        if (!cancelled) {
+          console.error(
+            "Failed to load support/resistance:",
+            error
+          );
+
+          setRawTechnicalLevels(
+            []
+          );
+        }
+      }
+    }
+
+    void loadSupportResistance();
+
+    const refreshTimer =
+      window.setInterval(
+        () => {
+          void loadSupportResistance();
+        },
+        5 * 60_000
+      );
+
+    return () => {
+      cancelled = true;
+
+      window.clearInterval(
+        refreshTimer
+      );
+    };
+  }, [
+    symbol,
+    interval,
+    supportResistanceRefresh,
+  ]);
+
+  const technicalLevels =
+    useMemo<TechnicalLevels>(
+      () => {
+        const supports =
+          rawTechnicalLevels
+            .filter(
+              (level) =>
+                level <
+                effectiveCurrentPrice
+            )
+            .sort(
+              (
+                first,
+                second
+              ) =>
+                second -
+                first
+            )
+            .slice(0, 2);
+
+        const resistances =
+          rawTechnicalLevels
+            .filter(
+              (level) =>
+                level >
+                effectiveCurrentPrice
+            )
+            .sort(
+              (
+                first,
+                second
+              ) =>
+                first -
+                second
+            )
+            .slice(0, 2);
+
+        return {
+          support: supports,
+          resistance:
+            resistances,
+        };
+      },
+      [
+        rawTechnicalLevels,
+        effectiveCurrentPrice,
+      ]
+    );
+
+  useEffect(() => {
+    if (
+      rawTechnicalLevels.length ===
+      0
+    ) {
+      return;
+    }
+
+    if (
+      technicalLevels.support
+        .length < 2 ||
+      technicalLevels.resistance
+        .length < 2
+    ) {
+      const timer =
+        window.setTimeout(
+          () => {
+            setSupportResistanceRefresh(
+              (value) =>
+                value + 1
+            );
+          },
+          10_000
+        );
+
+      return () => {
+        window.clearTimeout(
+          timer
+        );
+      };
+    }
+  }, [
+    rawTechnicalLevels,
+    technicalLevels,
+  ]);
 
   const levels = useMemo(() => {
     const result: ChartLevel[] = [];
@@ -868,14 +1130,52 @@ export default function StockSmartChart({
       );
     }
 
+    technicalLevels.support.forEach(
+      (price, index) => {
+        addLevel(
+          `technical-support-${index + 1}`,
+          `دعم ${index + 1}`,
+          price,
+          index === 0
+            ? "#38bdf8"
+            : "#7dd3fc",
+          LineStyle.Dashed,
+          index === 0
+            ? 2
+            : 1,
+          true
+        );
+      }
+    );
+
+    technicalLevels.resistance.forEach(
+      (price, index) => {
+        addLevel(
+          `technical-resistance-${index + 1}`,
+          `مقاومة ${index + 1}`,
+          price,
+          index === 0
+            ? "#f97316"
+            : "#fdba74",
+          LineStyle.Dashed,
+          index === 0
+            ? 2
+            : 1,
+          true
+        );
+      }
+    );
+
     return result;
   }, [
+    effectiveCurrentPrice,
     currentPrice,
     entry,
     stop,
     targets,
     side,
     gammaData,
+    technicalLevels,
   ]);
 
   const inlineGammaLevels =
@@ -952,13 +1252,20 @@ export default function StockSmartChart({
 
     const series =
       chart.addSeries(
-        LineSeries,
+        CandlestickSeries,
         {
-          color: "rgba(0, 0, 0, 0)",
-          lineWidth: 1,
-          crosshairMarkerVisible: false,
+          upColor: "#22c55e",
+          downColor: "#ef4444",
+          borderUpColor:
+            "#22c55e",
+          borderDownColor:
+            "#ef4444",
+          wickUpColor:
+            "#22c55e",
+          wickDownColor:
+            "#ef4444",
           priceLineVisible: false,
-          lastValueVisible: false,
+          lastValueVisible: true,
         }
       );
 
@@ -984,12 +1291,15 @@ export default function StockSmartChart({
 
       chartRef.current = null;
       seriesRef.current = null;
+      lastCandleRef.current = null;
       priceLinesRef.current = [];
     };
   }, []);
 
   useEffect(() => {
-    const chart = chartRef.current;
+    const chart =
+      chartRef.current;
+
     const series =
       seriesRef.current;
 
@@ -997,59 +1307,196 @@ export default function StockSmartChart({
       return;
     }
 
-    const visiblePrices = [
-      currentPrice,
-      ...levels.map(
-        (level) => level.price
-      ),
-    ].filter(
-      (price) =>
-        Number.isFinite(price) &&
-        price > 0
-    );
+    const candleSeries = series;
+    const activeChart = chart;
 
-    const fallbackPrice =
-      visiblePrices[0] ?? 1;
+    let cancelled = false;
 
-    const minPrice = Math.min(
-      ...visiblePrices,
-      fallbackPrice
-    );
+    async function loadCandles() {
+      setCandlesLoading(true);
+      setCandlesError("");
 
-    const maxPrice = Math.max(
-      ...visiblePrices,
-      fallbackPrice
-    );
+      try {
+        const response =
+          await fetch(
+            `/api/stocks/${encodeURIComponent(
+              symbol
+            )}/candles?interval=${interval}`,
+            {
+              cache: "no-store",
+            }
+          );
 
-    const padding = Math.max(
-      (maxPrice - minPrice) * 0.08,
-      fallbackPrice * 0.01,
-      1
-    );
+        const result =
+          (await response.json()) as {
+            candles?: Array<{
+              time: number;
+              open: number;
+              high: number;
+              low: number;
+              close: number;
+              volume: number;
+            }>;
+            error?: string;
+          };
 
-    const now = Math.floor(
-      Date.now() / 1000
-    );
+        if (!response.ok) {
+          throw new Error(
+            result.error ||
+              "تعذر جلب الشموع"
+          );
+        }
 
-    series.setData([
-      {
-        time:
-          (now - 60) as UTCTimestamp,
-        value: Math.max(
-          minPrice - padding,
-          0.01
+        const candles =
+          Array.isArray(
+            result.candles
+          )
+            ? result.candles
+            : [];
+
+        if (cancelled) {
+          return;
+        }
+
+        const chartCandles =
+          candles.map(
+            (candle) => ({
+              time:
+                candle.time as UTCTimestamp,
+              open: candle.open,
+              high: candle.high,
+              low: candle.low,
+              close: candle.close,
+            })
+          );
+
+        candleSeries.setData(
+          chartCandles
+        );
+
+        lastCandleRef.current =
+          chartCandles.length > 0
+            ? chartCandles[
+                chartCandles.length - 1
+              ]
+            : null;
+
+        activeChart
+          .timeScale()
+          .fitContent();
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        setCandlesError(
+          error instanceof Error
+            ? error.message
+            : "تعذر جلب الشموع"
+        );
+      } finally {
+        if (!cancelled) {
+          setCandlesLoading(false);
+        }
+      }
+    }
+
+    void loadCandles();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [symbol, interval]);
+
+  useEffect(() => {
+    const series =
+      seriesRef.current;
+
+    const price =
+      Number(livePrice);
+
+    if (
+      !series ||
+      !Number.isFinite(price) ||
+      price <= 0
+    ) {
+      return;
+    }
+
+    const timestampSeconds =
+      Math.floor(
+        Number(
+          liveQuote?.timestamp ||
+            Date.now()
+        ) / 1000
+      );
+
+    const currentInterval =
+      intervalRef.current;
+
+    const intervalSeconds =
+      currentInterval * 60;
+
+    const previous =
+      lastCandleRef.current;
+
+    let nextCandle: ChartCandle;
+
+    /*
+      إذا كان التحديث داخل نفس شمعة الفريم،
+      نعدّل الإغلاق والأعلى والأدنى فقط.
+    */
+    if (
+      previous &&
+      timestampSeconds >=
+        Number(previous.time) &&
+      timestampSeconds <
+        Number(previous.time) +
+          intervalSeconds
+    ) {
+      nextCandle = {
+        ...previous,
+        high: Math.max(
+          previous.high,
+          price
         ),
-      },
-      {
-        time: now as UTCTimestamp,
-        value: maxPrice + padding,
-      },
-    ]);
+        low: Math.min(
+          previous.low,
+          price
+        ),
+        close: price,
+      };
+    } else {
+      /*
+        عند بدء فريم جديد ننشئ شمعة جديدة
+        بدون إعادة تحميل الصفحة أو التحليل.
+      */
+      const bucketTime =
+        Math.floor(
+          timestampSeconds /
+            intervalSeconds
+        ) * intervalSeconds;
 
-    chart
-      .timeScale()
-      .fitContent();
-  }, [currentPrice, levels]);
+      nextCandle = {
+        time:
+          bucketTime as UTCTimestamp,
+        open: price,
+        high: price,
+        low: price,
+        close: price,
+      };
+    }
+
+    series.update(
+      nextCandle
+    );
+
+    lastCandleRef.current =
+      nextCandle;
+  }, [
+    livePrice,
+    liveQuote?.timestamp,
+  ]);
 
   useEffect(() => {
     const series =
@@ -1219,6 +1666,42 @@ export default function StockSmartChart({
           </p>
         </div>
 
+        <div className="flex flex-wrap gap-2">
+          {[
+            [5, "5m"],
+            [15, "15m"],
+            [30, "30m"],
+            [60, "1H"],
+            [240, "4H"],
+            [1440, "1D"],
+          ].map(
+            ([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() =>
+                  setIntervalValue(
+                    value as
+                      | 5
+                      | 15
+                      | 30
+                      | 60
+                      | 240
+                      | 1440
+                  )
+                }
+                className={[
+                  "rounded-xl border px-3 py-2 text-xs font-black transition",
+                  interval === value
+                    ? "border-cyan-400/40 bg-cyan-400/10 text-cyan-300"
+                    : "border-white/[0.07] bg-slate-900/70 text-slate-400 hover:text-white",
+                ].join(" ")}
+              >
+                {label}
+              </button>
+            )
+          )}
+        </div>
       </div>
 
       {side === "NEUTRAL" ? (
@@ -1233,6 +1716,18 @@ export default function StockSmartChart({
         </div>
 
         <div className="relative h-[480px] w-full">
+          {candlesLoading ? (
+            <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-slate-950/35 text-sm font-bold text-slate-300">
+              جارٍ تحميل الشموع...
+            </div>
+          ) : null}
+
+          {candlesError ? (
+            <div className="pointer-events-none absolute left-4 top-4 z-30 rounded-xl border border-rose-400/20 bg-rose-400/10 px-3 py-2 text-xs font-bold text-rose-300">
+              {candlesError}
+            </div>
+          ) : null}
+
           <div
             ref={containerRef}
             className="h-full w-full"
