@@ -73,7 +73,8 @@ export async function updateSession(
    * التحقق النهائي من السر يتم داخل route.ts نفسه.
    */
   if (
-    pathname === "/api/whale-trades/scan"
+    pathname === "/api/whale-trades/scan" ||
+    pathname === "/api/market-news/scan"
   ) {
     const cronSecret =
       process.env.CRON_SECRET;
