@@ -382,10 +382,16 @@ export async function POST(
       result.status ===
       "needs_review"
     ) {
-      return NextResponse.json(
-        result,
-        { status: 409 }
-      );
+      /*
+        تم حفظ الدفع بنجاح، لكن العميل لم ينشئ
+        حسابًا بعد. سيُفعّل الاشتراك تلقائيًا
+        عند التسجيل بنفس البريد.
+      */
+      return NextResponse.json({
+        ...result,
+        ok: true,
+        pendingRegistration: true,
+      });
     }
 
     if (
