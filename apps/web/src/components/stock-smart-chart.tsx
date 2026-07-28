@@ -1426,6 +1426,45 @@ export default function StockSmartChart({
     setIsExpanded,
   ] = useState(false);
 
+  /*
+   * نحفظ موضع الصفحة قبل فتح الشارت
+   * حتى لا يعود المستخدم إلى أعلى الصفحة
+   * عند إغلاق وضع التكبير.
+   */
+  const expandedScrollYRef =
+    useRef(0);
+
+  function openExpandedChart() {
+    expandedScrollYRef.current =
+      window.scrollY;
+
+    setIsExpanded(true);
+  }
+
+  function closeExpandedChart() {
+    setIsExpanded(false);
+
+    window.requestAnimationFrame(
+      () => {
+        window.scrollTo({
+          top:
+            expandedScrollYRef.current,
+          left: 0,
+          behavior: "auto",
+        });
+      }
+    );
+  }
+
+  function toggleExpandedChart() {
+    if (isExpanded) {
+      closeExpandedChart();
+      return;
+    }
+
+    openExpandedChart();
+  }
+
   const [
     isPriceScaleManual,
     setIsPriceScaleManual,
@@ -1731,6 +1770,17 @@ export default function StockSmartChart({
     ) {
       if (event.key === "Escape") {
         setIsExpanded(false);
+
+        window.requestAnimationFrame(
+          () => {
+            window.scrollTo({
+              top:
+                expandedScrollYRef.current,
+              left: 0,
+              behavior: "auto",
+            });
+          }
+        );
       }
     }
 
@@ -4077,10 +4127,8 @@ export default function StockSmartChart({
 
           <button
             type="button"
-            onClick={() =>
-              setIsExpanded(
-                (current) => !current
-              )
+            onClick={
+              toggleExpandedChart
             }
             className={[
               "rounded-xl border px-3 py-2 text-xs font-black transition",
@@ -4103,6 +4151,86 @@ export default function StockSmartChart({
 
       <div className="border-b border-white/[0.05] px-5 py-2 text-right text-[11px] font-bold leading-5 text-slate-500 sm:px-6">
         اسحب تدريج الأسعار في يمين الشارت لتكبير أو تصغير النطاق السعري، واسحب الشارت لتحريكه، واستخدم إصبعين للتكبير على الجوال.
+      </div>
+
+      {side === "NEUTRAL" ? (
+        <div className="mx-5 mt-5 rounded-2xl border border-amber-400/20 bg-amber-400/[0.06] p-4 text-sm font-bold leading-7 text-amber-200">
+          الاتجاه محايد حاليًا. تظهر مستويات Gamma CALL وGamma PUT للمراقبة فقط، ولا يوجد دخول أو وقف أو أهداف حتى يتحول الاتجاه.
+        </div>
+      ) : null}
+
+      <div className="relative">
+        <div
+          className={[
+            "relative w-full",
+            isExpanded
+              ? "h-[calc(100dvh-190px)] min-h-[420px]"
+              : "h-[420px] sm:h-[480px] lg:h-[560px]",
+          ].join(" ")}
+        >
+          {candlesLoading ? (
+            <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-slate-950/35 text-sm font-bold text-slate-300">
+              جارٍ تحميل الشموع...
+            </div>
+          ) : null}
+
+          {candlesError ? (
+            <div className="pointer-events-none absolute left-4 top-4 z-30 rounded-xl border border-rose-400/20 bg-rose-400/10 px-3 py-2 text-xs font-bold text-rose-300">
+              {candlesError}
+            </div>
+          ) : null}
+
+          <div
+            ref={containerRef}
+            onDoubleClick={(
+              event
+            ) => {
+              event.preventDefault();
+              event.stopPropagation();
+
+              toggleExpandedChart();
+            }}
+            className={[
+              "h-full w-full select-none",
+              isExpanded
+                ? "cursor-zoom-out"
+                : "cursor-zoom-in",
+            ].join(" ")}
+            dir="ltr"
+            title={
+              isExpanded
+                ? "اضغط مرتين لإغلاق التكبير"
+                : "اضغط مرتين لتكبير الشارت"
+            }
+          />
+
+          <div
+            ref={gammaLabelsLayerRef}
+            className="pointer-events-none absolute inset-0 z-20 overflow-hidden"
+            aria-hidden="true"
+          >
+            {inlineGammaLevels.map(
+              (level) => (
+                <span
+                  key={`inline-${level.key}-${level.price}`}
+                  data-gamma-label={
+                    level.key
+                  }
+                  dir="rtl"
+                  className="absolute right-[86px] top-0 hidden whitespace-nowrap text-[10px] font-black leading-none [will-change:transform] sm:right-[96px] sm:text-xs"
+                  style={{
+                    color: level.color,
+                    textShadow:
+                      "0 1px 3px #020617, 0 -1px 3px #020617",
+                  }}
+                >
+                  {level.title}
+                </span>
+              )
+            )}
+          </div>
+
+        </div>
       </div>
 
       <div className="border-b border-white/[0.06] px-5 py-5 sm:px-6">
@@ -4427,78 +4555,6 @@ export default function StockSmartChart({
               ) : null}
             </>
           ) : null}
-        </div>
-      </div>
-
-      {side === "NEUTRAL" ? (
-        <div className="mx-5 mt-5 rounded-2xl border border-amber-400/20 bg-amber-400/[0.06] p-4 text-sm font-bold leading-7 text-amber-200">
-          الاتجاه محايد حاليًا. تظهر مستويات Gamma CALL وGamma PUT للمراقبة فقط، ولا يوجد دخول أو وقف أو أهداف حتى يتحول الاتجاه.
-        </div>
-      ) : null}
-
-      <div className="relative">
-        <div
-          className={[
-            "relative w-full",
-            isExpanded
-              ? "h-[calc(100dvh-190px)] min-h-[420px]"
-              : "h-[420px] sm:h-[480px] lg:h-[560px]",
-          ].join(" ")}
-        >
-          {candlesLoading ? (
-            <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-slate-950/35 text-sm font-bold text-slate-300">
-              جارٍ تحميل الشموع...
-            </div>
-          ) : null}
-
-          {candlesError ? (
-            <div className="pointer-events-none absolute left-4 top-4 z-30 rounded-xl border border-rose-400/20 bg-rose-400/10 px-3 py-2 text-xs font-bold text-rose-300">
-              {candlesError}
-            </div>
-          ) : null}
-
-          <div
-            ref={containerRef}
-            onDoubleClick={() =>
-              setIsExpanded(
-                (current) => !current
-              )
-            }
-            className="h-full w-full cursor-zoom-in"
-            dir="ltr"
-            title={
-              isExpanded
-                ? "اضغط مرتين لإغلاق التكبير"
-                : "اضغط مرتين لتكبير الشارت"
-            }
-          />
-
-          <div
-            ref={gammaLabelsLayerRef}
-            className="pointer-events-none absolute inset-0 z-20 overflow-hidden"
-            aria-hidden="true"
-          >
-            {inlineGammaLevels.map(
-              (level) => (
-                <span
-                  key={`inline-${level.key}-${level.price}`}
-                  data-gamma-label={
-                    level.key
-                  }
-                  dir="rtl"
-                  className="absolute right-[86px] top-0 hidden whitespace-nowrap text-[10px] font-black leading-none [will-change:transform] sm:right-[96px] sm:text-xs"
-                  style={{
-                    color: level.color,
-                    textShadow:
-                      "0 1px 3px #020617, 0 -1px 3px #020617",
-                  }}
-                >
-                  {level.title}
-                </span>
-              )
-            )}
-          </div>
-
         </div>
       </div>
 
