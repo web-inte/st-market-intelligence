@@ -299,6 +299,32 @@ export default function ActiveTradesPage() {
     setTradeSymbolSearch,
   ] = useState("");
 
+  const [
+    activeView,
+    setActiveView,
+  ] = useState<
+    "all" | "favorites"
+  >("all");
+
+  const [
+    favoriteTradeIds,
+    setFavoriteTradeIds,
+  ] = useState<Set<string>>(
+    new Set()
+  );
+
+  const [
+    favoriteLoadingIds,
+    setFavoriteLoadingIds,
+  ] = useState<Set<string>>(
+    new Set()
+  );
+
+  const [
+    favoritesError,
+    setFavoritesError,
+  ] = useState("");
+
   const normalizedTradeSymbolSearch =
     tradeSymbolSearch
       .trim()
@@ -307,13 +333,24 @@ export default function ActiveTradesPage() {
   const filteredTrades =
     useMemo(
       () => {
+        const viewTrades =
+          activeView ===
+          "favorites"
+            ? trades.filter(
+                (trade) =>
+                  favoriteTradeIds.has(
+                    trade.id
+                  )
+              )
+            : trades;
+
         if (
           !normalizedTradeSymbolSearch
         ) {
-          return trades;
+          return viewTrades;
         }
 
-        return trades.filter(
+        return viewTrades.filter(
           (trade) =>
             trade.symbol
               .toUpperCase()
@@ -324,6 +361,8 @@ export default function ActiveTradesPage() {
       },
       [
         trades,
+        activeView,
+        favoriteTradeIds,
         normalizedTradeSymbolSearch,
       ]
     );
@@ -348,6 +387,195 @@ export default function ActiveTradesPage() {
 
   const tradesRef =
     useRef<ActiveTrade[]>([]);
+
+  const loadFavorites =
+    useCallback(async () => {
+      try {
+        const response =
+          await fetch(
+            "/api/active-trades/favorites",
+            {
+              cache: "no-store",
+              credentials:
+                "include",
+            }
+          );
+
+        const payload =
+          (await response.json()) as {
+            ok: boolean;
+            favoriteTradeIds?: string[];
+            error?: string;
+          };
+
+        if (
+          !response.ok ||
+          !payload.ok
+        ) {
+          throw new Error(
+            payload.error ||
+              "تعذر تحميل المفضلة"
+          );
+        }
+
+        setFavoriteTradeIds(
+          new Set(
+            payload.favoriteTradeIds ||
+              []
+          )
+        );
+
+        setFavoritesError("");
+      } catch (favoriteError) {
+        setFavoritesError(
+          favoriteError instanceof Error
+            ? favoriteError.message
+            : "تعذر تحميل المفضلة"
+        );
+      }
+    }, []);
+
+  const toggleFavorite =
+    useCallback(
+      async (
+        tradeId: string
+      ) => {
+        if (
+          favoriteLoadingIds.has(
+            tradeId
+          )
+        ) {
+          return;
+        }
+
+        const wasFavorite =
+          favoriteTradeIds.has(
+            tradeId
+          );
+
+        const nextFavorite =
+          !wasFavorite;
+
+        setFavoriteLoadingIds(
+          (current) =>
+            new Set(
+              current
+            ).add(
+              tradeId
+            )
+        );
+
+        setFavoriteTradeIds(
+          (current) => {
+            const next =
+              new Set(
+                current
+              );
+
+            if (nextFavorite) {
+              next.add(
+                tradeId
+              );
+            } else {
+              next.delete(
+                tradeId
+              );
+            }
+
+            return next;
+          }
+        );
+
+        try {
+          const response =
+            await fetch(
+              "/api/active-trades/favorites",
+              {
+                method:
+                  "POST",
+                cache:
+                  "no-store",
+                credentials:
+                  "include",
+                headers: {
+                  "Content-Type":
+                    "application/json",
+                },
+                body:
+                  JSON.stringify({
+                    tradeId,
+                    favorite:
+                      nextFavorite,
+                  }),
+              }
+            );
+
+          const payload =
+            (await response.json()) as {
+              ok: boolean;
+              error?: string;
+            };
+
+          if (
+            !response.ok ||
+            !payload.ok
+          ) {
+            throw new Error(
+              payload.error ||
+                "تعذر تحديث المفضلة"
+            );
+          }
+
+          setFavoritesError("");
+        } catch (favoriteError) {
+          setFavoriteTradeIds(
+            (current) => {
+              const next =
+                new Set(
+                  current
+                );
+
+              if (wasFavorite) {
+                next.add(
+                  tradeId
+                );
+              } else {
+                next.delete(
+                  tradeId
+                );
+              }
+
+              return next;
+            }
+          );
+
+          setFavoritesError(
+            favoriteError instanceof Error
+              ? favoriteError.message
+              : "تعذر تحديث المفضلة"
+          );
+        } finally {
+          setFavoriteLoadingIds(
+            (current) => {
+              const next =
+                new Set(
+                  current
+                );
+
+              next.delete(
+                tradeId
+              );
+
+              return next;
+            }
+          );
+        }
+      },
+      [
+        favoriteLoadingIds,
+        favoriteTradeIds,
+      ]
+    );
 
   const loadTrades =
     useCallback(
@@ -625,6 +853,7 @@ export default function ActiveTradesPage() {
 
   useEffect(() => {
     void loadTrades();
+    void loadFavorites();
 
     const interval =
       window.setInterval(() => {
@@ -636,7 +865,10 @@ export default function ActiveTradesPage() {
         interval
       );
     };
-  }, [loadTrades]);
+  }, [
+    loadTrades,
+    loadFavorites,
+  ]);
 
   /*
     تحديث أسعار العقود فقط كل ثانية.
@@ -825,6 +1057,60 @@ export default function ActiveTradesPage() {
           </div>
         </div>
 
+        <div className="mb-6 flex flex-wrap items-center gap-3 rounded-3xl border border-slate-800 bg-slate-900/70 p-4">
+          <button
+            type="button"
+            onClick={() =>
+              setActiveView(
+                "all"
+              )
+            }
+            className={[
+              "rounded-2xl border px-4 py-2.5 text-sm font-black transition",
+              activeView ===
+              "all"
+                ? "border-cyan-400/40 bg-cyan-400/15 text-cyan-200"
+                : "border-slate-700 bg-slate-950/60 text-slate-300 hover:border-slate-500",
+            ].join(" ")}
+          >
+            كل الصفقات{" "}
+            <span className="text-xs opacity-80">
+              ({trades.length})
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() =>
+              setActiveView(
+                "favorites"
+              )
+            }
+            className={[
+              "rounded-2xl border px-4 py-2.5 text-sm font-black transition",
+              activeView ===
+              "favorites"
+                ? "border-amber-400/40 bg-amber-400/15 text-amber-200"
+                : "border-slate-700 bg-slate-950/60 text-slate-300 hover:border-slate-500",
+            ].join(" ")}
+          >
+            ⭐ المفضلة{" "}
+            <span className="text-xs opacity-80">
+              (
+              {
+                favoriteTradeIds.size
+              }
+              )
+            </span>
+          </button>
+        </div>
+
+        {favoritesError ? (
+          <div className="mb-6 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm font-bold text-amber-200">
+            {favoritesError}
+          </div>
+        ) : null}
+
         <div className="mb-6 rounded-3xl border border-slate-800 bg-slate-900/70 p-4 sm:p-5">
           <label
             htmlFor="active-trade-symbol-search"
@@ -917,6 +1203,33 @@ export default function ActiveTradesPage() {
           </div>
         ) : (
           <>
+            {activeView ===
+              "favorites" &&
+            !normalizedTradeSymbolSearch &&
+            filteredTrades.length === 0 ? (
+              <div className="mb-6 rounded-3xl border border-amber-400/20 bg-amber-400/[0.06] p-8 text-center">
+                <p className="text-lg font-black text-white">
+                  لا توجد صفقات في المفضلة
+                </p>
+
+                <p className="mt-2 text-sm text-slate-400">
+                  اضغط على النجمة بجانب أي صفقة لحفظها هنا.
+                </p>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setActiveView(
+                      "all"
+                    )
+                  }
+                  className="mt-5 rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-bold text-slate-200 transition hover:border-slate-500"
+                >
+                  عرض جميع الصفقات
+                </button>
+              </div>
+            ) : null}
+
             {normalizedTradeSymbolSearch &&
             filteredTrades.length === 0 ? (
               <div className="mb-6 rounded-3xl border border-amber-400/20 bg-amber-400/[0.06] p-8 text-center">
@@ -953,6 +1266,9 @@ export default function ActiveTradesPage() {
                 <table className="min-w-[1450px] w-full text-right text-sm">
                   <thead className="border-b border-slate-800 bg-slate-900">
                     <tr className="text-slate-400">
+                      <th className="w-16 px-4 py-4 text-center">
+                        حفظ
+                      </th>
                       <th className="px-4 py-4">
                         وقت التفعيل
                       </th>
@@ -1011,6 +1327,57 @@ export default function ActiveTradesPage() {
                           key={trade.id}
                           className="transition hover:bg-slate-800/40"
                         >
+                          <td className="px-4 py-5 text-center">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void toggleFavorite(
+                                  trade.id
+                                )
+                              }
+                              disabled={
+                                favoriteLoadingIds.has(
+                                  trade.id
+                                )
+                              }
+                              aria-label={
+                                favoriteTradeIds.has(
+                                  trade.id
+                                )
+                                  ? "إزالة الصفقة من المفضلة"
+                                  : "إضافة الصفقة إلى المفضلة"
+                              }
+                              title={
+                                favoriteTradeIds.has(
+                                  trade.id
+                                )
+                                  ? "إزالة من المفضلة"
+                                  : "إضافة إلى المفضلة"
+                              }
+                              className={[
+                                "inline-flex h-10 w-10 items-center justify-center rounded-xl border text-2xl transition",
+                                favoriteTradeIds.has(
+                                  trade.id
+                                )
+                                  ? "border-amber-400/40 bg-amber-400/15 text-amber-300"
+                                  : "border-slate-700 bg-slate-950/60 text-slate-500 hover:border-amber-400/40 hover:text-amber-300",
+                                favoriteLoadingIds.has(
+                                  trade.id
+                                )
+                                  ? "cursor-wait opacity-50"
+                                  : "",
+                              ].join(" ")}
+                            >
+                              {
+                                favoriteTradeIds.has(
+                                  trade.id
+                                )
+                                  ? "★"
+                                  : "☆"
+                              }
+                            </button>
+                          </td>
+
                           <td className="whitespace-nowrap px-4 py-5 text-slate-300">
                             {formatDateTime(
                               trade.activatedAt
@@ -1289,20 +1656,71 @@ export default function ActiveTradesPage() {
                         </p>
                       </div>
 
-                      <span
-                        className={[
-                          "rounded-lg border px-2.5 py-1 text-xs font-bold",
-                          statusClass(
-                            trade.contractStatus
-                          ),
-                        ].join(
-                          " "
-                        )}
-                      >
-                        {
-                          trade.statusLabel
-                        }
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={[
+                            "rounded-lg border px-2.5 py-1 text-xs font-bold",
+                            statusClass(
+                              trade.contractStatus
+                            ),
+                          ].join(
+                            " "
+                          )}
+                        >
+                          {
+                            trade.statusLabel
+                          }
+                        </span>
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void toggleFavorite(
+                              trade.id
+                            )
+                          }
+                          disabled={
+                            favoriteLoadingIds.has(
+                              trade.id
+                            )
+                          }
+                          aria-label={
+                            favoriteTradeIds.has(
+                              trade.id
+                            )
+                              ? "إزالة الصفقة من المفضلة"
+                              : "إضافة الصفقة إلى المفضلة"
+                          }
+                          title={
+                            favoriteTradeIds.has(
+                              trade.id
+                            )
+                              ? "إزالة من المفضلة"
+                              : "إضافة إلى المفضلة"
+                          }
+                          className={[
+                            "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border text-2xl transition",
+                            favoriteTradeIds.has(
+                              trade.id
+                            )
+                              ? "border-amber-400/40 bg-amber-400/15 text-amber-300"
+                              : "border-slate-700 bg-slate-950/60 text-slate-500 hover:border-amber-400/40 hover:text-amber-300",
+                            favoriteLoadingIds.has(
+                              trade.id
+                            )
+                              ? "cursor-wait opacity-50"
+                              : "",
+                          ].join(" ")}
+                        >
+                          {
+                            favoriteTradeIds.has(
+                              trade.id
+                            )
+                              ? "★"
+                              : "☆"
+                          }
+                        </button>
+                      </div>
                     </div>
 
                     <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
