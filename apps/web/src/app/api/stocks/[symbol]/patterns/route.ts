@@ -879,6 +879,89 @@ export async function GET(
                 positiveNumber(
                   pattern.dprice
                 ),
+
+              /*
+               * النطاق الزمني الحقيقي للنموذج.
+               * تستخدمه الواجهة لربط النموذج
+               * بموضعه الفعلي على الشارت.
+               */
+              startTime:
+                unixToIso(
+                  pattern.start_time ||
+                  pattern.atime ||
+                  0
+                ),
+
+              endTime:
+                unixToIso(
+                  pattern.end_time ||
+                  pattern.etime ||
+                  pattern.dtime ||
+                  detectedTimestamp
+                ),
+
+              /*
+               * نقاط النموذج الخام من مزود البيانات.
+               * تفيد لاحقًا في رسم خطوط المثلثات
+               * والأعلام والأوتاد وخطوط العنق.
+               */
+              points: {
+                a: {
+                  price:
+                    positiveNumber(
+                      pattern.aprice
+                    ),
+                  time:
+                    unixToIso(
+                      pattern.atime ||
+                      0
+                    ),
+                },
+                b: {
+                  price:
+                    positiveNumber(
+                      pattern.bprice
+                    ),
+                  time:
+                    unixToIso(
+                      pattern.btime ||
+                      0
+                    ),
+                },
+                c: {
+                  price:
+                    positiveNumber(
+                      pattern.cprice
+                    ),
+                  time:
+                    unixToIso(
+                      pattern.ctime ||
+                      0
+                    ),
+                },
+                d: {
+                  price:
+                    positiveNumber(
+                      pattern.dprice
+                    ),
+                  time:
+                    unixToIso(
+                      pattern.dtime ||
+                      0
+                    ),
+                },
+                e: {
+                  price:
+                    positiveNumber(
+                      pattern.eprice
+                    ),
+                  time:
+                    unixToIso(
+                      pattern.etime ||
+                      0
+                    ),
+                },
+              },
             };
           }
         )
@@ -918,12 +1001,50 @@ export async function GET(
           "CLASSIC"
       );
 
+    /*
+     * نماذج الشموع قصيرة العمر.
+     * لا نعرض نموذجًا قديمًا بعد مرور
+     * أكثر من 3 شمعات من الفريم المختار.
+     *
+     * كما نعرض أحدث نموذج فقط حتى لا
+     * يمتلئ الشارت بإشارات تاريخية.
+     */
+    const candlePatternMaxAgeMs =
+      Math.max(
+        1,
+        effectiveInterval
+      ) *
+      60_000 *
+      3;
+
+    const candlePatternCutoff =
+      Date.now() -
+      candlePatternMaxAgeMs;
+
     const candlestickPatterns =
-      patterns.filter(
-        (pattern) =>
-          pattern.category ===
-          "CANDLESTICK"
-      );
+      patterns
+        .filter(
+          (pattern) =>
+            pattern.category ===
+            "CANDLESTICK"
+        )
+        .filter((pattern) => {
+          const timestamp =
+            new Date(
+              pattern.endTime ||
+              pattern.detectedAt ||
+              ""
+            ).getTime();
+
+          return (
+            Number.isFinite(
+              timestamp
+            ) &&
+            timestamp >=
+              candlePatternCutoff
+          );
+        })
+        .slice(0, 1);
 
     const payload = {
       ok: true,
