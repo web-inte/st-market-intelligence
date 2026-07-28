@@ -1444,6 +1444,40 @@ export default function StockSmartChart({
     );
   }
 
+  function moveChartLeft() {
+    const chart =
+      chartRef.current;
+
+    if (!chart) {
+      return;
+    }
+
+    const timeScale =
+      chart.timeScale();
+
+    timeScale.scrollToPosition(
+      timeScale.scrollPosition() + 5,
+      false
+    );
+  }
+
+  function moveChartRight() {
+    const chart =
+      chartRef.current;
+
+    if (!chart) {
+      return;
+    }
+
+    const timeScale =
+      chart.timeScale();
+
+    timeScale.scrollToPosition(
+      timeScale.scrollPosition() - 5,
+      false
+    );
+  }
+
   const seriesRef =
     useRef<
       ISeriesApi<"Candlestick"> | null
@@ -1830,6 +1864,31 @@ export default function StockSmartChart({
             });
           }
         );
+
+        return;
+      }
+
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        zoomCandlesIn();
+        return;
+      }
+
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        zoomCandlesOut();
+        return;
+      }
+
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        moveChartLeft();
+        return;
+      }
+
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        moveChartRight();
       }
     }
 
@@ -1891,21 +1950,18 @@ export default function StockSmartChart({
   useEffect(() => {
     let cancelled = false;
 
-    const resolution =
-      interval === 1440
-        ? "D"
-        : interval === 240
-          ? "60"
-          : String(interval);
-
+    /*
+     * الدعم والمقاومة يُطلبان من
+     * نفس فريم الشارت، بما في ذلك 4H.
+     */
     async function loadSupportResistance() {
       try {
         const response =
           await fetch(
             `/api/stocks/${encodeURIComponent(
               symbol
-            )}/support-resistance?resolution=${encodeURIComponent(
-              resolution
+            )}/support-resistance?interval=${encodeURIComponent(
+              interval
             )}`,
             {
               cache: "no-store",
@@ -4270,11 +4326,57 @@ export default function StockSmartChart({
       ) : null}
 
       <div className="relative">
+        <div className="flex flex-wrap items-center justify-center gap-2 border-b border-white/[0.06] bg-slate-950/80 px-4 py-3">
+          <button
+            type="button"
+            onClick={moveChartLeft}
+            className="flex h-10 min-w-12 items-center justify-center rounded-xl border border-white/[0.08] bg-slate-900/80 px-4 text-lg font-black text-slate-200 transition active:scale-95 hover:border-cyan-400/30 hover:text-cyan-300"
+            title="تحريك الشارت لليسار"
+            aria-label="تحريك الشارت لليسار"
+          >
+            ◀
+          </button>
+
+          <button
+            type="button"
+            onClick={zoomCandlesIn}
+            className="flex h-10 min-w-12 items-center justify-center rounded-xl border border-cyan-400/25 bg-cyan-400/[0.08] px-4 text-lg font-black text-cyan-300 transition active:scale-95"
+            title="تكبير عرض الشموع"
+            aria-label="تكبير عرض الشموع"
+          >
+            ▲
+          </button>
+
+          <button
+            type="button"
+            onClick={zoomCandlesOut}
+            className="flex h-10 min-w-12 items-center justify-center rounded-xl border border-cyan-400/25 bg-cyan-400/[0.08] px-4 text-lg font-black text-cyan-300 transition active:scale-95"
+            title="تصغير عرض الشموع"
+            aria-label="تصغير عرض الشموع"
+          >
+            ▼
+          </button>
+
+          <button
+            type="button"
+            onClick={moveChartRight}
+            className="flex h-10 min-w-12 items-center justify-center rounded-xl border border-white/[0.08] bg-slate-900/80 px-4 text-lg font-black text-slate-200 transition active:scale-95 hover:border-cyan-400/30 hover:text-cyan-300"
+            title="تحريك الشارت لليمين"
+            aria-label="تحريك الشارت لليمين"
+          >
+            ▶
+          </button>
+
+          <span className="w-full text-center text-[11px] font-bold text-slate-500 sm:w-auto">
+            الأسهم: تحريك وتكبير الشموع
+          </span>
+        </div>
+
         <div
           className={[
             "relative w-full",
             isExpanded
-              ? "h-[calc(100dvh-190px)] min-h-[420px]"
+              ? "h-[calc(100dvh-250px)] min-h-[420px]"
               : "h-[420px] sm:h-[480px] lg:h-[560px]",
           ].join(" ")}
         >

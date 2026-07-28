@@ -2,6 +2,11 @@ import {
   NextResponse,
 } from "next/server";
 
+import {
+  getCandles,
+  type SupportedInterval,
+} from "@/lib/candle-engine";
+
 export const dynamic =
   "force-dynamic";
 
@@ -11,43 +16,459 @@ type RouteContext = {
   }>;
 };
 
-const allowedResolutions =
-  new Set([
-    "1",
-    "5",
-    "15",
-    "30",
-    "60",
-    "D",
-    "W",
-    "M",
-  ]);
+type CandleRow = {
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume?: number;
+};
 
-function normalizeResolution(
-  value: string | null
-) {
-  const normalized =
-    String(value || "15")
-      .trim()
-      .toUpperCase();
+const allowedIntervals:
+  SupportedInterval[] = [
+    5,
+    15,
+    30,
+    60,
+    240,
+    1440,
+  ];
 
-  return allowedResolutions.has(
-    normalized
+function normalizeInterval(
+  value:
+    string | null
+): SupportedInterval {
+  const parsed =
+    Number.parseInt(
+      String(value || "15"),
+      10
+    );
+
+  return allowedIntervals.includes(
+    parsed as SupportedInterval
   )
-    ? normalized
-    : "15";
+    ? (
+        parsed as
+          SupportedInterval
+      )
+    : 15;
+}
+
+function positiveNumber(
+  value:
+    unknown
+) {
+  const number =
+    Number(value);
+
+  return (
+    Number.isFinite(number) &&
+    number > 0
+  )
+    ? number
+    : null;
+}
+
+function normalizeCandles(
+  value:
+    unknown
+): CandleRow[] {
+  if (
+    !value ||
+    typeof value !== "object"
+  ) {
+    return [];
+  }
+
+  const result =
+    value as {
+      candles?: unknown[];
+    };
+
+  if (
+    !Array.isArray(
+      result.candles
+    )
+  ) {
+    return [];
+  }
+
+  const mapped:
+    Array<
+      CandleRow | null
+    > =
+    result.candles.map(
+      (item) => {
+        if (
+          !item ||
+          typeof item !==
+            "object"
+        ) {
+          return null;
+        }
+
+        const row =
+          item as Record<
+            string,
+            unknown
+          >;
+
+        const time =
+          positiveNumber(
+            row.time
+          );
+
+        const open =
+          positiveNumber(
+            row.open
+          );
+
+        const high =
+          positiveNumber(
+            row.high
+          );
+
+        const low =
+          positiveNumber(
+            row.low
+          );
+
+        const close =
+          positiveNumber(
+            row.close
+          );
+
+        if (
+          time === null ||
+          open === null ||
+          high === null ||
+          low === null ||
+          close === null
+        ) {
+          return null;
+        }
+
+        const volume =
+          positiveNumber(
+            row.volume
+          );
+
+        return {
+          time,
+          open,
+          high,
+          low,
+          close,
+          ...(volume !== null
+            ? { volume }
+            : {}),
+        };
+      }
+    );
+
+  return mapped
+    .filter(
+      (
+        candle
+      ): candle is CandleRow =>
+        candle !== null
+    )
+    .sort(
+      (
+        first,
+        second
+      ) =>
+        first.time -
+        second.time
+    );
+}
+
+function pivotWindowForInterval(
+  interval:
+    SupportedInterval
+) {
+  if (
+    interval === 5
+  ) {
+    return 4;
+  }
+
+  if (
+    interval === 15
+  ) {
+    return 4;
+  }
+
+  if (
+    interval === 30
+  ) {
+    return 3;
+  }
+
+  if (
+    interval === 60
+  ) {
+    return 3;
+  }
+
+  if (
+    interval === 240
+  ) {
+    return 2;
+  }
+
+  return 2;
+}
+
+function calculateAtr(
+  candles:
+    CandleRow[],
+  period = 14
+) {
+  if (
+    candles.length < 2
+  ) {
+    return 0;
+  }
+
+  const ranges:
+    number[] = [];
+
+  for (
+    let index = 1;
+    index <
+    candles.length;
+    index += 1
+  ) {
+    const current =
+      candles[index];
+
+    const previous =
+      candles[
+        index - 1
+      ];
+
+    ranges.push(
+      Math.max(
+        current.high -
+          current.low,
+        Math.abs(
+          current.high -
+            previous.close
+        ),
+        Math.abs(
+          current.low -
+            previous.close
+        )
+      )
+    );
+  }
+
+  const recent =
+    ranges.slice(
+      -period
+    );
+
+  if (
+    recent.length === 0
+  ) {
+    return 0;
+  }
+
+  return (
+    recent.reduce(
+      (
+        total,
+        value
+      ) =>
+        total + value,
+      0
+    ) /
+    recent.length
+  );
+}
+
+function collectPivotLevels(
+  candles:
+    CandleRow[],
+  windowSize:
+    number
+) {
+  const candidates:
+    Array<{
+      price: number;
+      strength: number;
+    }> = [];
+
+  for (
+    let index =
+      windowSize;
+    index <
+      candles.length -
+        windowSize;
+    index += 1
+  ) {
+    const candle =
+      candles[index];
+
+    const surrounding =
+      candles.slice(
+        index -
+          windowSize,
+        index +
+          windowSize +
+          1
+      );
+
+    const isPivotHigh =
+      surrounding.every(
+        (
+          row,
+          localIndex
+        ) =>
+          localIndex ===
+            windowSize ||
+          candle.high >=
+            row.high
+      );
+
+    const isPivotLow =
+      surrounding.every(
+        (
+          row,
+          localIndex
+        ) =>
+          localIndex ===
+            windowSize ||
+          candle.low <=
+            row.low
+      );
+
+    if (
+      isPivotHigh
+    ) {
+      candidates.push({
+        price:
+          candle.high,
+        strength:
+          1 +
+          (
+            candle.volume ||
+            0
+          ),
+      });
+    }
+
+    if (
+      isPivotLow
+    ) {
+      candidates.push({
+        price:
+          candle.low,
+        strength:
+          1 +
+          (
+            candle.volume ||
+            0
+          ),
+      });
+    }
+  }
+
+  return candidates;
+}
+
+function clusterLevels(
+  candidates:
+    Array<{
+      price: number;
+      strength: number;
+    }>,
+  tolerance:
+    number
+) {
+  const clusters:
+    Array<{
+      price: number;
+      strength: number;
+      touches: number;
+    }> = [];
+
+  const sorted =
+    [...candidates].sort(
+      (
+        first,
+        second
+      ) =>
+        first.price -
+        second.price
+    );
+
+  for (
+    const candidate of
+      sorted
+  ) {
+    const existing =
+      clusters.find(
+        (cluster) =>
+          Math.abs(
+            cluster.price -
+              candidate.price
+          ) <= tolerance
+      );
+
+    if (!existing) {
+      clusters.push({
+        price:
+          candidate.price,
+        strength:
+          candidate.strength,
+        touches: 1,
+      });
+
+      continue;
+    }
+
+    const combinedStrength =
+      existing.strength +
+      candidate.strength;
+
+    existing.price =
+      (
+        existing.price *
+          existing.strength +
+        candidate.price *
+          candidate.strength
+      ) /
+      combinedStrength;
+
+    existing.strength =
+      combinedStrength;
+
+    existing.touches += 1;
+  }
+
+  return clusters;
 }
 
 export async function GET(
-  request: Request,
-  context: RouteContext
+  request:
+    Request,
+  context:
+    RouteContext
 ) {
   try {
-    const { symbol: rawSymbol } =
+    const {
+      symbol:
+        rawSymbol,
+    } =
       await context.params;
 
     const symbol =
-      String(rawSymbol || "")
+      String(
+        rawSymbol || ""
+      )
         .trim()
         .toUpperCase()
         .replace(
@@ -84,182 +505,207 @@ export async function GET(
     }
 
     const requestUrl =
-      new URL(request.url);
-
-    const resolution =
-      normalizeResolution(
-        requestUrl.searchParams.get(
-          "resolution"
-        )
+      new URL(
+        request.url
       );
 
-    const resolutionFallbacks:
-      Record<string, string[]> = {
-        "1": [
-          "1",
-          "5",
-          "15",
-          "30",
-          "60",
-          "D",
-        ],
-        "5": [
-          "5",
-          "15",
-          "30",
-          "60",
-          "D",
-        ],
-        "15": [
-          "15",
-          "30",
-          "60",
-          "D",
-        ],
-        "30": [
-          "30",
-          "60",
-          "D",
-        ],
-        "60": [
-          "60",
-          "D",
-          "W",
-        ],
-        "D": [
-          "D",
-          "W",
-        ],
-        "W": [
-          "W",
-          "M",
-        ],
-        "M": [
-          "M",
-        ],
-      };
+    const interval =
+      normalizeInterval(
+        requestUrl
+          .searchParams
+          .get("interval")
+      );
 
-    const resolutionsToTry =
-      resolutionFallbacks[
-        resolution
-      ] || [resolution];
+    /*
+     * كل فريم يستخرج مستوياته من
+     * شموع الفريم نفسه بلا fallback.
+     */
+    const candleResult =
+      await getCandles({
+        symbol,
+        interval,
+        apiKey,
+      });
 
-    let selectedResolution =
-      resolution;
+    const candles =
+      normalizeCandles(
+        candleResult
+      );
 
-    let levels: number[] = [];
-
-    for (
-      const candidateResolution
-      of resolutionsToTry
+    if (
+      candles.length < 12
     ) {
-      const url =
-        "https://finnhub.io/api/v1/scan/support-resistance" +
-        `?symbol=${encodeURIComponent(
-          symbol
-        )}` +
-        `&resolution=${encodeURIComponent(
-          candidateResolution
-        )}` +
-        `&token=${encodeURIComponent(
-          apiKey
-        )}`;
-
-      const response =
-        await fetch(url, {
-          cache: "no-store",
-          signal:
-            AbortSignal.timeout(
-              15_000
-            ),
-        });
-
-      const payload =
-        (await response.json()) as {
-          levels?: unknown[];
-          error?: string;
-        };
-
-      if (!response.ok) {
-        if (
-          response.status === 429
-        ) {
-          return NextResponse.json(
-            {
-              error:
-                payload.error ||
-                "تم تجاوز حد طلبات Finnhub.",
-            },
-            {
-              status: 429,
-            }
-          );
-        }
-
-        continue;
-      }
-
-      const candidateLevels =
-        Array.isArray(
-          payload.levels
-        )
-          ? payload.levels
-              .map(Number)
-              .filter(
-                (level) =>
-                  Number.isFinite(
-                    level
-                  ) &&
-                  level > 0
-              )
-              .sort(
-                (
-                  first,
-                  second
-                ) =>
-                  first -
-                  second
-              )
-              .filter(
-                (
-                  level,
-                  index,
-                  allLevels
-                ) =>
-                  index === 0 ||
-                  Math.abs(
-                    level -
-                      allLevels[
-                        index - 1
-                      ]
-                  ) >= 0.001
-              )
-          : [];
-
-      if (
-        candidateLevels.length >
-        0
-      ) {
-        levels =
-          candidateLevels;
-
-        selectedResolution =
-          candidateResolution;
-
-        break;
-      }
+      return NextResponse.json({
+        symbol,
+        interval,
+        levels: [],
+        supports: [],
+        resistances: [],
+        source:
+          "timeframe-candles",
+        error:
+          "عدد الشموع غير كافٍ لحساب الدعم والمقاومة.",
+        updatedAt:
+          new Date()
+            .toISOString(),
+      });
     }
+
+    const recentCandles =
+      candles.slice(
+        -300
+      );
+
+    const currentPrice =
+      recentCandles[
+        recentCandles.length -
+          1
+      ].close;
+
+    const atr =
+      calculateAtr(
+        recentCandles
+      );
+
+    const minimumTolerance =
+      currentPrice *
+      0.0015;
+
+    const tolerance =
+      Math.max(
+        minimumTolerance,
+        atr * 0.3
+      );
+
+    const pivotWindow =
+      pivotWindowForInterval(
+        interval
+      );
+
+    const candidates =
+      collectPivotLevels(
+        recentCandles,
+        pivotWindow
+      );
+
+    const clusters =
+      clusterLevels(
+        candidates,
+        tolerance
+      );
+
+    const ranked =
+      clusters
+        .filter(
+          (cluster) =>
+            cluster.touches >=
+              2 ||
+            cluster.strength >
+              1
+        )
+        .sort(
+          (
+            first,
+            second
+          ) => {
+            if (
+              second.touches !==
+              first.touches
+            ) {
+              return (
+                second.touches -
+                first.touches
+              );
+            }
+
+            return (
+              second.strength -
+              first.strength
+            );
+          }
+        );
+
+    const supports =
+      ranked
+        .filter(
+          (cluster) =>
+            cluster.price <
+            currentPrice
+        )
+        .sort(
+          (
+            first,
+            second
+          ) =>
+            second.price -
+            first.price
+        )
+        .slice(0, 8)
+        .map(
+          (cluster) =>
+            Number(
+              cluster.price
+                .toFixed(4)
+            )
+        );
+
+    const resistances =
+      ranked
+        .filter(
+          (cluster) =>
+            cluster.price >
+            currentPrice
+        )
+        .sort(
+          (
+            first,
+            second
+          ) =>
+            first.price -
+            second.price
+        )
+        .slice(0, 8)
+        .map(
+          (cluster) =>
+            Number(
+              cluster.price
+                .toFixed(4)
+            )
+        );
+
+    const levels =
+      [
+        ...supports,
+        ...resistances,
+      ]
+        .sort(
+          (
+            first,
+            second
+          ) =>
+            first -
+            second
+        );
 
     return NextResponse.json({
       symbol,
-      requestedResolution:
-        resolution,
-      resolution:
-        selectedResolution,
-      fallbackUsed:
-        selectedResolution !==
-        resolution,
+      interval,
+      currentPrice,
       levels,
+      supports,
+      resistances,
+      candleCount:
+        recentCandles.length,
+      pivotWindow,
+      tolerance:
+        Number(
+          tolerance.toFixed(
+            6
+          )
+        ),
+      source:
+        "timeframe-candles",
+      fallbackUsed: false,
       updatedAt:
         new Date()
           .toISOString(),
@@ -270,7 +716,7 @@ export async function GET(
         error:
           error instanceof Error
             ? error.message
-            : "تعذر جلب الدعم والمقاومة.",
+            : "تعذر حساب الدعم والمقاومة.",
       },
       {
         status: 500,
