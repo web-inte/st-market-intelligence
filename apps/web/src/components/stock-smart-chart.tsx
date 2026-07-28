@@ -3247,28 +3247,49 @@ export default function StockSmartChart({
       name ===
         "inverse head and shoulders"
     ) {
-      addPatternPath(
-        [
-          resolved.a,
-          resolved.b,
-          resolved.c,
-          resolved.d,
-          resolved.e,
-        ],
-        boundaryColor,
-        LineStyle.Solid,
-        4
-      );
+      /*
+       * لا نرسم الرأس والكتفين إلا إذا
+       * كانت النقاط الخمس مكتملة.
+       *
+       * توصيل نقاط ناقصة يعطي شكلًا
+       * مضللًا وغير مطابق للنموذج.
+       */
+      const hasCompleteHeadShoulders =
+        resolved.a !== null &&
+        resolved.b !== null &&
+        resolved.c !== null &&
+        resolved.d !== null &&
+        resolved.e !== null;
 
-      addPatternPath(
-        [
-          resolved.b,
-          resolved.d,
-        ],
-        "#facc15",
-        LineStyle.Dashed,
-        3
-      );
+      if (
+        hasCompleteHeadShoulders
+      ) {
+        addPatternPath(
+          [
+            resolved.a,
+            resolved.b,
+            resolved.c,
+            resolved.d,
+            resolved.e,
+          ],
+          boundaryColor,
+          LineStyle.Solid,
+          4
+        );
+
+        /*
+         * خط العنق بين B و D.
+         */
+        addPatternPath(
+          [
+            resolved.b,
+            resolved.d,
+          ],
+          "#facc15",
+          LineStyle.Dashed,
+          3
+        );
+      }
     }
 
     /*
