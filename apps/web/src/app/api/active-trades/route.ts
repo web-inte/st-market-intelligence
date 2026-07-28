@@ -639,6 +639,125 @@ type MassiveContractLivePrice = {
   quoteAt: string;
 };
 
+type FinnhubLiveQuote = {
+  c?: number;
+  t?: number;
+};
+
+type CachedFinnhubStockPrice = {
+  price: number;
+  timestampMs: number;
+  expiresAtMs: number;
+};
+
+/*
+  كاش قصير يمنع تكرار طلب Finnhub
+  لنفس الرمز عند وجود عدة صفقات عليه.
+*/
+const finnhubStockPriceCache =
+  new Map<
+    string,
+    CachedFinnhubStockPrice
+  >();
+
+const FINNHUB_STOCK_CACHE_MS =
+  4_000;
+
+async function fetchFinnhubLiveStockPrice(
+  symbol: string,
+  apiKey: string
+): Promise<{
+  price: number;
+  timestampMs: number;
+}> {
+  const normalizedSymbol =
+    String(symbol || "")
+      .trim()
+      .toUpperCase();
+
+  const cached =
+    finnhubStockPriceCache.get(
+      normalizedSymbol
+    );
+
+  const now = Date.now();
+
+  if (
+    cached &&
+    cached.expiresAtMs > now
+  ) {
+    return {
+      price: cached.price,
+      timestampMs:
+        cached.timestampMs,
+    };
+  }
+
+  const url =
+    "https://finnhub.io/api/v1/quote" +
+    `?symbol=${encodeURIComponent(
+      normalizedSymbol
+    )}` +
+    `&token=${encodeURIComponent(
+      apiKey
+    )}`;
+
+  const response = await fetch(url, {
+    cache: "no-store",
+    headers: {
+      "Cache-Control":
+        "no-cache, no-store, max-age=0",
+      Pragma: "no-cache",
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      `Finnhub HTTP ${response.status}`
+    );
+  }
+
+  const payload =
+    (await response.json()) as
+      FinnhubLiveQuote;
+
+  const price =
+    activeTradeNumber(
+      payload.c
+    );
+
+  const timestampMs =
+    activeTradeNumber(
+      payload.t
+    ) > 0
+      ? activeTradeNumber(
+          payload.t
+        ) * 1000
+      : now;
+
+  if (price <= 0) {
+    throw new Error(
+      `Finnhub لم يرجع سعرًا صالحًا لـ ${normalizedSymbol}`
+    );
+  }
+
+  finnhubStockPriceCache.set(
+    normalizedSymbol,
+    {
+      price,
+      timestampMs,
+      expiresAtMs:
+        now +
+        FINNHUB_STOCK_CACHE_MS,
+    }
+  );
+
+  return {
+    price,
+    timestampMs,
+  };
+}
+
 function activeTradeRecord(
   value: unknown
 ): Record<string, unknown> {
@@ -1006,9 +1125,18 @@ export async function GET() {
       const massiveApiKey =
   process.env.MASSIVE_API_KEY;
 
+const finnhubApiKey =
+  process.env.FINNHUB_API_KEY;
+
 if (!massiveApiKey) {
   throw new Error(
     "متغير MASSIVE_API_KEY غير موجود"
+  );
+}
+
+if (!finnhubApiKey) {
+  throw new Error(
+    "متغير FINNHUB_API_KEY غير موجود"
   );
 }
 
@@ -1051,6 +1179,82 @@ const regularMarketOpen =
 
     if (error) {
       throw error;
+    }
+
+    /*
+      نجلب سعر كل سهم من Finnhub مرة واحدة
+      فقط في الدورة، حتى لو كان عليه عدة صفقات.
+    */
+    const activeSymbols =
+      Array.from(
+        new Set(
+          (data || [])
+            .map((rawRow) =>
+              String(
+                activeTradeRecord(
+                  rawRow
+                ).symbol || ""
+              )
+                .trim()
+                .toUpperCase()
+            )
+            .filter(Boolean)
+        )
+      );
+
+    const finnhubPrices =
+      new Map<
+        string,
+        {
+          price: number;
+          timestampMs: number;
+        }
+      >();
+
+    if (regularMarketOpen) {
+      const settledStockPrices =
+        await Promise.allSettled(
+          activeSymbols.map(
+            async (symbol) => {
+              const quote =
+                await fetchFinnhubLiveStockPrice(
+                  symbol,
+                  finnhubApiKey
+                );
+
+              return {
+                symbol,
+                ...quote,
+              };
+            }
+          )
+        );
+
+      for (
+        const result of
+        settledStockPrices
+      ) {
+        if (
+          result.status ===
+          "fulfilled"
+        ) {
+          finnhubPrices.set(
+            result.value.symbol,
+            {
+              price:
+                result.value.price,
+              timestampMs:
+                result.value
+                  .timestampMs,
+            }
+          );
+        } else {
+          console.warn(
+            "تعذر تحديث سعر سهم من Finnhub:",
+            result.reason
+          );
+        }
+      }
     }
 
     const refreshedRows =
@@ -1214,9 +1418,22 @@ const regularMarketOpen =
               row.current_price
             );
 
+          const finnhubStockQuote =
+            finnhubPrices.get(
+              symbol
+                .trim()
+                .toUpperCase()
+            );
+
+          /*
+            Finnhub هو مصدر سعر السهم المباشر.
+            لا نعتمد على underlying_asset
+            الموجود داخل Snapshot الأوبشن.
+          */
           const stockPrice =
-            live.stockPrice > 0
-              ? live.stockPrice
+            finnhubStockQuote &&
+            finnhubStockQuote.price > 0
+              ? finnhubStockQuote.price
               : previousStockPrice;
 
           const side =
