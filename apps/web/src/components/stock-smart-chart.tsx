@@ -577,10 +577,323 @@ function extractGammaView(
   };
 }
 
+type PatternDirection =
+  | "BULLISH"
+  | "BEARISH"
+  | "NEUTRAL";
+
+type PatternStatus =
+  | "COMPLETE"
+  | "FORMING";
+
+type PatternCategory =
+  | "CLASSIC"
+  | "CANDLESTICK";
+
+type DetectedPattern = {
+  id: string;
+  name: string;
+  label: string;
+  category:
+    PatternCategory;
+  direction:
+    PatternDirection;
+  status:
+    PatternStatus;
+  explanation: string;
+  confirmation: string;
+  invalidation: string;
+  detectedAt:
+    string | null;
+  entry:
+    number | null;
+  target1:
+    number | null;
+  target2:
+    number | null;
+  stopLoss:
+    number | null;
+  startPrice:
+    number | null;
+  endPrice:
+    number | null;
+};
+
+type PatternsResponse = {
+  ok: boolean;
+  symbol: string;
+  requestedInterval: number;
+  effectiveInterval: number;
+  resolution: string;
+  fallback: boolean;
+  fallbackMessage:
+    string | null;
+  classicPatterns:
+    DetectedPattern[];
+  candlestickPatterns:
+    DetectedPattern[];
+  counts: {
+    classic: number;
+    candlestick: number;
+    complete: number;
+    forming: number;
+  };
+  updatedAt: string;
+  cached: boolean;
+  error?: string;
+};
+
+const CLASSIC_PATTERNS_STORAGE_KEY =
+  "st_market_show_classic_patterns";
+
+const CANDLE_PATTERNS_STORAGE_KEY =
+  "st_market_show_candle_patterns";
+
+function patternDirectionLabel(
+  direction:
+    PatternDirection
+) {
+  if (
+    direction === "BULLISH"
+  ) {
+    return "صاعد محتمل";
+  }
+
+  if (
+    direction === "BEARISH"
+  ) {
+    return "هابط محتمل";
+  }
+
+  return "محايد";
+}
+
+function patternDirectionClasses(
+  direction:
+    PatternDirection
+) {
+  if (
+    direction === "BULLISH"
+  ) {
+    return "border-emerald-400/25 bg-emerald-400/[0.08] text-emerald-300";
+  }
+
+  if (
+    direction === "BEARISH"
+  ) {
+    return "border-rose-400/25 bg-rose-400/[0.08] text-rose-300";
+  }
+
+  return "border-amber-400/25 bg-amber-400/[0.08] text-amber-300";
+}
+
+function patternStatusLabel(
+  status:
+    PatternStatus
+) {
+  if (
+    status === "COMPLETE"
+  ) {
+    return "مكتمل";
+  }
+
+  return "قيد التكوين";
+}
+
+function patternStatusClasses(
+  status:
+    PatternStatus
+) {
+  if (
+    status === "COMPLETE"
+  ) {
+    return "border-cyan-400/25 bg-cyan-400/[0.08] text-cyan-300";
+  }
+
+  return "border-amber-400/25 bg-amber-400/[0.08] text-amber-300";
+}
+
+function formatPatternTime(
+  value:
+    string | null
+) {
+  if (!value) {
+    return "وقت غير معروف";
+  }
+
+  const date =
+    new Date(value);
+
+  if (
+    Number.isNaN(
+      date.getTime()
+    )
+  ) {
+    return "وقت غير معروف";
+  }
+
+  return new Intl.DateTimeFormat(
+    "ar-SA",
+    {
+      dateStyle: "medium",
+      timeStyle: "short",
+      timeZone: "Asia/Riyadh",
+    }
+  ).format(date);
+}
+
 function priceFormat(
   value: number
 ) {
   return Number(value || 0).toFixed(2);
+}
+
+function PatternEducationCard({
+  pattern,
+}: {
+  pattern:
+    DetectedPattern;
+}) {
+  return (
+    <article className="rounded-2xl border border-white/[0.07] bg-slate-950/60 p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <span
+          className={[
+            "rounded-xl border px-3 py-1.5 text-xs font-black",
+            patternDirectionClasses(
+              pattern.direction
+            ),
+          ].join(" ")}
+        >
+          {patternDirectionLabel(
+            pattern.direction
+          )}
+        </span>
+
+        <span
+          className={[
+            "rounded-xl border px-3 py-1.5 text-xs font-black",
+            patternStatusClasses(
+              pattern.status
+            ),
+          ].join(" ")}
+        >
+          {patternStatusLabel(
+            pattern.status
+          )}
+        </span>
+
+        <span className="mr-auto text-xs text-slate-600">
+          {formatPatternTime(
+            pattern.detectedAt
+          )}
+        </span>
+      </div>
+
+      <h5 className="mt-4 text-lg font-black text-white">
+        {pattern.label}
+      </h5>
+
+      <div className="mt-4 space-y-3 text-sm leading-7">
+        <div className="rounded-xl border border-white/[0.06] bg-white/[0.025] p-3">
+          <p className="text-xs font-black text-violet-300">
+            ماذا يعني؟
+          </p>
+
+          <p className="mt-1 text-slate-300">
+            {pattern.explanation}
+          </p>
+        </div>
+
+        <div className="rounded-xl border border-emerald-400/10 bg-emerald-400/[0.04] p-3">
+          <p className="text-xs font-black text-emerald-300">
+            كيف يتأكد؟
+          </p>
+
+          <p className="mt-1 text-slate-300">
+            {pattern.confirmation}
+          </p>
+        </div>
+
+        <div className="rounded-xl border border-rose-400/10 bg-rose-400/[0.04] p-3">
+          <p className="text-xs font-black text-rose-300">
+            متى يُلغى؟
+          </p>
+
+          <p className="mt-1 text-slate-300">
+            {pattern.invalidation}
+          </p>
+        </div>
+      </div>
+
+      {pattern.entry ||
+      pattern.target1 ||
+      pattern.target2 ||
+      pattern.stopLoss ? (
+        <div className="mt-4 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+          {pattern.entry ? (
+            <div className="rounded-xl border border-cyan-400/10 bg-cyan-400/[0.04] p-3">
+              <p className="text-slate-500">
+                دخول
+              </p>
+
+              <p className="mt-1 font-black text-cyan-300">
+                $
+                {priceFormat(
+                  pattern.entry
+                )}
+              </p>
+            </div>
+          ) : null}
+
+          {pattern.target1 ? (
+            <div className="rounded-xl border border-emerald-400/10 bg-emerald-400/[0.04] p-3">
+              <p className="text-slate-500">
+                الهدف 1
+              </p>
+
+              <p className="mt-1 font-black text-emerald-300">
+                $
+                {priceFormat(
+                  pattern.target1
+                )}
+              </p>
+            </div>
+          ) : null}
+
+          {pattern.target2 ? (
+            <div className="rounded-xl border border-emerald-400/10 bg-emerald-400/[0.04] p-3">
+              <p className="text-slate-500">
+                الهدف 2
+              </p>
+
+              <p className="mt-1 font-black text-emerald-300">
+                $
+                {priceFormat(
+                  pattern.target2
+                )}
+              </p>
+            </div>
+          ) : null}
+
+          {pattern.stopLoss ? (
+            <div className="rounded-xl border border-rose-400/10 bg-rose-400/[0.04] p-3">
+              <p className="text-slate-500">
+                إلغاء النموذج
+              </p>
+
+              <p className="mt-1 font-black text-rose-300">
+                $
+                {priceFormat(
+                  pattern.stopLoss
+                )}
+              </p>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </article>
+  );
 }
 
 export default function StockSmartChart({
@@ -635,6 +948,46 @@ export default function StockSmartChart({
   ] = useState("");
 
   const [
+    showClassicPatterns,
+    setShowClassicPatterns,
+  ] = useState(true);
+
+  const [
+    showCandlePatterns,
+    setShowCandlePatterns,
+  ] = useState(true);
+
+  const [
+    patternPreferencesLoaded,
+    setPatternPreferencesLoaded,
+  ] = useState(false);
+
+  const [
+    patternInterval,
+    setPatternInterval,
+  ] = useState<
+    15 | 30 | 60 | 1440
+  >(30);
+
+  const [
+    patternsData,
+    setPatternsData,
+  ] =
+    useState<PatternsResponse | null>(
+      null
+    );
+
+  const [
+    patternsLoading,
+    setPatternsLoading,
+  ] = useState(false);
+
+  const [
+    patternsError,
+    setPatternsError,
+  ] = useState("");
+
+  const [
     interval,
     setIntervalValue,
   ] = useState<
@@ -645,6 +998,178 @@ export default function StockSmartChart({
     intervalRef.current =
       interval;
   }, [interval]);
+
+  useEffect(() => {
+    try {
+      const classicStored =
+        window.localStorage.getItem(
+          CLASSIC_PATTERNS_STORAGE_KEY
+        );
+
+      const candleStored =
+        window.localStorage.getItem(
+          CANDLE_PATTERNS_STORAGE_KEY
+        );
+
+      if (
+        classicStored === "false"
+      ) {
+        setShowClassicPatterns(
+          false
+        );
+      }
+
+      if (
+        candleStored === "false"
+      ) {
+        setShowCandlePatterns(
+          false
+        );
+      }
+    } catch {
+      /*
+       * يبقى العرض مفعّلًا افتراضيًا.
+       */
+    } finally {
+      setPatternPreferencesLoaded(
+        true
+      );
+    }
+  }, []);
+
+  useEffect(() => {
+    if (
+      !patternPreferencesLoaded
+    ) {
+      return;
+    }
+
+    try {
+      window.localStorage.setItem(
+        CLASSIC_PATTERNS_STORAGE_KEY,
+        String(
+          showClassicPatterns
+        )
+      );
+
+      window.localStorage.setItem(
+        CANDLE_PATTERNS_STORAGE_KEY,
+        String(
+          showCandlePatterns
+        )
+      );
+    } catch {
+      /*
+       * فشل حفظ الاختيار لا يمنع العرض.
+       */
+    }
+  }, [
+    showClassicPatterns,
+    showCandlePatterns,
+    patternPreferencesLoaded,
+  ]);
+
+  useEffect(() => {
+    if (
+      !patternPreferencesLoaded ||
+      (
+        !showClassicPatterns &&
+        !showCandlePatterns
+      )
+    ) {
+      setPatternsLoading(
+        false
+      );
+      setPatternsError("");
+      setPatternsData(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadPatterns() {
+      setPatternsLoading(
+        true
+      );
+      setPatternsError("");
+
+      try {
+        const response =
+          await fetch(
+            `/api/stocks/${encodeURIComponent(
+              symbol
+            )}/patterns?interval=${patternInterval}`,
+            {
+              cache: "no-store",
+            }
+          );
+
+        const result =
+          (await response.json()) as
+            PatternsResponse;
+
+        if (
+          !response.ok ||
+          result.ok === false
+        ) {
+          throw new Error(
+            result.error ||
+              "تعذر تحميل النماذج."
+          );
+        }
+
+        if (cancelled) {
+          return;
+        }
+
+        setPatternsData(
+          result
+        );
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        setPatternsData(null);
+
+        setPatternsError(
+          error instanceof Error
+            ? error.message
+            : "تعذر تحميل النماذج."
+        );
+      } finally {
+        if (!cancelled) {
+          setPatternsLoading(
+            false
+          );
+        }
+      }
+    }
+
+    void loadPatterns();
+
+    const timer =
+      window.setInterval(
+        () => {
+          void loadPatterns();
+        },
+        60_000
+      );
+
+    return () => {
+      cancelled = true;
+
+      window.clearInterval(
+        timer
+      );
+    };
+  }, [
+    symbol,
+    patternInterval,
+    showClassicPatterns,
+    showCandlePatterns,
+    patternPreferencesLoaded,
+  ]);
 
   useEffect(() => {
     const timer =
@@ -2107,6 +2632,239 @@ export default function StockSmartChart({
 
       <div className="border-b border-white/[0.05] px-5 py-2 text-right text-[11px] font-bold leading-5 text-slate-500 sm:px-6">
         اسحب تدريج الأسعار في يمين الشارت لتكبير أو تصغير النطاق السعري، واسحب الشارت لتحريكه، واستخدم إصبعين للتكبير على الجوال.
+      </div>
+
+      <div className="border-b border-white/[0.06] px-5 py-5 sm:px-6">
+        <div className="rounded-2xl border border-violet-400/15 bg-gradient-to-br from-violet-500/[0.07] via-slate-950/75 to-cyan-500/[0.05] p-4 sm:p-5">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="text-xs font-black text-violet-300">
+                تحليل النماذج الفنية
+              </p>
+
+              <h3 className="mt-2 text-xl font-black text-white">
+                النماذج الكلاسيكية ونماذج الشموع
+              </h3>
+
+              <p className="mt-2 max-w-3xl text-xs leading-6 text-slate-500">
+                أداة تعليمية ومساندة للمراقبة فقط، ولا تدخل حاليًا في قرار الصفقة أو درجة التحليل.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                  setShowClassicPatterns(
+                    (current) =>
+                      !current
+                  )
+                }
+                className={[
+                  "rounded-xl border px-4 py-2 text-xs font-black transition",
+                  showClassicPatterns
+                    ? "border-cyan-400/30 bg-cyan-400/10 text-cyan-300"
+                    : "border-white/[0.08] bg-slate-900/70 text-slate-500 hover:text-white",
+                ].join(" ")}
+              >
+                {showClassicPatterns
+                  ? "إخفاء النماذج الكلاسيكية"
+                  : "إظهار النماذج الكلاسيكية"}
+              </button>
+
+              <button
+                type="button"
+                onClick={() =>
+                  setShowCandlePatterns(
+                    (current) =>
+                      !current
+                  )
+                }
+                className={[
+                  "rounded-xl border px-4 py-2 text-xs font-black transition",
+                  showCandlePatterns
+                    ? "border-amber-400/30 bg-amber-400/10 text-amber-300"
+                    : "border-white/[0.08] bg-slate-900/70 text-slate-500 hover:text-white",
+                ].join(" ")}
+              >
+                {showCandlePatterns
+                  ? "إخفاء نماذج الشموع"
+                  : "إظهار نماذج الشموع"}
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            {[
+              [15, "15m"],
+              [30, "30m"],
+              [60, "1H"],
+              [1440, "1D"],
+            ].map(
+              ([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() =>
+                    setPatternInterval(
+                      value as
+                        | 15
+                        | 30
+                        | 60
+                        | 1440
+                    )
+                  }
+                  className={[
+                    "rounded-xl border px-3 py-2 text-xs font-black transition",
+                    patternInterval ===
+                    value
+                      ? "border-violet-400/40 bg-violet-400/10 text-violet-300"
+                      : "border-white/[0.07] bg-slate-900/65 text-slate-400 hover:text-white",
+                  ].join(" ")}
+                >
+                  {label}
+                </button>
+              )
+            )}
+          </div>
+
+          {!showClassicPatterns &&
+          !showCandlePatterns ? (
+            <div className="mt-4 rounded-xl border border-white/[0.06] bg-slate-950/50 p-4 text-center">
+              <p className="text-sm font-bold text-slate-400">
+                تم إخفاء النوعين.
+              </p>
+
+              <p className="mt-2 text-xs text-slate-600">
+                لن يتم إرسال طلبات تحديث حتى تُظهر أحدهما.
+              </p>
+            </div>
+          ) : null}
+
+          {(showClassicPatterns ||
+            showCandlePatterns) &&
+          patternsLoading ? (
+            <div className="mt-4 rounded-xl border border-white/[0.06] bg-slate-950/50 p-4 text-center text-sm font-bold text-slate-400">
+              جارٍ اكتشاف النماذج...
+            </div>
+          ) : null}
+
+          {(showClassicPatterns ||
+            showCandlePatterns) &&
+          !patternsLoading &&
+          patternsError ? (
+            <div className="mt-4 rounded-xl border border-rose-400/20 bg-rose-400/[0.06] p-4 text-sm font-bold text-rose-300">
+              {patternsError}
+            </div>
+          ) : null}
+
+          {(showClassicPatterns ||
+            showCandlePatterns) &&
+          !patternsLoading &&
+          patternsData ? (
+            <>
+              {patternsData
+                .fallbackMessage ? (
+                <div className="mt-4 rounded-xl border border-amber-400/20 bg-amber-400/[0.06] px-4 py-3 text-xs font-bold leading-6 text-amber-200">
+                  {
+                    patternsData
+                      .fallbackMessage
+                  }
+                </div>
+              ) : null}
+
+              {showClassicPatterns ? (
+                <div className="mt-5">
+                  <div className="flex items-center justify-between gap-3">
+                    <h4 className="font-black text-cyan-300">
+                      النماذج الكلاسيكية
+                    </h4>
+
+                    <span className="rounded-full border border-cyan-400/20 bg-cyan-400/[0.06] px-3 py-1 text-xs font-black text-cyan-300">
+                      {
+                        patternsData
+                          .classicPatterns
+                          .length
+                      }
+                    </span>
+                  </div>
+
+                  {patternsData
+                    .classicPatterns
+                    .length === 0 ? (
+                    <div className="mt-3 rounded-xl border border-white/[0.06] bg-slate-950/45 p-4 text-sm text-slate-500">
+                      لا يوجد نموذج كلاسيكي مهم على الفريم المختار حاليًا.
+                    </div>
+                  ) : (
+                    <div className="mt-3 grid gap-4 lg:grid-cols-2">
+                      {patternsData
+                        .classicPatterns
+                        .map(
+                          (
+                            pattern
+                          ) => (
+                            <PatternEducationCard
+                              key={
+                                pattern.id
+                              }
+                              pattern={
+                                pattern
+                              }
+                            />
+                          )
+                        )}
+                    </div>
+                  )}
+                </div>
+              ) : null}
+
+              {showCandlePatterns ? (
+                <div className="mt-6">
+                  <div className="flex items-center justify-between gap-3">
+                    <h4 className="font-black text-amber-300">
+                      نماذج الشموع المهمة
+                    </h4>
+
+                    <span className="rounded-full border border-amber-400/20 bg-amber-400/[0.06] px-3 py-1 text-xs font-black text-amber-300">
+                      {
+                        patternsData
+                          .candlestickPatterns
+                          .length
+                      }
+                    </span>
+                  </div>
+
+                  {patternsData
+                    .candlestickPatterns
+                    .length === 0 ? (
+                    <div className="mt-3 rounded-xl border border-white/[0.06] bg-slate-950/45 p-4 text-sm text-slate-500">
+                      لا يوجد نموذج شموع مهم على الفريم المختار حاليًا.
+                    </div>
+                  ) : (
+                    <div className="mt-3 grid gap-4 lg:grid-cols-2">
+                      {patternsData
+                        .candlestickPatterns
+                        .map(
+                          (
+                            pattern
+                          ) => (
+                            <PatternEducationCard
+                              key={
+                                pattern.id
+                              }
+                              pattern={
+                                pattern
+                              }
+                            />
+                          )
+                        )}
+                    </div>
+                  )}
+                </div>
+              ) : null}
+            </>
+          ) : null}
+        </div>
       </div>
 
       {side === "NEUTRAL" ? (
