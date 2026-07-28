@@ -12,6 +12,7 @@ type QuoteRequestItem = {
   symbol: string;
   contractTicker: string;
   contractEntryPrice: number;
+  contractBestPrice: number;
 };
 
 type DataRecord =
@@ -139,10 +140,49 @@ async function fetchContractQuote(
         100
       : 0;
 
+  /*
+    أعلى سعر للعقد لا ينخفض أبدًا.
+    نحميه من الردود القديمة ومن نزول
+    السعر الحالي بعد تسجيل قمة جديدة.
+  */
+  const contractBestPrice =
+    Math.max(
+      numberValue(
+        item.contractBestPrice
+      ),
+      entryPrice,
+      currentPrice
+    );
+
+  const contractBestProfitDollars =
+    entryPrice > 0
+      ? (contractBestPrice -
+          entryPrice) *
+        100
+      : 0;
+
+  const contractBestProfitPct =
+    entryPrice > 0
+      ? ((contractBestPrice -
+          entryPrice) /
+          entryPrice) *
+        100
+      : 0;
+
   return {
     id: item.id,
     contractCurrentPrice:
       round(currentPrice),
+    contractBestPrice:
+      round(contractBestPrice),
+    contractBestProfitDollars:
+      round(
+        contractBestProfitDollars
+      ),
+    contractBestProfitPct:
+      round(
+        contractBestProfitPct
+      ),
     contractBid:
       round(bid),
     contractAsk:
@@ -196,6 +236,10 @@ export async function POST(
             contractEntryPrice:
               numberValue(
                 item.contractEntryPrice
+              ),
+            contractBestPrice:
+              numberValue(
+                item.contractBestPrice
               ),
           };
         })

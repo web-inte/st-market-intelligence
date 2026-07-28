@@ -657,6 +657,21 @@ export default function ActiveTradesPage() {
                     ...trade,
                     contractCurrentPrice:
                       live.contractCurrentPrice,
+                    contractBestPrice:
+                      Math.max(
+                        Number(
+                          trade.contractBestPrice
+                        ) || 0,
+                        Number(
+                          live.contractBestPrice
+                        ) || 0,
+                        Number(
+                          live.contractCurrentPrice
+                        ) || 0,
+                        Number(
+                          trade.contractEntryPrice
+                        ) || 0
+                      ),
                     contractBid:
                       live.contractBid,
                     contractAsk:
@@ -763,6 +778,8 @@ export default function ActiveTradesPage() {
                         trade.contractTicker,
                       contractEntryPrice:
                         trade.contractEntryPrice,
+                      contractBestPrice:
+                        trade.contractBestPrice,
                     })
                   ),
               }),
@@ -775,6 +792,12 @@ export default function ActiveTradesPage() {
             quotes?: Array<{
               id: string;
               contractCurrentPrice:
+                number;
+              contractBestPrice:
+                number;
+              contractBestProfitDollars:
+                number;
+              contractBestProfitPct:
                 number;
               contractBid: number;
               contractAsk: number;
@@ -819,10 +842,28 @@ export default function ActiveTradesPage() {
                 return trade;
               }
 
+              const safeContractBestPrice =
+                Math.max(
+                  Number(
+                    trade.contractBestPrice
+                  ) || 0,
+                  Number(
+                    quote.contractBestPrice
+                  ) || 0,
+                  Number(
+                    quote.contractCurrentPrice
+                  ) || 0,
+                  Number(
+                    trade.contractEntryPrice
+                  ) || 0
+                );
+
               return {
                 ...trade,
                 contractCurrentPrice:
                   quote.contractCurrentPrice,
+                contractBestPrice:
+                  safeContractBestPrice,
                 contractBid:
                   quote.contractBid,
                 contractAsk:
