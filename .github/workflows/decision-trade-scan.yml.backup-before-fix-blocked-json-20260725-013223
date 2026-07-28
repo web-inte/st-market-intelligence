@@ -1,0 +1,414 @@
+name: Decision Trade Scanner
+
+on:
+  workflow_dispatch:
+    inputs:
+      round:
+        description: "Round 1, 2, 3, or 4"
+        required: true
+        default: "1"
+
+
+permissions:
+  contents: read
+
+concurrency:
+  group: decision-trade-scanner
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Scan selected round
+        env:
+          DECISION_SCAN_SECRET: ${{ secrets.DECISION_SCAN_SECRET }}
+          BASE_URL: https://www.st-market.com
+        shell: bash
+        run: |
+          set -uo pipefail
+
+          if [ -z "${DECISION_SCAN_SECRET:-}" ]; then
+            echo "CRON_SECRET is missing"
+            exit 1
+          fi
+
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            round_number="${{ github.event.inputs.round }}"
+          else
+            case "${{ github.event.schedule }}" in
+              "30,45 9 * * 1-5"|"0,15,30,45 10-15 * * 1-5")
+                round_number=1
+                ;;
+              "35,50 9 * * 1-5"|"5,20,35,50 10-15 * * 1-5")
+                round_number=2
+                ;;
+              "40,55 9 * * 1-5"|"10,25,40,55 10-15 * * 1-5")
+                round_number=3
+                ;;
+              *)
+                echo "❌ جدول تشغيل غير معروف"
+                exit 1
+                ;;
+            esac
+          fi
+
+          failures=0
+          successes=0
+
+          case "${round_number}" in
+            1)
+              symbols=(
+                "AMZN"
+                "AAPL"
+                "MSFT"
+                "QQQ"
+                "PLTR"
+                "ORCL"
+                "COIN"
+                "INTC"
+                "SMCI"
+                "DIS"
+                "BA"
+                "DDOG"
+                "ZS"
+                "ANET"
+                "RBLX"
+                "DECK"
+                "BKNG"
+                "GE"
+                "CMI"
+                "VRTX"
+                "ABBV"
+                "ADSK"
+                "CB"
+                "CME"
+                "MSCI"
+                "RSG"
+                "FAST"
+                "FERG"
+                "KLAC"
+                "CDNS"
+                "MCHP"
+                "HCA"
+                "HUM"
+                "GD"
+                "HON"
+                "ROK"
+                "DHI"
+                "LOW"
+                "ORLY"
+              )
+              ;;
+            2)
+              symbols=(
+                "NVDA"
+                "META"
+                "AVGO"
+                "SPY"
+                "NFLX"
+                "JPM"
+                "SHOP"
+                "QCOM"
+                "SNOW"
+                "PYPL"
+                "TTD"
+                "NET"
+                "MDB"
+                "APP"
+                "TTWO"
+                "ONON"
+                "DE"
+                "ETN"
+                "TT"
+                "REGN"
+                "ISRG"
+                "ADP"
+                "MMC"
+                "SPGI"
+                "AON"
+                "WM"
+                "ODFL"
+                "XYL"
+                "LRCX"
+                "SNPS"
+                "FICO"
+                "ELV"
+                "CNC"
+                "LMT"
+                "EMR"
+                "JCI"
+                "PHM"
+                "TJX"
+                "ROST"
+              )
+              ;;
+            3)
+              symbols=(
+                "AMD"
+                "MSTR"
+                "TSLA"
+                "GOOGL"
+                "CRM"
+                "BAC"
+                "MU"
+                "ARM"
+                "UBER"
+                "XOM"
+                "CRWD"
+                "PANW"
+                "TEAM"
+                "HOOD"
+                "EA"
+                "ABNB"
+                "CAT"
+                "PH"
+                "LULU"
+                "MRK"
+                "INTU"
+                "PAYX"
+                "ICE"
+                "MCO"
+                "AJG"
+                "URI"
+                "CPRT"
+                "VRT"
+                "APH"
+                "NXPI"
+                "AXON"
+                "CI"
+                "NOC"
+                "RTX"
+                "ITW"
+                "LEN"
+                "NVR"
+                "CMG"
+                "GWW"
+              )
+              ;;
+            4)
+              symbols=(
+                "OXY"
+                "SLB"
+                "CVX"
+                "COP"
+                "MPC"
+                "FCX"
+                "NEM"
+                "AA"
+                "NUE"
+                "CEG"
+                "VST"
+                "NEE"
+                "PLD"
+                "AMT"
+                "EQIX"
+                "SPG"
+                "WMT"
+                "COST"
+                "TGT"
+                "PM"
+                "LLY"
+                "UNH"
+                "PFE"
+                "CVS"
+                "AMGN"
+                "SOFI"
+                "AFRM"
+                "C"
+                "WFC"
+                "GS"
+                "SCHW"
+                "NKE"
+                "SBUX"
+                "CCL"
+                "RCL"
+                "UAL"
+                "DAL"
+                "RDDT"
+                "SNAP"
+                "DELL"
+              )
+              ;;
+            *)
+              echo "Invalid round: ${round_number}"
+              exit 1
+              ;;
+          esac
+
+          echo "Round: ${round_number}"
+          echo "Symbols: ${#symbols[@]}"
+
+          # المحركان الأول والثاني يعملان على جميع الدوائر دائمًا.
+          #
+          # محرك قرار البوتات ينتقل بين الدوائر كل 15 دقيقة:
+          # دورة 1 → الدائرة الأولى
+          # دورة 2 → الدائرة الثانية
+          # دورة 3 → الدائرة الثالثة
+          # دورة 4 → الدائرة الرابعة
+          #
+          # في التشغيل اليدوي، الدائرة المختارة تمر على المحركات الثلاثة.
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            bot_engine_round="${round_number}"
+          else
+            cycle_index=$(( $(date +%s) / 900 ))
+            bot_engine_round=$(( cycle_index % 4 + 1 ))
+          fi
+
+          echo "دائرة محرك قرار البوتات في هذه الدورة: ${bot_engine_round}"
+
+          echo "===== جلب الرموز المستبعدة قبل البحث ====="
+
+          blocked_file="/tmp/blocked-symbols.json"
+
+          blocked_http_code=$(
+            curl \
+              --silent \
+              --show-error \
+              --location \
+              --connect-timeout 8 \
+              --max-time 40 \
+              --output "${blocked_file}" \
+              --write-out "%{http_code}" \
+              --header "Authorization: Bearer ${DECISION_SCAN_SECRET}" \
+              "${BASE_URL}/api/bot-decision/blocked-symbols" \
+              || printf "000"
+          )
+
+          blocked_http_code="${blocked_http_code: -3}"
+
+          declare -A blocked_symbol_map=()
+
+          if [ "${blocked_http_code}" = "200" ]; then
+            while IFS= read -r blocked_symbol; do
+              if [ -n "${blocked_symbol}" ]; then
+                blocked_symbol_map["${blocked_symbol}"]=1
+              fi
+            done < <(
+              python3 - "${blocked_file}" <<'PYBLOCKED'
+import json
+import sys
+
+path = sys.argv[1]
+
+try:
+    with open(path, "r", encoding="utf-8") as file:
+        payload = json.load(file)
+
+    for symbol in payload.get("symbols", []):
+        symbol = str(symbol).strip().upper()
+        if symbol:
+            print(symbol)
+except Exception as error:
+    print(
+        f"تعذر قراءة الرموز المستبعدة: {error}",
+        file=sys.stderr,
+    )
+PYBLOCKED
+            )
+
+            echo "عدد الرموز المستبعدة: ${#blocked_symbol_map[@]}"
+          else
+            echo "⚠️ تعذر جلب الرموز المستبعدة: HTTP ${blocked_http_code}"
+            head -c 700 "${blocked_file}" 2>/dev/null || true
+            echo
+            echo "سيستمر البحث مع بقاء حماية منع التكرار داخل المحرك."
+          fi
+
+          for symbol in "${symbols[@]}"; do
+            if [ -n "${blocked_symbol_map[$symbol]:-}" ]; then
+              echo "⏭️ ${symbol} — مستبعد قبل البحث لوجود مراقبة أو صفقة مفتوحة"
+              continue
+            fi
+            echo "===== ${symbol} ====="
+
+            response_file="/tmp/${symbol}.json"
+
+            symbol_failed=0
+
+            # تم إيقاف المحركين A و D.
+            # يعمل محرك C فقط من خلال Bot Decision.
+            if [ "${round_number}" = "${bot_engine_round}" ]; then
+              echo "محرك قرار البوتات: ${symbol}"
+
+              bot_response_file="/tmp/${symbol}-bot-decision.json"
+
+              bot_http_code=$(
+                curl \
+                  --silent \
+                  --show-error \
+                  --location \
+                  --connect-timeout 8 \
+                  --max-time 240 \
+                  --output "${bot_response_file}" \
+                  --write-out "%{http_code}" \
+                  --header "Authorization: Bearer ${DECISION_SCAN_SECRET}" \
+                  "${BASE_URL}/api/bot-decision/${symbol}?mode=auto" \
+                  || printf "000"
+              )
+
+              bot_http_code="${bot_http_code: -3}"
+
+              if [ "${bot_http_code}" = "200" ]; then
+                echo "✅ ${symbol} — محرك قرار البوتات"
+                echo "===== نتيجة محرك قرار البوتات ====="
+                head -c 1200 "${bot_response_file}" 2>/dev/null || true
+                echo
+              else
+                echo "⚠️ ${symbol} — محرك قرار البوتات: HTTP ${bot_http_code}"
+                head -c 700 "${bot_response_file}" 2>/dev/null || true
+                echo
+                symbol_failed=1
+              fi
+            else
+              echo "⏭️ ${symbol} — محرك قرار البوتات مخصص لدائرة ${bot_engine_round} في هذه الدورة"
+            fi
+
+            if [ "${symbol_failed}" -eq 0 ]; then
+              successes=$((successes + 1))
+            else
+              failures=$((failures + 1))
+            fi
+
+            sleep 2
+          done
+
+          echo "Successes: ${successes}"
+          echo "Failures: ${failures}"
+
+          echo "===== متابعة فرص محرك قرار البوتات ====="
+
+          monitor_file="/tmp/bot-decision-monitor.json"
+
+          monitor_code=$(
+            curl \
+              --silent \
+              --show-error \
+              --location \
+              --connect-timeout 8 \
+              --max-time 240 \
+              --output "${monitor_file}" \
+              --write-out "%{http_code}" \
+              --header "Authorization: Bearer ${DECISION_SCAN_SECRET}" \
+              "${BASE_URL}/api/bot-decision/monitor" \
+              || printf "000"
+          )
+
+          monitor_code="${monitor_code: -3}"
+
+          if [ "${monitor_code}" = "200" ]; then
+            echo "✅ تمت متابعة فرص المراقبة"
+            echo "===== نتيجة متابعة المراقبة ====="
+            head -c 1200 "${monitor_file}" 2>/dev/null || true
+            echo
+          else
+            echo "⚠️ فشل مسار المتابعة: HTTP ${monitor_code}"
+            head -c 700 "${monitor_file}" 2>/dev/null || true
+            echo
+          fi
+
+          if [ "${failures}" -gt 8 ]; then
+            exit 1
+          fi

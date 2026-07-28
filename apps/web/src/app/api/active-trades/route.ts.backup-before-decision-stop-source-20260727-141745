@@ -658,230 +658,11 @@ function activeTradeNumber(
     : 0;
 }
 
-type NewYorkDateTimeParts = {
-  year: number;
-  month: number;
-  day: number;
-  hour: number;
-  minute: number;
-};
-
-function getNewYorkDateTimeParts(
-  timestampMs: number
-): NewYorkDateTimeParts | null {
-  if (
-    !Number.isFinite(timestampMs) ||
-    timestampMs <= 0
-  ) {
-    return null;
-  }
-
-  const parts =
-    new Intl.DateTimeFormat(
-      "en-US",
-      {
-        timeZone:
-          "America/New_York",
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
-        hourCycle: "h23",
-      }
-    ).formatToParts(
-      new Date(timestampMs)
-    );
-
-  const values =
-    Object.fromEntries(
-      parts.map(
-        (part) => [
-          part.type,
-          part.value,
-        ]
-      )
-    );
-
-  const result = {
-    year: Number(values.year),
-    month: Number(values.month),
-    day: Number(values.day),
-    hour: Number(values.hour),
-    minute: Number(values.minute),
-  };
-
-  return Object.values(
-    result
-  ).every(Number.isFinite)
-    ? result
-    : null;
-}
-
-function normalizeMassiveTimestampMs(
-  value: unknown
-) {
-  const timestamp =
-    Number(value);
-
-  if (
-    !Number.isFinite(timestamp) ||
-    timestamp <= 0
-  ) {
-    return 0;
-  }
-
-  /*
-    Massive قد يعيد الوقت:
-    - نانوثانية
-    - ميكروثانية
-    - مللي ثانية
-    - ثانية
-  */
-  if (timestamp >= 1e17) {
-    return Math.floor(
-      timestamp / 1e6
-    );
-  }
-
-  if (timestamp >= 1e14) {
-    return Math.floor(
-      timestamp / 1e3
-    );
-  }
-
-  if (timestamp >= 1e12) {
-    return Math.floor(
-      timestamp
-    );
-  }
-
-  return Math.floor(
-    timestamp * 1000
-  );
-}
-
-function isCurrentRegularSessionTimestamp(
-  timestampMs: number
-) {
-  const quoteTime =
-    getNewYorkDateTimeParts(
-      timestampMs
-    );
-
-  const nowTime =
-    getNewYorkDateTimeParts(
-      Date.now()
-    );
-
-  if (!quoteTime || !nowTime) {
-    return false;
-  }
-
-  const sameSessionDate =
-    quoteTime.year ===
-      nowTime.year &&
-    quoteTime.month ===
-      nowTime.month &&
-    quoteTime.day ===
-      nowTime.day;
-
-  const quoteMinutes =
-    quoteTime.hour * 60 +
-    quoteTime.minute;
-
-  const regularOpenMinutes =
-    9 * 60 + 30;
-
-  const regularCloseMinutes =
-    16 * 60;
-
-  return (
-    sameSessionDate &&
-    quoteMinutes >=
-      regularOpenMinutes &&
-    quoteMinutes <
-      regularCloseMinutes
-  );
-}
-
-async function isRegularMarketOpen(
-  apiKey: string
-) {
-  try {
-    const response =
-      await fetch(
-        "https://api.massive.com/v1/marketstatus/now",
-        {
-          headers: {
-            Authorization:
-              `Bearer ${apiKey}`,
-            Accept:
-              "application/json",
-          },
-          cache: "no-store",
-        }
-      );
-
-    if (!response.ok) {
-      /*
-        عند تعذر معرفة حالة السوق:
-        نتجمّد احترازيًا بدل تحديث
-        الصفقات بسعر غير موثوق.
-      */
-      return false;
-    }
-
-    const payload =
-      activeTradeRecord(
-        await response.json()
-      );
-
-    const exchanges =
-      activeTradeRecord(
-        payload.exchanges
-      );
-
-    const market =
-      String(
-        payload.market || ""
-      )
-        .trim()
-        .toLowerCase();
-
-    const nyse =
-      String(
-        exchanges.nyse || ""
-      )
-        .trim()
-        .toLowerCase();
-
-    const nasdaq =
-      String(
-        exchanges.nasdaq || ""
-      )
-        .trim()
-        .toLowerCase();
-
-    return (
-      market === "open" ||
-      nyse === "open" ||
-      nasdaq === "open"
-    );
-  } catch {
-    return false;
-  }
-}
-
 async function fetchMassiveContractLivePrice(
   symbol: string,
   contractTicker: string,
   apiKey: string
-): Promise<
-  MassiveContractLivePrice & {
-    marketDataAtMs: number;
-  }
-> {
+): Promise<MassiveContractLivePrice> {
   const url =
     `https://api.massive.com/v3/snapshot/options/` +
     `${encodeURIComponent(symbol)}/` +
@@ -939,26 +720,6 @@ async function fetchMassiveContractLivePrice(
       trade.price
     );
 
-  const quoteTimestampMs =
-    normalizeMassiveTimestampMs(
-      quote.sip_timestamp ||
-      quote.participant_timestamp ||
-      quote.timestamp
-    );
-
-  const tradeTimestampMs =
-    normalizeMassiveTimestampMs(
-      trade.sip_timestamp ||
-      trade.participant_timestamp ||
-      trade.timestamp
-    );
-
-  const marketDataAtMs =
-    Math.max(
-      quoteTimestampMs,
-      tradeTimestampMs
-    );
-
   const calculatedMidpoint =
     bid > 0 && ask > 0
       ? (bid + ask) / 2
@@ -988,13 +749,7 @@ async function fetchMassiveContractLivePrice(
         underlying.price
       ),
     quoteAt:
-      marketDataAtMs > 0
-        ? new Date(
-            marketDataAtMs
-          ).toISOString()
-        : new Date().toISOString(),
-
-    marketDataAtMs,
+      new Date().toISOString(),
   };
 }
 
@@ -1011,18 +766,6 @@ if (!massiveApiKey) {
     "متغير MASSIVE_API_KEY غير موجود"
   );
 }
-
-/*
-  الصفقات تتجمّد بالكامل خارج
-  الجلسة الرسمية الأمريكية.
-
-  PRE_MARKET و AFTER_HOURS و CLOSED
-  لا تحدث السعر أو الربح أو الأعلى.
-*/
-const regularMarketOpen =
-  await isRegularMarketOpen(
-    massiveApiKey
-  );
 
     const {
       data,
@@ -1096,26 +839,6 @@ const regularMarketOpen =
           return rawRow;
         }
 
-        /*
-          بعد اعتماد الوقف النهائي من بوت القرار،
-          تتجمّد بيانات العقد عند سعر الإغلاق المحفوظ.
-          لا نطلب سعرًا حيًا ولا نعيد حساب الربح والخسارة.
-        */
-        if (
-          savedStatus === "STOPPED" ||
-          savedContractStatus === "STOPPED"
-        ) {
-          return rawRow;
-        }
-
-        /*
-          لا نجلب أي سعر ولا نكتب أي تحديث
-          خارج جلسة السوق الرسمية.
-        */
-        if (!regularMarketOpen) {
-          return rawRow;
-        }
-
         try {
           const live =
             await fetchMassiveContractLivePrice(
@@ -1123,22 +846,6 @@ const regularMarketOpen =
               contractTicker,
               massiveApiKey
             );
-
-          /*
-            عند افتتاح السوق قد يعيد Massive
-            آخر Quote أو Trade من جلسة أمس.
-
-            لذلك لا نفك تجميد الصفقة حتى تصل
-            أول بيانات فعلية من جلسة اليوم
-            بعد 09:30 بتوقيت نيويورك.
-          */
-          if (
-            !isCurrentRegularSessionTimestamp(
-              live.marketDataAtMs
-            )
-          ) {
-            return rawRow;
-          }
 
           const gammaSnapshot =
             activeTradeRecord(
@@ -1245,12 +952,16 @@ const regularMarketOpen =
               row.stop_price
             );
 
-          /*
-            صفقة بوت القرار لا تُغلق محليًا من الموقع.
-            بوت القرار هو مصدر الحقيقة للوقف النهائي،
-            ويحدّث contract_status عند اعتماد الوقف.
-          */
-          const stopped = false;
+          const stopped =
+            stopPrice > 0 &&
+            stockPrice > 0 &&
+            (side === "CALL"
+              ? stockPrice <=
+                stopPrice
+              : side === "PUT"
+                ? stockPrice >=
+                  stopPrice
+                : false);
 
           const nowIso =
             live.quoteAt;
