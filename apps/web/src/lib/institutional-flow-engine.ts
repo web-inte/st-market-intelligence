@@ -62,10 +62,17 @@ export type InstitutionalFlowResult = {
   reasons: string[];
 };
 
-const SWEEP_WINDOW_MS = 3_000;
+/*
+ * نافذة أوسع لالتقاط التنفيذات المؤسسية المتتابعة
+ * التي قد تتوزع على عدة ثوانٍ بدل وصولها خلال 3 ثوانٍ فقط.
+ *
+ * شروط الحفظ النهائية في ماسح الحيتان لم تتغير:
+ * ASK + فتح مركز مرجح + Score >= 75.
+ */
+const SWEEP_WINDOW_MS = 15_000;
 const SWEEP_MIN_TRADES = 2;
-const SWEEP_MIN_PREMIUM = 150_000;
-const BLOCK_MIN_PREMIUM = 250_000;
+const SWEEP_MIN_PREMIUM = 100_000;
+const BLOCK_MIN_PREMIUM = 150_000;
 
 function clamp(
   value: number,
