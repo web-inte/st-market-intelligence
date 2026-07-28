@@ -5,6 +5,7 @@ import {
   CrosshairMode,
   LineStyle,
   CandlestickSeries,
+  LineSeries,
   createChart,
   type IChartApi,
   type IPriceLine,
@@ -590,6 +591,13 @@ type PatternCategory =
   | "CLASSIC"
   | "CANDLESTICK";
 
+type PatternPoint = {
+  price:
+    number | null;
+  time:
+    string | null;
+};
+
 type DetectedPattern = {
   id: string;
   name: string;
@@ -617,6 +625,19 @@ type DetectedPattern = {
     number | null;
   endPrice:
     number | null;
+
+  startTime:
+    string | null;
+  endTime:
+    string | null;
+
+  points: {
+    a: PatternPoint;
+    b: PatternPoint;
+    c: PatternPoint;
+    d: PatternPoint;
+    e: PatternPoint;
+  };
 };
 
 type PatternsResponse = {
@@ -642,6 +663,966 @@ type PatternsResponse = {
   cached: boolean;
   error?: string;
 };
+
+type PatternChartCandle =
+  ChartCandle & {
+    color?: string;
+    borderColor?: string;
+    wickColor?: string;
+  };
+
+function isoTimeToSeconds(
+  value:
+    string | null
+) {
+  if (!value) {
+    return null;
+  }
+
+  const milliseconds =
+    new Date(value).getTime();
+
+  if (
+    !Number.isFinite(
+      milliseconds
+    )
+  ) {
+    return null;
+  }
+
+  return Math.floor(
+    milliseconds / 1000
+  );
+}
+
+/*
+ * تلوين شموع نماذج الشموع فقط.
+ *
+ * لا نلوّن النماذج الكلاسيكية هنا؛
+ * لأنها ستُرسم لاحقًا بخطوط وحدود مستقلة.
+ */
+function candleBody(
+  candle:
+    ChartCandle
+) {
+  return Math.abs(
+    candle.close -
+    candle.open
+  );
+}
+
+function candleRange(
+  candle:
+    ChartCandle
+) {
+  return Math.max(
+    0.000001,
+    candle.high -
+    candle.low
+  );
+}
+
+function upperWick(
+  candle:
+    ChartCandle
+) {
+  return (
+    candle.high -
+    Math.max(
+      candle.open,
+      candle.close
+    )
+  );
+}
+
+function lowerWick(
+  candle:
+    ChartCandle
+) {
+  return (
+    Math.min(
+      candle.open,
+      candle.close
+    ) -
+    candle.low
+  );
+}
+
+function isBullishCandle(
+  candle:
+    ChartCandle
+) {
+  return (
+    candle.close >
+    candle.open
+  );
+}
+
+function isBearishCandle(
+  candle:
+    ChartCandle
+) {
+  return (
+    candle.close <
+    candle.open
+  );
+}
+
+function isStrongBody(
+  candle:
+    ChartCandle
+) {
+  return (
+    candleBody(candle) /
+      candleRange(candle) >=
+    0.55
+  );
+}
+
+function hasDowntrendBefore(
+  candles:
+    ChartCandle[],
+  startIndex:
+    number
+) {
+  const previous =
+    candles.slice(
+      Math.max(
+        0,
+        startIndex - 4
+      ),
+      startIndex
+    );
+
+  if (
+    previous.length < 3
+  ) {
+    return false;
+  }
+
+  return (
+    previous[
+      previous.length - 1
+    ].close <
+      previous[0].close &&
+    previous.filter(
+      (
+        candle,
+        index
+      ) =>
+        index === 0 ||
+        candle.close <
+          previous[
+            index - 1
+          ].close
+    ).length >= 3
+  );
+}
+
+function hasUptrendBefore(
+  candles:
+    ChartCandle[],
+  startIndex:
+    number
+) {
+  const previous =
+    candles.slice(
+      Math.max(
+        0,
+        startIndex - 4
+      ),
+      startIndex
+    );
+
+  if (
+    previous.length < 3
+  ) {
+    return false;
+  }
+
+  return (
+    previous[
+      previous.length - 1
+    ].close >
+      previous[0].close &&
+    previous.filter(
+      (
+        candle,
+        index
+      ) =>
+        index === 0 ||
+        candle.close >
+          previous[
+            index - 1
+          ].close
+    ).length >= 3
+  );
+}
+
+function candlestickPatternLength(
+  name:
+    string
+) {
+  if (
+    [
+      "morning star",
+      "evening star",
+      "three white soldiers",
+      "three black crows",
+      "three inside up",
+      "three inside down",
+      "two black gapping",
+    ].includes(name)
+  ) {
+    return 3;
+  }
+
+  if (
+    [
+      "bullish engulfing",
+      "bearish engulfing",
+      "dark cloud cover",
+      "piercing pattern",
+      "bullish harami",
+      "bearish harami",
+    ].includes(name)
+  ) {
+    return 2;
+  }
+
+  return 1;
+}
+
+function findPatternEndIndex(
+  pattern:
+    DetectedPattern,
+  candles:
+    ChartCandle[],
+  intervalMinutes:
+    number
+) {
+  const timestamp =
+    isoTimeToSeconds(
+      pattern.endTime ||
+      pattern.detectedAt
+    );
+
+  if (
+    timestamp === null ||
+    candles.length === 0
+  ) {
+    return -1;
+  }
+
+  const tolerance =
+    Math.max(
+      60,
+      intervalMinutes * 60
+    );
+
+  let bestIndex = -1;
+  let bestDistance =
+    Number.POSITIVE_INFINITY;
+
+  candles.forEach(
+    (
+      candle,
+      index
+    ) => {
+      const distance =
+        Math.abs(
+          Number(candle.time) -
+          timestamp
+        );
+
+      if (
+        distance <
+        bestDistance
+      ) {
+        bestDistance =
+          distance;
+        bestIndex =
+          index;
+      }
+    }
+  );
+
+  return (
+    bestDistance <=
+    tolerance * 1.5
+  )
+    ? bestIndex
+    : -1;
+}
+
+/*
+ * التحقق النهائي من نموذج الشموع.
+ *
+ * Finnhub يرشح اسم النموذج فقط،
+ * أما القبول النهائي فيعتمد على:
+ * - اتجاه الحركة السابقة.
+ * - نسب الجسم والظلال.
+ * - ترتيب الشموع.
+ * - الابتلاع أو الفجوة الحقيقية.
+ */
+function validateCandlestickPattern(
+  pattern:
+    DetectedPattern,
+  candles:
+    ChartCandle[],
+  intervalMinutes:
+    number
+) {
+  if (
+    pattern.category !==
+    "CANDLESTICK"
+  ) {
+    return false;
+  }
+
+  const endIndex =
+    findPatternEndIndex(
+      pattern,
+      candles,
+      intervalMinutes
+    );
+
+  if (
+    endIndex < 0
+  ) {
+    return false;
+  }
+
+  const length =
+    candlestickPatternLength(
+      pattern.name
+    );
+
+  const startIndex =
+    endIndex -
+    length +
+    1;
+
+  if (
+    startIndex < 0
+  ) {
+    return false;
+  }
+
+  const rows =
+    candles.slice(
+      startIndex,
+      endIndex + 1
+    );
+
+  if (
+    rows.length !== length
+  ) {
+    return false;
+  }
+
+  const first =
+    rows[0];
+
+  const second =
+    rows[1];
+
+  const third =
+    rows[2];
+
+  const downtrend =
+    hasDowntrendBefore(
+      candles,
+      startIndex
+    );
+
+  const uptrend =
+    hasUptrendBefore(
+      candles,
+      startIndex
+    );
+
+  switch (
+    pattern.name
+  ) {
+    case "bullish engulfing":
+      return Boolean(
+        downtrend &&
+        second &&
+        isBearishCandle(first) &&
+        isBullishCandle(second) &&
+        second.open <=
+          first.close &&
+        second.close >=
+          first.open &&
+        candleBody(second) >
+          candleBody(first) &&
+        isStrongBody(second)
+      );
+
+    case "bearish engulfing":
+      return Boolean(
+        uptrend &&
+        second &&
+        isBullishCandle(first) &&
+        isBearishCandle(second) &&
+        second.open >=
+          first.close &&
+        second.close <=
+          first.open &&
+        candleBody(second) >
+          candleBody(first) &&
+        isStrongBody(second)
+      );
+
+    case "hammer":
+      return (
+        downtrend &&
+        lowerWick(first) >=
+          candleBody(first) *
+            2 &&
+        upperWick(first) <=
+          candleBody(first) *
+            0.6 &&
+        candleBody(first) /
+          candleRange(first) <=
+          0.4
+      );
+
+    case "inverted hammer":
+      return (
+        downtrend &&
+        upperWick(first) >=
+          candleBody(first) *
+            2 &&
+        lowerWick(first) <=
+          candleBody(first) *
+            0.6 &&
+        candleBody(first) /
+          candleRange(first) <=
+          0.4
+      );
+
+    case "hanging man":
+      return (
+        uptrend &&
+        lowerWick(first) >=
+          candleBody(first) *
+            2 &&
+        upperWick(first) <=
+          candleBody(first) *
+            0.6 &&
+        candleBody(first) /
+          candleRange(first) <=
+          0.4
+      );
+
+    case "shooting star":
+      return (
+        uptrend &&
+        upperWick(first) >=
+          candleBody(first) *
+            2 &&
+        lowerWick(first) <=
+          candleBody(first) *
+            0.6 &&
+        candleBody(first) /
+          candleRange(first) <=
+          0.4
+      );
+
+    case "morning star":
+      return Boolean(
+        downtrend &&
+        second &&
+        third &&
+        isBearishCandle(first) &&
+        isStrongBody(first) &&
+        candleBody(second) <=
+          candleBody(first) *
+            0.45 &&
+        isBullishCandle(third) &&
+        isStrongBody(third) &&
+        third.close >=
+          (
+            first.open +
+            first.close
+          ) / 2
+      );
+
+    case "evening star":
+      return Boolean(
+        uptrend &&
+        second &&
+        third &&
+        isBullishCandle(first) &&
+        isStrongBody(first) &&
+        candleBody(second) <=
+          candleBody(first) *
+            0.45 &&
+        isBearishCandle(third) &&
+        isStrongBody(third) &&
+        third.close <=
+          (
+            first.open +
+            first.close
+          ) / 2
+      );
+
+    case "three white soldiers":
+      return Boolean(
+        downtrend &&
+        second &&
+        third &&
+        rows.every(
+          isBullishCandle
+        ) &&
+        rows.every(
+          isStrongBody
+        ) &&
+        second.close >
+          first.close &&
+        third.close >
+          second.close &&
+        second.open >
+          first.open &&
+        second.open <
+          first.close &&
+        third.open >
+          second.open &&
+        third.open <
+          second.close
+      );
+
+    case "three black crows":
+      return Boolean(
+        uptrend &&
+        second &&
+        third &&
+        rows.every(
+          isBearishCandle
+        ) &&
+        rows.every(
+          isStrongBody
+        ) &&
+        second.close <
+          first.close &&
+        third.close <
+          second.close &&
+        second.open <
+          first.open &&
+        second.open >
+          first.close &&
+        third.open <
+          second.open &&
+        third.open >
+          second.close
+      );
+
+    case "dark cloud cover":
+      return Boolean(
+        uptrend &&
+        second &&
+        isBullishCandle(first) &&
+        isStrongBody(first) &&
+        isBearishCandle(second) &&
+        second.open >
+          first.close &&
+        second.close <
+          (
+            first.open +
+            first.close
+          ) / 2 &&
+        second.close >
+          first.open
+      );
+
+    case "piercing pattern":
+      return Boolean(
+        downtrend &&
+        second &&
+        isBearishCandle(first) &&
+        isStrongBody(first) &&
+        isBullishCandle(second) &&
+        second.open <
+          first.close &&
+        second.close >
+          (
+            first.open +
+            first.close
+          ) / 2 &&
+        second.close <
+          first.open
+      );
+
+    case "bullish harami":
+      return Boolean(
+        downtrend &&
+        second &&
+        isBearishCandle(first) &&
+        isStrongBody(first) &&
+        candleBody(second) <=
+          candleBody(first) *
+            0.55 &&
+        Math.max(
+          second.open,
+          second.close
+        ) <
+          first.open &&
+        Math.min(
+          second.open,
+          second.close
+        ) >
+          first.close
+      );
+
+    case "bearish harami":
+      return Boolean(
+        uptrend &&
+        second &&
+        isBullishCandle(first) &&
+        isStrongBody(first) &&
+        candleBody(second) <=
+          candleBody(first) *
+            0.55 &&
+        Math.max(
+          second.open,
+          second.close
+        ) <
+          first.close &&
+        Math.min(
+          second.open,
+          second.close
+        ) >
+          first.open
+      );
+
+    case "three inside up":
+      return Boolean(
+        downtrend &&
+        second &&
+        third &&
+        isBearishCandle(first) &&
+        isStrongBody(first) &&
+        candleBody(second) <=
+          candleBody(first) *
+            0.55 &&
+        Math.max(
+          second.open,
+          second.close
+        ) <
+          first.open &&
+        Math.min(
+          second.open,
+          second.close
+        ) >
+          first.close &&
+        isBullishCandle(third) &&
+        third.close >
+          first.open
+      );
+
+    case "three inside down":
+      return Boolean(
+        uptrend &&
+        second &&
+        third &&
+        isBullishCandle(first) &&
+        isStrongBody(first) &&
+        candleBody(second) <=
+          candleBody(first) *
+            0.55 &&
+        Math.max(
+          second.open,
+          second.close
+        ) <
+          first.close &&
+        Math.min(
+          second.open,
+          second.close
+        ) >
+          first.open &&
+        isBearishCandle(third) &&
+        third.close <
+          first.open
+      );
+
+    case "two black gapping":
+      return Boolean(
+        uptrend &&
+        second &&
+        third &&
+        isBearishCandle(second) &&
+        isBearishCandle(third) &&
+        isStrongBody(second) &&
+        isStrongBody(third) &&
+        /*
+         * فجوة هبوط حقيقية:
+         * أعلى الشمعة الثانية أسفل
+         * أدنى الشمعة السابقة بالكامل.
+         */
+        second.high <
+          first.low &&
+        third.close <
+          second.close &&
+        third.high <=
+          second.high
+      );
+
+    default:
+      return false;
+  }
+}
+
+function getValidatedCandlestickPatterns(
+  patternsData:
+    PatternsResponse | null,
+  candles:
+    ChartCandle[],
+  intervalMinutes:
+    number
+) {
+  if (
+    !patternsData ||
+    candles.length === 0
+  ) {
+    return [];
+  }
+
+  return patternsData
+    .candlestickPatterns
+    .filter(
+      (pattern) =>
+        validateCandlestickPattern(
+          pattern,
+          candles,
+          intervalMinutes
+        )
+    )
+    /*
+     * يظهر أحدث نموذج صحيح فقط.
+     */
+    .sort(
+      (
+        first,
+        second
+      ) =>
+        (
+          isoTimeToSeconds(
+            second.endTime ||
+            second.detectedAt
+          ) || 0
+        ) -
+        (
+          isoTimeToSeconds(
+            first.endTime ||
+            first.detectedAt
+          ) || 0
+        )
+    )
+    .slice(0, 1);
+}
+
+function highlightCandlestickPatternCandles(
+  candles:
+    ChartCandle[],
+  patternsData:
+    PatternsResponse | null,
+  enabled:
+    boolean,
+  fallbackIntervalMinutes:
+    number
+): PatternChartCandle[] {
+  if (
+    !enabled ||
+    !patternsData ||
+    candles.length === 0
+  ) {
+    return candles.map(
+      (candle) => ({
+        ...candle,
+      })
+    );
+  }
+
+  const highlightedTimes =
+    new Set<number>();
+
+  const fallbackSeconds =
+    Math.max(
+      60,
+      fallbackIntervalMinutes *
+        60
+    );
+
+  const validatedPatterns =
+    getValidatedCandlestickPatterns(
+      patternsData,
+      candles,
+      fallbackIntervalMinutes
+    );
+
+  for (
+    const pattern of
+      validatedPatterns
+  ) {
+    let start =
+      isoTimeToSeconds(
+        pattern.startTime
+      );
+
+    let end =
+      isoTimeToSeconds(
+        pattern.endTime
+      );
+
+    const detected =
+      isoTimeToSeconds(
+        pattern.detectedAt
+      );
+
+    if (
+      start === null &&
+      detected !== null
+    ) {
+      /*
+       * عند غياب بداية النموذج نلوّن
+       * شمعة الاكتشاف فقط، ولا نرجع
+       * تلقائيًا إلى شمعة أقدم.
+       */
+      start = detected;
+    }
+
+    if (
+      end === null &&
+      detected !== null
+    ) {
+      end = detected;
+    }
+
+    if (
+      start === null ||
+      end === null
+    ) {
+      continue;
+    }
+
+    /*
+     * نحول أوقات المزود إلى بداية شمعة
+     * الفريم نفسها؛ وبذلك لا نلوّن شمعة
+     * أقدم أو أحدث بالخطأ.
+     */
+    const rangeStart =
+      Math.floor(
+        Math.min(
+          start,
+          end
+        ) /
+          fallbackSeconds
+      ) *
+      fallbackSeconds;
+
+    const rangeEnd =
+      Math.floor(
+        Math.max(
+          start,
+          end
+        ) /
+          fallbackSeconds
+      ) *
+      fallbackSeconds;
+
+    for (
+      const candle of candles
+    ) {
+      const candleTime =
+        Number(candle.time);
+
+      if (
+        candleTime >=
+          rangeStart &&
+        candleTime <=
+          rangeEnd
+      ) {
+        highlightedTimes.add(
+          candleTime
+        );
+      }
+    }
+  }
+
+  return candles.map(
+    (candle) => {
+      if (
+        !highlightedTimes.has(
+          Number(candle.time)
+        )
+      ) {
+        return {
+          ...candle,
+        };
+      }
+
+      return {
+        ...candle,
+
+        /*
+         * لون ذهبي واضح للنموذج المكتشف.
+         */
+        color:
+          "#facc15",
+        borderColor:
+          "#fde047",
+        wickColor:
+          "#fef08a",
+      };
+    }
+  );
+}
+
+function nearestChartCandleTime(
+  timestamp:
+    number,
+  candles:
+    ChartCandle[],
+  toleranceSeconds:
+    number
+): UTCTimestamp | null {
+  let nearest:
+    ChartCandle | null = null;
+
+  let nearestDistance =
+    Number.POSITIVE_INFINITY;
+
+  for (
+    const candle of candles
+  ) {
+    const distance =
+      Math.abs(
+        Number(candle.time) -
+          timestamp
+      );
+
+    if (
+      distance <
+      nearestDistance
+    ) {
+      nearest = candle;
+      nearestDistance =
+        distance;
+    }
+  }
+
+  if (
+    !nearest ||
+    nearestDistance >
+      toleranceSeconds
+  ) {
+    return null;
+  }
+
+  return nearest.time;
+}
 
 const CLASSIC_PATTERNS_STORAGE_KEY =
   "st_market_show_classic_patterns";
@@ -687,30 +1668,247 @@ function patternDirectionClasses(
   return "border-amber-400/25 bg-amber-400/[0.08] text-amber-300";
 }
 
-function patternStatusLabel(
+type PatternLifecycleStatus =
+  | "WAITING"
+  | "ACTIVE"
+  | "TARGET_1"
+  | "TARGET_2"
+  | "FAILED";
+
+function patternLifecycleLabel(
   status:
-    PatternStatus
+    PatternLifecycleStatus
 ) {
   if (
-    status === "COMPLETE"
+    status === "ACTIVE"
   ) {
-    return "مكتمل";
+    return "تم تفعيل النموذج";
   }
 
-  return "قيد التكوين";
+  if (
+    status === "TARGET_1"
+  ) {
+    return "تم تحقيق الهدف الأول";
+  }
+
+  if (
+    status === "TARGET_2"
+  ) {
+    return "تم تحقيق جميع الأهداف";
+  }
+
+  if (
+    status === "FAILED"
+  ) {
+    return "فشل النموذج";
+  }
+
+  return "بانتظار الاختراق";
 }
 
-function patternStatusClasses(
+function patternLifecycleClasses(
   status:
-    PatternStatus
+    PatternLifecycleStatus
 ) {
   if (
-    status === "COMPLETE"
+    status === "ACTIVE"
   ) {
     return "border-cyan-400/25 bg-cyan-400/[0.08] text-cyan-300";
   }
 
+  if (
+    status === "TARGET_1"
+  ) {
+    return "border-emerald-400/25 bg-emerald-400/[0.08] text-emerald-300";
+  }
+
+  if (
+    status === "TARGET_2"
+  ) {
+    return "border-green-300/30 bg-green-300/[0.1] text-green-200";
+  }
+
+  if (
+    status === "FAILED"
+  ) {
+    return "border-rose-400/30 bg-rose-400/[0.1] text-rose-300";
+  }
+
   return "border-amber-400/25 bg-amber-400/[0.08] text-amber-300";
+}
+
+/*
+ * حساب دورة حياة النموذج من الشموع الفعلية.
+ *
+ * التفعيل يعتمد على إغلاق شمعة بعد
+ * مستوى الدخول، وليس مجرد لمس لحظي.
+ *
+ * لا نعتبر ضرب الإلغاء فشلًا إلا بعد
+ * تفعيل النموذج.
+ */
+function derivePatternLifecycle(
+  pattern:
+    DetectedPattern,
+  candles:
+    ChartCandle[]
+): PatternLifecycleStatus {
+  const entry =
+    pattern.entry;
+
+  if (
+    entry === null ||
+    !Number.isFinite(
+      entry
+    ) ||
+    entry <= 0
+  ) {
+    return "WAITING";
+  }
+
+  const patternEnd =
+    isoTimeToSeconds(
+      pattern.endTime ||
+      pattern.detectedAt
+    );
+
+  const relevantCandles =
+    candles.filter(
+      (candle) =>
+        patternEnd === null ||
+        Number(candle.time) >=
+          patternEnd
+    );
+
+  if (
+    relevantCandles.length === 0
+  ) {
+    return "WAITING";
+  }
+
+  let activated = false;
+  let target1Reached = false;
+  let target2Reached = false;
+
+  for (
+    const candle of
+      relevantCandles
+  ) {
+    /*
+     * لا يبدأ تتبع الهدف أو الفشل
+     * إلا بعد إغلاق شمعة عبر الدخول.
+     */
+    if (!activated) {
+      if (
+        pattern.direction ===
+          "BULLISH" &&
+        candle.close >= entry
+      ) {
+        activated = true;
+      } else if (
+        pattern.direction ===
+          "BEARISH" &&
+        candle.close <= entry
+      ) {
+        activated = true;
+      } else if (
+        pattern.direction ===
+          "NEUTRAL" &&
+        (
+          candle.high >= entry ||
+          candle.low <= entry
+        )
+      ) {
+        activated = true;
+      }
+
+      if (!activated) {
+        continue;
+      }
+    }
+
+    const target1Hit =
+      pattern.target1 !== null &&
+      (
+        pattern.direction ===
+          "BEARISH"
+          ? candle.low <=
+            pattern.target1
+          : candle.high >=
+            pattern.target1
+      );
+
+    const target2Hit =
+      pattern.target2 !== null &&
+      (
+        pattern.direction ===
+          "BEARISH"
+          ? candle.low <=
+            pattern.target2
+          : candle.high >=
+            pattern.target2
+      );
+
+    const stopHit =
+      pattern.stopLoss !== null &&
+      (
+        pattern.direction ===
+          "BEARISH"
+          ? candle.high >=
+            pattern.stopLoss
+          : candle.low <=
+            pattern.stopLoss
+      );
+
+    /*
+     * إذا لامست الشمعة الوقف والهدف
+     * في الشمعة نفسها ولا نعرف الترتيب
+     * اللحظي، نعتمد النتيجة المحافظة:
+     * الفشل ما لم يكن هدف سابق قد تحقق.
+     */
+    if (
+      stopHit &&
+      !target1Reached &&
+      !target2Reached &&
+      !target1Hit &&
+      !target2Hit
+    ) {
+      return "FAILED";
+    }
+
+    if (target2Hit) {
+      target2Reached = true;
+      target1Reached = true;
+    } else if (target1Hit) {
+      target1Reached = true;
+    }
+
+    /*
+     * إذا تحقق هدف سابق ثم عاد السعر
+     * إلى الإلغاء، نحافظ على إنجاز الهدف
+     * بدل تحويل النتيجة إلى فشل كامل.
+     */
+    if (
+      stopHit &&
+      !target1Reached &&
+      !target2Reached
+    ) {
+      return "FAILED";
+    }
+  }
+
+  if (target2Reached) {
+    return "TARGET_2";
+  }
+
+  if (target1Reached) {
+    return "TARGET_1";
+  }
+
+  if (activated) {
+    return "ACTIVE";
+  }
+
+  return "WAITING";
 }
 
 function formatPatternTime(
@@ -750,9 +1948,12 @@ function priceFormat(
 
 function PatternEducationCard({
   pattern,
+  lifecycleStatus,
 }: {
   pattern:
     DetectedPattern;
+  lifecycleStatus:
+    PatternLifecycleStatus;
 }) {
   return (
     <article className="rounded-2xl border border-white/[0.07] bg-slate-950/60 p-4">
@@ -773,13 +1974,13 @@ function PatternEducationCard({
         <span
           className={[
             "rounded-xl border px-3 py-1.5 text-xs font-black",
-            patternStatusClasses(
-              pattern.status
+            patternLifecycleClasses(
+              lifecycleStatus
             ),
           ].join(" ")}
         >
-          {patternStatusLabel(
-            pattern.status
+          {patternLifecycleLabel(
+            lifecycleStatus
           )}
         </span>
 
@@ -920,6 +2121,25 @@ export default function StockSmartChart({
       null
     );
 
+  /*
+   * نحتفظ بنسخة الشموع الأصلية حتى نستطيع
+   * إضافة أو إزالة تلوين النماذج دون
+   * إعادة طلب بيانات الشموع.
+   */
+  const chartCandlesRef =
+    useRef<
+      ChartCandle[]
+    >([]);
+
+  /*
+   * سلاسل مستقلة لرسم أحدث نموذج
+   * كلاسيكي على الشارت.
+   */
+  const classicPatternSeriesRef =
+    useRef<
+      ISeriesApi<"Line">[]
+    >([]);
+
   const [
     isExpanded,
     setIsExpanded,
@@ -947,6 +2167,16 @@ export default function StockSmartChart({
     setCandlesError,
   ] = useState("");
 
+  /*
+   * refs لا تسبب إعادة تشغيل Effects.
+   * لذلك نستخدم هذا العداد لإعادة رسم
+   * النماذج بعد اكتمال تحميل الشموع.
+   */
+  const [
+    chartCandlesVersion,
+    setChartCandlesVersion,
+  ] = useState(0);
+
   const [
     showClassicPatterns,
     setShowClassicPatterns,
@@ -956,6 +2186,21 @@ export default function StockSmartChart({
     showCandlePatterns,
     setShowCandlePatterns,
   ] = useState(true);
+
+  /*
+   * فتح وإغلاق محتوى بطاقات النماذج.
+   * هذه الحالات لا توقف اكتشاف النماذج،
+   * بل تتحكم فقط في المساحة المعروضة للمستخدم.
+   */
+  const [
+    classicPatternsPanelOpen,
+    setClassicPatternsPanelOpen,
+  ] = useState(false);
+
+  const [
+    candlePatternsPanelOpen,
+    setCandlePatternsPanelOpen,
+  ] = useState(false);
 
   const [
     patternPreferencesLoaded,
@@ -975,6 +2220,21 @@ export default function StockSmartChart({
   ] =
     useState<PatternsResponse | null>(
       null
+    );
+
+  const validatedCandlestickPatterns =
+    useMemo(
+      () =>
+        getValidatedCandlestickPatterns(
+          patternsData,
+          chartCandlesRef.current,
+          patternInterval
+        ),
+      [
+        patternsData,
+        patternInterval,
+        chartCandlesVersion,
+      ]
     );
 
   const [
@@ -1761,6 +3021,35 @@ export default function StockSmartChart({
       }
     );
 
+    /*
+     * وضع النماذج الكلاسيكية النظيف:
+     *
+     * عند تشغيل النماذج الكلاسيكية
+     * نخفي جميع مستويات الصفقة والقاما
+     * حتى لا يزدحم الشارت.
+     *
+     * يبقى فقط:
+     * - دعم 1
+     * - دعم 2
+     * - مقاومة 1
+     * - مقاومة 2
+     */
+    if (
+      showClassicPatterns
+    ) {
+      return result.filter(
+        (level) =>
+          level.key ===
+            "technical-support-1" ||
+          level.key ===
+            "technical-support-2" ||
+          level.key ===
+            "technical-resistance-1" ||
+          level.key ===
+            "technical-resistance-2"
+      );
+    }
+
     return result;
   }, [
     effectiveCurrentPrice,
@@ -1771,6 +3060,7 @@ export default function StockSmartChart({
     side,
     gammaData,
     technicalLevels,
+    showClassicPatterns,
   ]);
 
   const inlineGammaLevels =
@@ -1951,6 +3241,8 @@ export default function StockSmartChart({
       chartRef.current = null;
       seriesRef.current = null;
       lastCandleRef.current = null;
+      chartCandlesRef.current = [];
+      classicPatternSeriesRef.current = [];
       priceLinesRef.current = [];
     };
   }, []);
@@ -2029,8 +3321,25 @@ export default function StockSmartChart({
             })
           );
 
+        chartCandlesRef.current =
+          chartCandles;
+
+        /*
+         * إجبار Effects الخاصة برسومات
+         * النماذج على العمل بعد وصول الشموع.
+         */
+        setChartCandlesVersion(
+          (current) =>
+            current + 1
+        );
+
         candleSeries.setData(
-          chartCandles
+          highlightCandlestickPatternCandles(
+            chartCandles,
+            patternsData,
+            showCandlePatterns,
+            patternInterval
+          )
         );
 
         lastCandleRef.current =
@@ -2066,6 +3375,881 @@ export default function StockSmartChart({
       cancelled = true;
     };
   }, [symbol, interval]);
+
+  /*
+   * رسم أحدث نموذج كلاسيكي على الشارت
+   * باستخدام نقاط A / B / C / D / E
+   * القادمة من مزود بيانات النماذج.
+   */
+  useEffect(() => {
+    const chart =
+      chartRef.current;
+
+    if (!chart) {
+      return;
+    }
+
+    /*
+     * حذف أي رسم قديم قبل إنشاء
+     * الرسم الجديد أو عند الإخفاء.
+     */
+    for (
+      const existingSeries of
+        classicPatternSeriesRef.current
+    ) {
+      try {
+        chart.removeSeries(
+          existingSeries
+        );
+      } catch {
+        /*
+         * قد تكون السلسلة أزيلت
+         * أثناء إعادة إنشاء الشارت.
+         */
+      }
+    }
+
+    classicPatternSeriesRef.current =
+      [];
+
+    if (
+      !showClassicPatterns ||
+      !patternsData ||
+      patternsData
+        .classicPatterns
+        .length === 0
+    ) {
+      return;
+    }
+
+    const candles =
+      chartCandlesRef.current;
+
+    if (
+      candles.length === 0
+    ) {
+      return;
+    }
+
+    /*
+     * استجابة API مرتبة من الأحدث
+     * إلى الأقدم، لذلك نرسم الأول فقط.
+     */
+    const pattern =
+      patternsData
+        .classicPatterns[0];
+
+    const toleranceSeconds =
+      Math.max(
+        patternInterval,
+        interval
+      ) *
+      60 *
+      2;
+
+    const sourcePoints = [
+      pattern.points.a,
+      pattern.points.b,
+      pattern.points.c,
+      pattern.points.d,
+      pattern.points.e,
+    ];
+
+    const chartPoints:
+      Array<{
+        time: UTCTimestamp;
+        value: number;
+      }> = [];
+
+    for (
+      const point of sourcePoints
+    ) {
+      if (
+        point.price === null ||
+        !Number.isFinite(
+          point.price
+        ) ||
+        !point.time
+      ) {
+        continue;
+      }
+
+      const timestamp =
+        isoTimeToSeconds(
+          point.time
+        );
+
+      if (
+        timestamp === null
+      ) {
+        continue;
+      }
+
+      const candleTime =
+        nearestChartCandleTime(
+          timestamp,
+          candles,
+          toleranceSeconds
+        );
+
+      if (
+        candleTime === null
+      ) {
+        continue;
+      }
+
+      chartPoints.push({
+        time: candleTime,
+        value: point.price,
+      });
+    }
+
+    /*
+     * بعض النماذج قد لا ترجع جميع
+     * نقاط A-E؛ نستخدم البداية والنهاية
+     * كخيار احتياطي.
+     */
+    if (
+      chartPoints.length < 2
+    ) {
+      const fallbackPoints = [
+        {
+          time:
+            pattern.startTime,
+          price:
+            pattern.startPrice,
+        },
+        {
+          time:
+            pattern.endTime ||
+            pattern.detectedAt,
+          price:
+            pattern.endPrice,
+        },
+      ];
+
+      for (
+        const point of
+          fallbackPoints
+      ) {
+        if (
+          point.price === null ||
+          !Number.isFinite(
+            point.price
+          ) ||
+          !point.time
+        ) {
+          continue;
+        }
+
+        const timestamp =
+          isoTimeToSeconds(
+            point.time
+          );
+
+        if (
+          timestamp === null
+        ) {
+          continue;
+        }
+
+        const candleTime =
+          nearestChartCandleTime(
+            timestamp,
+            candles,
+            toleranceSeconds
+          );
+
+        if (
+          candleTime === null
+        ) {
+          continue;
+        }
+
+        chartPoints.push({
+          time: candleTime,
+          value: point.price,
+        });
+      }
+    }
+
+    /*
+     * ترتيب النقاط زمنيًا وحذف أي
+     * وقت مكرر؛ LineSeries يشترط
+     * أن تكون البيانات مرتبة.
+     */
+    const uniquePoints =
+      Array.from(
+        new Map(
+          chartPoints
+            .sort(
+              (
+                first,
+                second
+              ) =>
+                Number(
+                  first.time
+                ) -
+                Number(
+                  second.time
+                )
+            )
+            .map(
+              (point) => [
+                Number(
+                  point.time
+                ),
+                point,
+              ]
+            )
+        ).values()
+      );
+
+    if (
+      uniquePoints.length < 2
+    ) {
+      return;
+    }
+
+    const patternColor =
+      pattern.direction ===
+      "BULLISH"
+        ? "#22d3ee"
+        : pattern.direction ===
+            "BEARISH"
+          ? "#fb7185"
+          : "#facc15";
+
+    const patternSeries =
+      chart.addSeries(
+        LineSeries,
+        {
+          color:
+            patternColor,
+          lineWidth: 3,
+          lineStyle:
+            LineStyle.Solid,
+          priceLineVisible:
+            false,
+          lastValueVisible:
+            false,
+          crosshairMarkerVisible:
+            true,
+          crosshairMarkerRadius:
+            5,
+          crosshairMarkerBorderColor:
+            patternColor,
+          crosshairMarkerBackgroundColor:
+            "#020617",
+        }
+      );
+
+    patternSeries.setData(
+      uniquePoints
+    );
+
+    const createdSeries:
+      ISeriesApi<"Line">[] = [
+        patternSeries,
+      ];
+
+    type ResolvedPatternPoint = {
+      time: UTCTimestamp;
+      value: number;
+    };
+
+    /*
+     * تحويل نقطة النموذج الخام إلى نقطة
+     * مرتبطة بأقرب شمعة فعلية على الشارت.
+     */
+    const resolvePatternPoint = (
+      point:
+        PatternPoint
+    ): ResolvedPatternPoint | null => {
+      if (
+        point.price === null ||
+        !Number.isFinite(
+          point.price
+        ) ||
+        !point.time
+      ) {
+        return null;
+      }
+
+      const timestamp =
+        isoTimeToSeconds(
+          point.time
+        );
+
+      if (
+        timestamp === null
+      ) {
+        return null;
+      }
+
+      const candleTime =
+        nearestChartCandleTime(
+          timestamp,
+          candles,
+          toleranceSeconds
+        );
+
+      if (
+        candleTime === null
+      ) {
+        return null;
+      }
+
+      return {
+        time:
+          candleTime,
+        value:
+          point.price,
+      };
+    };
+
+    const resolved = {
+      a:
+        resolvePatternPoint(
+          pattern.points.a
+        ),
+      b:
+        resolvePatternPoint(
+          pattern.points.b
+        ),
+      c:
+        resolvePatternPoint(
+          pattern.points.c
+        ),
+      d:
+        resolvePatternPoint(
+          pattern.points.d
+        ),
+      e:
+        resolvePatternPoint(
+          pattern.points.e
+        ),
+    };
+
+    /*
+     * إضافة خط مكوّن من نقطتين أو أكثر.
+     */
+    const addPatternPath = (
+      points:
+        Array<
+          ResolvedPatternPoint | null
+        >,
+      color:
+        string,
+      lineStyle:
+        LineStyle,
+      lineWidth:
+        1 | 2 | 3 | 4
+    ) => {
+      const validPoints =
+        points
+          .filter(
+            (
+              point
+            ): point is
+              ResolvedPatternPoint =>
+              point !== null
+          )
+          .sort(
+            (
+              first,
+              second
+            ) =>
+              Number(
+                first.time
+              ) -
+              Number(
+                second.time
+              )
+          );
+
+      const unique =
+        Array.from(
+          new Map(
+            validPoints.map(
+              (point) => [
+                Number(
+                  point.time
+                ),
+                point,
+              ]
+            )
+          ).values()
+        );
+
+      if (
+        unique.length < 2
+      ) {
+        return;
+      }
+
+      const lineSeries =
+        chart.addSeries(
+          LineSeries,
+          {
+            color,
+            lineWidth,
+            lineStyle,
+            priceLineVisible:
+              false,
+            lastValueVisible:
+              false,
+            crosshairMarkerVisible:
+              true,
+            crosshairMarkerRadius:
+              4,
+            crosshairMarkerBorderColor:
+              color,
+            crosshairMarkerBackgroundColor:
+              "#020617",
+          }
+        );
+
+      lineSeries.setData(
+        unique
+      );
+
+      createdSeries.push(
+        lineSeries
+      );
+    };
+
+    /*
+     * تحديد نهاية نطاق النموذج لرسم
+     * خطوط العنق والاختراق والأهداف.
+     */
+    const firstPatternTime =
+      uniquePoints[0]?.time;
+
+    const lastPatternTime =
+      uniquePoints[
+        uniquePoints.length - 1
+      ]?.time;
+
+    const rawPatternEnd =
+      isoTimeToSeconds(
+        pattern.endTime ||
+        pattern.detectedAt
+      );
+
+    const matchedPatternEnd =
+      rawPatternEnd !== null
+        ? nearestChartCandleTime(
+            rawPatternEnd,
+            candles,
+            toleranceSeconds
+          )
+        : null;
+
+    const patternRangeEnd =
+      matchedPatternEnd ||
+      lastPatternTime;
+
+    /*
+     * خط أفقي محصور داخل المدة الزمنية
+     * الخاصة بالنموذج فقط.
+     */
+    const addPatternLevel = (
+      price:
+        number | null,
+      color:
+        string,
+      lineStyle:
+        LineStyle,
+      lineWidth:
+        1 | 2 | 3 | 4
+    ) => {
+      if (
+        price === null ||
+        !Number.isFinite(
+          price
+        ) ||
+        price <= 0 ||
+        firstPatternTime ===
+          undefined ||
+        patternRangeEnd ===
+          undefined ||
+        Number(
+          patternRangeEnd
+        ) <
+          Number(
+            firstPatternTime
+          )
+      ) {
+        return;
+      }
+
+      const levelSeries =
+        chart.addSeries(
+          LineSeries,
+          {
+            color,
+            lineWidth,
+            lineStyle,
+            priceLineVisible:
+              false,
+            lastValueVisible:
+              false,
+            crosshairMarkerVisible:
+              false,
+          }
+        );
+
+      levelSeries.setData([
+        {
+          time:
+            firstPatternTime,
+          value:
+            price,
+        },
+        {
+          time:
+            patternRangeEnd,
+          value:
+            price,
+        },
+      ]);
+
+      createdSeries.push(
+        levelSeries
+      );
+    };
+
+    const name =
+      pattern.name;
+
+    const bullishColor =
+      "#22d3ee";
+
+    const bearishColor =
+      "#fb7185";
+
+    const boundaryColor =
+      pattern.direction ===
+      "BULLISH"
+        ? bullishColor
+        : pattern.direction ===
+            "BEARISH"
+          ? bearishColor
+          : "#facc15";
+
+    /*
+     * =====================================================
+     * القمة والقاع المزدوجان
+     * A/C = القمتان أو القاعان
+     * B = خط العنق
+     * =====================================================
+     */
+    if (
+      name === "double top" ||
+      name === "double bottom"
+    ) {
+      addPatternPath(
+        [
+          resolved.a,
+          resolved.b,
+          resolved.c,
+        ],
+        boundaryColor,
+        LineStyle.Solid,
+        4
+      );
+
+      addPatternLevel(
+        pattern.points.b.price,
+        "#facc15",
+        LineStyle.Dashed,
+        3
+      );
+    }
+
+    /*
+     * =====================================================
+     * الرأس والكتفان والعكسي
+     * المسار الكامل للرأس والكتفين
+     * وخط العنق بين B وD.
+     * =====================================================
+     */
+    else if (
+      name ===
+        "head and shoulders" ||
+      name ===
+        "inverse head and shoulders"
+    ) {
+      addPatternPath(
+        [
+          resolved.a,
+          resolved.b,
+          resolved.c,
+          resolved.d,
+          resolved.e,
+        ],
+        boundaryColor,
+        LineStyle.Solid,
+        4
+      );
+
+      addPatternPath(
+        [
+          resolved.b,
+          resolved.d,
+        ],
+        "#facc15",
+        LineStyle.Dashed,
+        3
+      );
+    }
+
+    /*
+     * =====================================================
+     * المثلثات
+     * نقاط A/C/E ضلع، ونقاط B/D ضلع آخر.
+     * =====================================================
+     */
+    else if (
+      name ===
+        "ascending triangle" ||
+      name ===
+        "descending triangle" ||
+      name ===
+        "symmetrical triangle"
+    ) {
+      addPatternPath(
+        [
+          resolved.a,
+          resolved.c,
+          resolved.e,
+        ],
+        boundaryColor,
+        LineStyle.Solid,
+        3
+      );
+
+      addPatternPath(
+        [
+          resolved.b,
+          resolved.d,
+        ],
+        "#facc15",
+        LineStyle.Solid,
+        3
+      );
+    }
+
+    /*
+     * =====================================================
+     * الأوتاد
+     * حد علوي وحد سفلي متقاربان.
+     * =====================================================
+     */
+    else if (
+      name ===
+        "falling wedge" ||
+      name ===
+        "rising wedge"
+    ) {
+      addPatternPath(
+        [
+          resolved.a,
+          resolved.c,
+          resolved.e,
+        ],
+        boundaryColor,
+        LineStyle.Solid,
+        3
+      );
+
+      addPatternPath(
+        [
+          resolved.b,
+          resolved.d,
+        ],
+        boundaryColor,
+        LineStyle.Solid,
+        3
+      );
+    }
+
+    /*
+     * =====================================================
+     * العلم الصاعد والهابط
+     * A-B تمثل السارية، وبقية النقاط
+     * تمثل قناة العلم القصيرة.
+     * =====================================================
+     */
+    else if (
+      name === "bull flag" ||
+      name === "bear flag"
+    ) {
+      addPatternPath(
+        [
+          resolved.a,
+          resolved.b,
+        ],
+        boundaryColor,
+        LineStyle.Solid,
+        4
+      );
+
+      addPatternPath(
+        [
+          resolved.b,
+          resolved.d,
+        ],
+        "#facc15",
+        LineStyle.Solid,
+        3
+      );
+
+      addPatternPath(
+        [
+          resolved.c,
+          resolved.e,
+        ],
+        "#facc15",
+        LineStyle.Solid,
+        3
+      );
+    }
+
+    /*
+     * =====================================================
+     * القنوات الصاعدة والهابطة
+     * حد علوي وحد سفلي متوازيان.
+     * =====================================================
+     */
+    else if (
+      name === "channel up" ||
+      name === "channel down"
+    ) {
+      addPatternPath(
+        [
+          resolved.a,
+          resolved.c,
+          resolved.e,
+        ],
+        boundaryColor,
+        LineStyle.Solid,
+        3
+      );
+
+      addPatternPath(
+        [
+          resolved.b,
+          resolved.d,
+        ],
+        boundaryColor,
+        LineStyle.Solid,
+        3
+      );
+    }
+
+    /*
+     * أي نموذج كلاسيكي معروف مستقبلًا
+     * يُرسم بحدين متعاقبين بدل تجاهله.
+     */
+    else {
+      addPatternPath(
+        [
+          resolved.a,
+          resolved.c,
+          resolved.e,
+        ],
+        boundaryColor,
+        LineStyle.Solid,
+        3
+      );
+
+      addPatternPath(
+        [
+          resolved.b,
+          resolved.d,
+        ],
+        "#facc15",
+        LineStyle.Dashed,
+        3
+      );
+    }
+
+    /*
+     * مستويات المدرسة المشتركة لكل
+     * النماذج الكلاسيكية.
+     */
+    addPatternLevel(
+      pattern.entry,
+      "#22d3ee",
+      LineStyle.Solid,
+      2
+    );
+
+    addPatternLevel(
+      pattern.target1,
+      "#34d399",
+      LineStyle.Dashed,
+      2
+    );
+
+    addPatternLevel(
+      pattern.target2,
+      "#10b981",
+      LineStyle.Dotted,
+      2
+    );
+
+    addPatternLevel(
+      pattern.stopLoss,
+      "#fb7185",
+      LineStyle.Dotted,
+      2
+    );
+
+    classicPatternSeriesRef.current =
+      createdSeries;
+  }, [
+    patternsData,
+    showClassicPatterns,
+    patternInterval,
+    interval,
+    chartCandlesVersion,
+  ]);
+
+  /*
+   * بيانات الشموع تصل عادة قبل بيانات النماذج.
+   * عند وصول النماذج نعيد تعيين نفس الشموع
+   * مع تلوين شموع النموذج فقط.
+   */
+  useEffect(() => {
+    const series =
+      seriesRef.current;
+
+    const candles =
+      chartCandlesRef.current;
+
+    if (
+      !series ||
+      candles.length === 0
+    ) {
+      return;
+    }
+
+    series.setData(
+      highlightCandlestickPatternCandles(
+        candles,
+        patternsData,
+        showCandlePatterns,
+        patternInterval
+      )
+    );
+  }, [
+    patternsData,
+    showCandlePatterns,
+    patternInterval,
+  ]);
 
   useEffect(() => {
     const series =
@@ -2774,22 +4958,59 @@ export default function StockSmartChart({
               ) : null}
 
               {showClassicPatterns ? (
-                <div className="mt-5">
-                  <div className="flex items-center justify-between gap-3">
-                    <h4 className="font-black text-cyan-300">
-                      النماذج الكلاسيكية
-                    </h4>
+                <section className="mt-5 overflow-hidden rounded-2xl border border-cyan-400/15 bg-slate-950/45">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setClassicPatternsPanelOpen(
+                        (current) =>
+                          !current
+                      )
+                    }
+                    aria-expanded={
+                      classicPatternsPanelOpen
+                    }
+                    className="flex w-full items-center justify-between gap-3 px-4 py-4 text-right transition hover:bg-cyan-400/[0.04]"
+                  >
+                    <div className="flex min-w-0 items-center gap-3">
+                      <span
+                        className={[
+                          "flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-cyan-400/20 bg-cyan-400/[0.06] text-lg font-black text-cyan-300 transition-transform",
+                          classicPatternsPanelOpen
+                            ? "rotate-180"
+                            : "",
+                        ].join(" ")}
+                        aria-hidden="true"
+                      >
+                        ⌄
+                      </span>
 
-                    <span className="rounded-full border border-cyan-400/20 bg-cyan-400/[0.06] px-3 py-1 text-xs font-black text-cyan-300">
+                      <div className="min-w-0">
+                        <h4 className="font-black text-cyan-300">
+                          النماذج الكلاسيكية
+                        </h4>
+
+                        <p className="mt-1 text-xs text-slate-600">
+                          اضغط لعرض أو إغلاق تفاصيل النماذج
+                        </p>
+                      </div>
+                    </div>
+
+                    <span className="shrink-0 rounded-full border border-cyan-400/20 bg-cyan-400/[0.06] px-3 py-1 text-xs font-black text-cyan-300">
                       {
-                        patternsData
-                          .classicPatterns
-                          .length
+                        Math.min(
+                          patternsData
+                            .classicPatterns
+                            .length,
+                          1
+                        )
                       }
                     </span>
-                  </div>
+                  </button>
 
-                  {patternsData
+                  {classicPatternsPanelOpen ? (
+                    <div className="border-t border-white/[0.06] px-4 pb-4">
+                      {patternsData
                     .classicPatterns
                     .length === 0 ? (
                     <div className="mt-3 rounded-xl border border-white/[0.06] bg-slate-950/45 p-4 text-sm text-slate-500">
@@ -2799,6 +5020,7 @@ export default function StockSmartChart({
                     <div className="mt-3 grid gap-4 lg:grid-cols-2">
                       {patternsData
                         .classicPatterns
+                        .slice(0, 1)
                         .map(
                           (
                             pattern
@@ -2810,40 +5032,79 @@ export default function StockSmartChart({
                               pattern={
                                 pattern
                               }
+                              lifecycleStatus={
+                                derivePatternLifecycle(
+                                  pattern,
+                                  chartCandlesRef.current
+                                )
+                              }
                             />
                           )
                         )}
                     </div>
                   )}
-                </div>
+                    </div>
+                  ) : null}
+                </section>
               ) : null}
 
               {showCandlePatterns ? (
-                <div className="mt-6">
-                  <div className="flex items-center justify-between gap-3">
-                    <h4 className="font-black text-amber-300">
-                      نماذج الشموع المهمة
-                    </h4>
+                <section className="mt-6 overflow-hidden rounded-2xl border border-amber-400/15 bg-slate-950/45">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setCandlePatternsPanelOpen(
+                        (current) =>
+                          !current
+                      )
+                    }
+                    aria-expanded={
+                      candlePatternsPanelOpen
+                    }
+                    className="flex w-full items-center justify-between gap-3 px-4 py-4 text-right transition hover:bg-amber-400/[0.04]"
+                  >
+                    <div className="flex min-w-0 items-center gap-3">
+                      <span
+                        className={[
+                          "flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-amber-400/20 bg-amber-400/[0.06] text-lg font-black text-amber-300 transition-transform",
+                          candlePatternsPanelOpen
+                            ? "rotate-180"
+                            : "",
+                        ].join(" ")}
+                        aria-hidden="true"
+                      >
+                        ⌄
+                      </span>
 
-                    <span className="rounded-full border border-amber-400/20 bg-amber-400/[0.06] px-3 py-1 text-xs font-black text-amber-300">
+                      <div className="min-w-0">
+                        <h4 className="font-black text-amber-300">
+                          نماذج الشموع المهمة
+                        </h4>
+
+                        <p className="mt-1 text-xs text-slate-600">
+                          اضغط لعرض أو إغلاق تفاصيل الشموع
+                        </p>
+                      </div>
+                    </div>
+
+                    <span className="shrink-0 rounded-full border border-amber-400/20 bg-amber-400/[0.06] px-3 py-1 text-xs font-black text-amber-300">
                       {
-                        patternsData
-                          .candlestickPatterns
+                        validatedCandlestickPatterns
                           .length
                       }
                     </span>
-                  </div>
+                  </button>
 
-                  {patternsData
-                    .candlestickPatterns
+                  {candlePatternsPanelOpen ? (
+                    <div className="border-t border-white/[0.06] px-4 pb-4">
+                      {validatedCandlestickPatterns
                     .length === 0 ? (
                     <div className="mt-3 rounded-xl border border-white/[0.06] bg-slate-950/45 p-4 text-sm text-slate-500">
                       لا يوجد نموذج شموع مهم على الفريم المختار حاليًا.
                     </div>
                   ) : (
                     <div className="mt-3 grid gap-4 lg:grid-cols-2">
-                      {patternsData
-                        .candlestickPatterns
+                      {validatedCandlestickPatterns
                         .map(
                           (
                             pattern
@@ -2855,12 +5116,20 @@ export default function StockSmartChart({
                               pattern={
                                 pattern
                               }
+                              lifecycleStatus={
+                                derivePatternLifecycle(
+                                  pattern,
+                                  chartCandlesRef.current
+                                )
+                              }
                             />
                           )
                         )}
                     </div>
                   )}
-                </div>
+                    </div>
+                  ) : null}
+                </section>
               ) : null}
             </>
           ) : null}
@@ -2896,8 +5165,18 @@ export default function StockSmartChart({
 
           <div
             ref={containerRef}
-            className="h-full w-full"
+            onDoubleClick={() =>
+              setIsExpanded(
+                (current) => !current
+              )
+            }
+            className="h-full w-full cursor-zoom-in"
             dir="ltr"
+            title={
+              isExpanded
+                ? "اضغط مرتين لإغلاق التكبير"
+                : "اضغط مرتين لتكبير الشارت"
+            }
           />
 
           <div
