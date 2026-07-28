@@ -720,30 +720,115 @@ export default function SpxWhalesPage() {
         }
 
         /*
-          هذا هو المصدر المباشر لعرض سعر العقد.
-          يبقى مستقلًا عن تحديث التحليل الكامل.
+          لا نسمح أبدًا أن يكون السعر الحالي
+          أعلى من أعلى سعر تحقق في الواجهة.
+
+          هذا يحمي البطاقة من وصول رد أقدم
+          من المسار الكامل بعد رد quote الأحدث.
         */
-        setLiveTrade(updatedTrade);
+        setLiveTrade((previous) => {
+          const previousBest =
+            Number(
+              previous?.best_price ||
+              0
+            );
+
+          const returnedBest =
+            Number(
+              updatedTrade.best_price ||
+              0
+            );
+
+          const returnedCurrent =
+            Number(
+              updatedTrade.current_price ||
+              0
+            );
+
+          const safeBest =
+            Math.max(
+              previousBest,
+              returnedBest,
+              returnedCurrent
+            );
+
+          return {
+            ...updatedTrade,
+            best_price:
+              safeBest,
+          };
+        });
 
         setData((current) => {
           if (!current) {
             return current;
           }
 
+          const currentActive =
+            current.activeTrade;
+
+          const previousBest =
+            Number(
+              currentActive?.best_price ||
+              0
+            );
+
+          const returnedBest =
+            Number(
+              updatedTrade.best_price ||
+              0
+            );
+
+          const returnedCurrent =
+            Number(
+              updatedTrade.current_price ||
+              0
+            );
+
+          const safeBest =
+            Math.max(
+              previousBest,
+              returnedBest,
+              returnedCurrent
+            );
+
+          const safeTrade = {
+            ...updatedTrade,
+            best_price:
+              safeBest,
+          };
+
           return {
             ...current,
 
             activeTrade:
-              updatedTrade,
+              safeTrade,
 
             trades:
               (current.trades || [])
-                .map((trade) =>
-                  trade.id ===
-                  updatedTrade.id
-                    ? updatedTrade
-                    : trade
-                ),
+                .map((trade) => {
+                  if (
+                    trade.id !==
+                    updatedTrade.id
+                  ) {
+                    return trade;
+                  }
+
+                  const rowBest =
+                    Number(
+                      trade.best_price ||
+                      0
+                    );
+
+                  return {
+                    ...safeTrade,
+                    best_price:
+                      Math.max(
+                        rowBest,
+                        safeBest
+                      ),
+                  };
+                }),
           };
         });
       } catch (quoteError) {
