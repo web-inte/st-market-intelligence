@@ -1285,6 +1285,26 @@ export async function GET(
           activationStockPrice:
             stockPrice,
 
+          /*
+            مزامنة خطة السهم الحالية داخل snapshot
+            حتى لا تبقى أهداف أو نقطة تفعيل
+            من صفقة سابقة على الرمز نفسه.
+          */
+          selectedTargets:
+            Array.isArray(
+              row.gamma_targets
+            )
+              ? row.gamma_targets
+              : [],
+
+          activationRule:
+            side === "CALL"
+              ? `اختراق ${entryPrice} والثبات فوقه`
+              : `كسر ${entryPrice} والثبات تحته`,
+
+          capturedAt:
+            nowIso,
+
           contractChanged,
 
           contractChangeArabic:
@@ -1353,6 +1373,19 @@ export async function GET(
 
             contract_status:
               "ACTIVE",
+
+            /*
+              أي تفعيل جديد يبدأ بحالة نظيفة،
+              ولا يرث أهدافًا أو إغلاقًا سابقًا.
+            */
+            highest_target_hit:
+              0,
+
+            closed_at:
+              null,
+
+            close_reason:
+              null,
 
             activated_at:
               nowIso,
