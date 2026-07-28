@@ -1395,6 +1395,55 @@ export default function StockSmartChart({
   const chartRef =
     useRef<IChartApi | null>(null);
 
+  /*
+   * يتحكم في عرض وتباعد الشموع أفقيًا.
+   * القيمة الأكبر تعني شموعًا أعرض.
+   */
+  const candleBarSpacingRef =
+    useRef(8);
+
+  function setCandleBarSpacing(
+    nextSpacing: number
+  ) {
+    const chart =
+      chartRef.current;
+
+    if (!chart) {
+      return;
+    }
+
+    const spacing = Math.min(
+      40,
+      Math.max(
+        2,
+        nextSpacing
+      )
+    );
+
+    candleBarSpacingRef.current =
+      spacing;
+
+    chart
+      .timeScale()
+      .applyOptions({
+        barSpacing: spacing,
+      });
+  }
+
+  function zoomCandlesIn() {
+    setCandleBarSpacing(
+      candleBarSpacingRef.current *
+        1.2
+    );
+  }
+
+  function zoomCandlesOut() {
+    setCandleBarSpacing(
+      candleBarSpacingRef.current /
+        1.2
+    );
+  }
+
   const seriesRef =
     useRef<
       ISeriesApi<"Candlestick"> | null
@@ -2429,7 +2478,11 @@ export default function StockSmartChart({
         },
 
         handleScroll: {
-          mouseWheel: true,
+          /*
+           * التحكم بعجلة الماوس تتم
+           * معالجته يدويًا أسفل هذا Effect.
+           */
+          mouseWheel: false,
           pressedMouseMove: true,
           horzTouchDrag: true,
 
@@ -2445,7 +2498,12 @@ export default function StockSmartChart({
             time: true,
             price: true,
           },
-          mouseWheel: true,
+
+          /*
+           * عجلة الماوس لها معالجة مخصصة
+           * حتى تكبر وتصغر عرض الشموع فقط.
+           */
+          mouseWheel: false,
           pinch: true,
         },
 
@@ -2545,10 +2603,44 @@ export default function StockSmartChart({
       markPriceScaleManual
     );
 
+    function handleCandleWheel(
+      event: WheelEvent
+    ) {
+      /*
+       * منع تمرير الصفحة أثناء وجود
+       * المؤشر داخل الشارت.
+       */
+      event.preventDefault();
+      event.stopPropagation();
+
+      const multiplier =
+        event.deltaY < 0
+          ? 1.12
+          : 1 / 1.12;
+
+      setCandleBarSpacing(
+        candleBarSpacingRef.current *
+          multiplier
+      );
+    }
+
+    container.addEventListener(
+      "wheel",
+      handleCandleWheel,
+      {
+        passive: false,
+      }
+    );
+
     return () => {
       container.removeEventListener(
         "pointerdown",
         markPriceScaleManual
+      );
+
+      container.removeEventListener(
+        "wheel",
+        handleCandleWheel
       );
       resizeObserver.disconnect();
 
@@ -4082,6 +4174,24 @@ export default function StockSmartChart({
 
           <button
             type="button"
+            onClick={zoomCandlesIn}
+            className="rounded-xl border border-white/[0.08] bg-slate-900/70 px-3 py-2 text-xs font-black text-slate-300 transition hover:border-cyan-400/30 hover:text-cyan-300"
+            title="تكبير عرض الشموع"
+          >
+            شموع +
+          </button>
+
+          <button
+            type="button"
+            onClick={zoomCandlesOut}
+            className="rounded-xl border border-white/[0.08] bg-slate-900/70 px-3 py-2 text-xs font-black text-slate-300 transition hover:border-cyan-400/30 hover:text-cyan-300"
+            title="تصغير عرض الشموع"
+          >
+            شموع −
+          </button>
+
+          <button
+            type="button"
             onClick={fitChartContent}
             className="rounded-xl border border-white/[0.08] bg-slate-900/70 px-3 py-2 text-xs font-black text-slate-300 transition hover:border-cyan-400/30 hover:text-cyan-300"
             title="إظهار جميع الشموع"
@@ -4150,7 +4260,7 @@ export default function StockSmartChart({
       </div>
 
       <div className="border-b border-white/[0.05] px-5 py-2 text-right text-[11px] font-bold leading-5 text-slate-500 sm:px-6">
-        اسحب تدريج الأسعار في يمين الشارت لتكبير أو تصغير النطاق السعري، واسحب الشارت لتحريكه، واستخدم إصبعين للتكبير على الجوال.
+        استخدم عجلة الماوس أو زري شموع + و− لتكبير وتصغير عرض الشموع، واسحب الشارت لتحريكه، واسحب تدريج الأسعار يمين الشارت للتحكم بالنطاق السعري.
       </div>
 
       {side === "NEUTRAL" ? (
