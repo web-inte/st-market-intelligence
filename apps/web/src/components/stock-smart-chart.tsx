@@ -1402,6 +1402,17 @@ export default function StockSmartChart({
   const candleBarSpacingRef =
     useRef(8);
 
+  /*
+   * نستخدم هذه المراجع حتى نحافظ على
+   * تكبير الشموع وموضع الشارت عند تغيير الفريم،
+   * بينما يبدأ رمز الشركة الجديد بعرض طبيعي.
+   */
+  const hasLoadedCandlesRef =
+    useRef(false);
+
+  const lastLoadedSymbolRef =
+    useRef<string | null>(null);
+
   function setCandleBarSpacing(
     nextSpacing: number
   ) {
@@ -2708,6 +2719,8 @@ export default function StockSmartChart({
       chartCandlesRef.current = [];
       classicPatternSeriesRef.current = [];
       priceLinesRef.current = [];
+      hasLoadedCandlesRef.current = false;
+      lastLoadedSymbolRef.current = null;
     };
   }, []);
 
@@ -2730,6 +2743,23 @@ export default function StockSmartChart({
     async function loadCandles() {
       setCandlesLoading(true);
       setCandlesError("");
+
+      /*
+       * عند تغيير الفريم لنفس الرمز نحفظ
+       * موضع الشارت الحالي قبل استبدال البيانات.
+       */
+      const timeScale =
+        activeChart.timeScale();
+
+      const shouldPreserveView =
+        hasLoadedCandlesRef.current &&
+        lastLoadedSymbolRef.current ===
+          symbol;
+
+      const previousScrollPosition =
+        shouldPreserveView
+          ? timeScale.scrollPosition()
+          : 0;
 
       try {
         const response =
@@ -2813,9 +2843,35 @@ export default function StockSmartChart({
               ]
             : null;
 
-        activeChart
-          .timeScale()
-          .fitContent();
+        if (
+          shouldPreserveView
+        ) {
+          /*
+           * إعادة نفس عرض الشموع ونفس
+           * المسافة من آخر شمعة بعد تغيير الفريم.
+           */
+          timeScale.applyOptions({
+            barSpacing:
+              candleBarSpacingRef.current,
+          });
+
+          timeScale.scrollToPosition(
+            previousScrollPosition,
+            false
+          );
+        } else {
+          /*
+           * أول تحميل أو الانتقال إلى رمز
+           * جديد يبدأ بعرض جميع البيانات.
+           */
+          timeScale.fitContent();
+        }
+
+        hasLoadedCandlesRef.current =
+          true;
+
+        lastLoadedSymbolRef.current =
+          symbol;
       } catch (error) {
         if (cancelled) {
           return;
@@ -4334,7 +4390,20 @@ export default function StockSmartChart({
             title="تحريك الشارت لليسار"
             aria-label="تحريك الشارت لليسار"
           >
-            ◀
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              className="h-5 w-5"
+              aria-hidden="true"
+            >
+              <path
+                d="M15 6L9 12L15 18"
+                stroke="currentColor"
+                strokeWidth="2.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
           </button>
 
           <button
@@ -4364,7 +4433,20 @@ export default function StockSmartChart({
             title="تحريك الشارت لليمين"
             aria-label="تحريك الشارت لليمين"
           >
-            ▶
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              className="h-5 w-5"
+              aria-hidden="true"
+            >
+              <path
+                d="M9 6L15 12L9 18"
+                stroke="currentColor"
+                strokeWidth="2.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
           </button>
 
           <span className="w-full text-center text-[11px] font-bold text-slate-500 sm:w-auto">
