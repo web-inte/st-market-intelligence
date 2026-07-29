@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
 import AdminPanel from "./admin-panel";
+import AnnouncementAdminPanel from "./announcement-admin-panel";
 import AdminUsersTable from "./users-table";
 
 export const dynamic = "force-dynamic";
@@ -60,6 +61,8 @@ export default async function AdminPage() {
         </div>
 
         <AdminPanel />
+
+        <AnnouncementAdminPanel />
 
         <AdminUsersTable />
       </div>
