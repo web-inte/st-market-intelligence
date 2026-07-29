@@ -636,9 +636,9 @@ export default function WhaleOpportunityCard({
 
   const detectionDateTime =
     formatDetectionDateTime(
-      trade.first_seen_at ||
+      trade.last_seen_at ||
       trade.trade_timestamp ||
-      trade.last_seen_at,
+      trade.first_seen_at,
     );
 
   const activityTracking =
