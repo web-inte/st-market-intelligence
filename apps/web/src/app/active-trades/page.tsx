@@ -325,6 +325,23 @@ export default function ActiveTradesPage() {
     setFavoritesError,
   ] = useState("");
 
+  const [
+    isAdmin,
+    setIsAdmin,
+  ] = useState(false);
+
+  const [
+    deletingTradeIds,
+    setDeletingTradeIds,
+  ] = useState<Set<string>>(
+    new Set()
+  );
+
+  const [
+    deleteTradeError,
+    setDeleteTradeError,
+  ] = useState("");
+
   const normalizedTradeSymbolSearch =
     tradeSymbolSearch
       .trim()
@@ -387,6 +404,176 @@ export default function ActiveTradesPage() {
 
   const tradesRef =
     useRef<ActiveTrade[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function checkAdmin() {
+      try {
+        const response =
+          await fetch(
+            "/api/admin/active-trades",
+            {
+              cache: "no-store",
+              credentials:
+                "include",
+            }
+          );
+
+        if (
+          !cancelled
+        ) {
+          setIsAdmin(
+            response.ok
+          );
+        }
+      } catch {
+        if (
+          !cancelled
+        ) {
+          setIsAdmin(false);
+        }
+      }
+    }
+
+    void checkAdmin();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const deleteTrade =
+    useCallback(
+      async (
+        trade: ActiveTrade
+      ) => {
+        if (
+          !isAdmin ||
+          deletingTradeIds.has(
+            trade.id
+          )
+        ) {
+          return;
+        }
+
+        const confirmed =
+          window.confirm(
+            `هل أنت متأكد من حذف صفقة ${trade.symbol}؟\n\nستختفي عند جميع المستخدمين وتتوقف متابعتها وتحديثها نهائيًا داخل الموقع.`
+          );
+
+        if (!confirmed) {
+          return;
+        }
+
+        setDeletingTradeIds(
+          (current) =>
+            new Set(
+              current
+            ).add(
+              trade.id
+            )
+        );
+
+        setDeleteTradeError("");
+
+        try {
+          const response =
+            await fetch(
+              "/api/admin/active-trades",
+              {
+                method:
+                  "DELETE",
+                cache:
+                  "no-store",
+                credentials:
+                  "include",
+                headers: {
+                  "Content-Type":
+                    "application/json",
+                },
+                body:
+                  JSON.stringify({
+                    tradeId:
+                      trade.id,
+                  }),
+              }
+            );
+
+          const payload =
+            (await response.json()) as {
+              ok?: boolean;
+              error?: string;
+            };
+
+          if (
+            !response.ok ||
+            !payload.ok
+          ) {
+            throw new Error(
+              payload.error ||
+                "تعذر حذف الصفقة"
+            );
+          }
+
+          setTrades(
+            (current) => {
+              const next =
+                current.filter(
+                  (item) =>
+                    item.id !==
+                    trade.id
+                );
+
+              tradesRef.current =
+                next;
+
+              return next;
+            }
+          );
+
+          setFavoriteTradeIds(
+            (current) => {
+              const next =
+                new Set(
+                  current
+                );
+
+              next.delete(
+                trade.id
+              );
+
+              return next;
+            }
+          );
+        } catch (deleteError) {
+          setDeleteTradeError(
+            deleteError instanceof Error
+              ? deleteError.message
+              : "تعذر حذف الصفقة"
+          );
+        } finally {
+          setDeletingTradeIds(
+            (current) => {
+              const next =
+                new Set(
+                  current
+                );
+
+              next.delete(
+                trade.id
+              );
+
+              return next;
+            }
+          );
+        }
+      },
+      [
+        isAdmin,
+        deletingTradeIds,
+      ]
+    );
 
   const loadFavorites =
     useCallback(async () => {
@@ -1146,6 +1333,12 @@ export default function ActiveTradesPage() {
           </button>
         </div>
 
+        {deleteTradeError ? (
+          <div className="mb-4 rounded-2xl border border-red-400/30 bg-red-400/10 px-4 py-3 text-sm font-bold text-red-300">
+            {deleteTradeError}
+          </div>
+        ) : null}
+
         {favoritesError ? (
           <div className="mb-6 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm font-bold text-amber-200">
             {favoritesError}
@@ -1417,6 +1610,40 @@ export default function ActiveTradesPage() {
                                   : "☆"
                               }
                             </button>
+
+                            {isAdmin ? (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  void deleteTrade(
+                                    trade
+                                  )
+                                }
+                                disabled={
+                                  deletingTradeIds.has(
+                                    trade.id
+                                  )
+                                }
+                                aria-label="حذف الصفقة"
+                                title="حذف الصفقة عند الجميع وإيقاف متابعتها"
+                                className={[
+                                  "mt-2 inline-flex h-10 w-10 items-center justify-center rounded-xl border border-red-400/30 bg-red-400/10 text-lg text-red-300 transition hover:border-red-400/60 hover:bg-red-400/20",
+                                  deletingTradeIds.has(
+                                    trade.id
+                                  )
+                                    ? "cursor-wait opacity-50"
+                                    : "",
+                                ].join(" ")}
+                              >
+                                {
+                                  deletingTradeIds.has(
+                                    trade.id
+                                  )
+                                    ? "…"
+                                    : "🗑"
+                                }
+                              </button>
+                            ) : null}
                           </td>
 
                           <td className="whitespace-nowrap px-4 py-5 text-slate-300">
@@ -1759,8 +1986,41 @@ export default function ActiveTradesPage() {
                             )
                               ? "★"
                               : "☆"
-                          }
-                        </button>
+                          }                        </button>
+
+                        {isAdmin ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void deleteTrade(
+                                trade
+                              )
+                            }
+                            disabled={
+                              deletingTradeIds.has(
+                                trade.id
+                              )
+                            }
+                            aria-label="حذف الصفقة"
+                            title="حذف الصفقة عند الجميع وإيقاف متابعتها"
+                            className={[
+                              "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-red-400/30 bg-red-400/10 text-lg text-red-300 transition hover:border-red-400/60 hover:bg-red-400/20",
+                              deletingTradeIds.has(
+                                trade.id
+                              )
+                                ? "cursor-wait opacity-50"
+                                : "",
+                            ].join(" ")}
+                          >
+                            {
+                              deletingTradeIds.has(
+                                trade.id
+                              )
+                                ? "…"
+                                : "🗑"
+                            }
+                          </button>
+                        ) : null}
                       </div>
                     </div>
 
