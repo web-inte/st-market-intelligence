@@ -300,20 +300,10 @@ export default function SiteAnnouncementModal() {
             {announcement.message}
           </p>
 
-          <div className="mt-7 flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-5">
-            <p className="text-sm font-bold text-slate-400">
-              يختفي الإعلان تلقائيًا بعد{" "}
-              <span className="text-amber-300">
-                {secondsLeft}
-              </span>{" "}
-              ثوانٍ
-            </p>
-
+          <div className="mt-7 flex justify-end border-t border-white/10 pt-5">
             <button
               type="button"
-              onClick={
-                closeAnnouncement
-              }
+              onClick={closeAnnouncement}
               className="rounded-xl bg-amber-300 px-5 py-2.5 text-sm font-black text-slate-950 transition hover:bg-amber-200"
             >
               إغلاق
