@@ -258,7 +258,7 @@ export default function SiteAnnouncementModal() {
       aria-describedby="site-announcement-message"
       className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/80 px-4 py-8 backdrop-blur-sm"
     >
-      <div className="relative w-full max-w-lg overflow-hidden rounded-3xl border border-amber-300/30 bg-slate-900 shadow-2xl shadow-black/50">
+      <div className="relative max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-3xl border border-amber-300/30 bg-slate-900 shadow-2xl shadow-black/50">
         <div className="h-1.5 w-full bg-amber-300" />
 
         <button
