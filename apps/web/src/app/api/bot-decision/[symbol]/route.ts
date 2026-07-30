@@ -2179,15 +2179,14 @@ export async function GET(
         : "MANUAL";
 
     /*
-      تم تعطيل إنشاء WATCHING من محرك الموقع الثالث القديم.
+      البحث اليدوي من الموقع يجب أن ينشئ سجل WATCHING
+      حتى تستطيع صفحة الصفقات النشطة عرضه بعد التفعيل.
 
-      بوت القرار الخارجي ST Decision هو المصدر الوحيد
-      لإنشاء WATCHING وتحويلها إلى ACTIVE للمحرك الثالث.
-
-      لا يؤثر هذا على المحرك الأول أو المحرك الثاني.
+      الفحص التلقائي يبقى معطلًا هنا لأن بوت القرار
+      الخارجي هو المسؤول عنه، منعًا لتكرار الصفقة.
     */
     const shouldSaveWatching =
-      false;
+      mode === "MANUAL";
 
     let selectedContract:
       BotDecisionContract |
