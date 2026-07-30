@@ -145,40 +145,23 @@ function getActiveRows(
 function getSpxRows(
   payload: SpxPayload
 ): SpxTradeRow[] {
-  const rows: SpxTradeRow[] = [];
-
   if (
-    payload.activeTrade &&
-    typeof payload.activeTrade === "object"
+    !payload.activeTrade ||
+    typeof payload.activeTrade !==
+      "object"
   ) {
-    rows.push(
-      payload.activeTrade as SpxTradeRow
-    );
+    return [];
   }
 
-  if (Array.isArray(payload.trades)) {
-    for (const item of payload.trades) {
-      if (
-        item &&
-        typeof item === "object"
-      ) {
-        rows.push(item as SpxTradeRow);
-      }
-    }
-  }
+  const activeTrade =
+    payload.activeTrade as SpxTradeRow;
 
-  const unique =
-    new Map<string, SpxTradeRow>();
+  const id =
+    textValue(activeTrade.id);
 
-  for (const row of rows) {
-    const id = textValue(row.id);
-
-    if (id) {
-      unique.set(id, row);
-    }
-  }
-
-  return Array.from(unique.values());
+  return id
+    ? [activeTrade]
+    : [];
 }
 
 function BellIcon({
@@ -427,10 +410,10 @@ export default function TradeNotificationBell() {
             next
           );
 
+          playSound();
+
           return next;
         });
-
-        playSound();
       },
       [playSound]
     );
