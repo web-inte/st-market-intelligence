@@ -342,6 +342,18 @@ export default function ActiveTradesPage() {
     setDeleteTradeError,
   ] = useState("");
 
+  const [
+    editingStopTradeIds,
+    setEditingStopTradeIds,
+  ] = useState<Set<string>>(
+    new Set()
+  );
+
+  const [
+    editStopError,
+    setEditStopError,
+  ] = useState("");
+
   const normalizedTradeSymbolSearch =
     tradeSymbolSearch
       .trim()
@@ -572,6 +584,196 @@ export default function ActiveTradesPage() {
       [
         isAdmin,
         deletingTradeIds,
+      ]
+    );
+
+  const editTradeStop =
+    useCallback(
+      async (
+        trade: ActiveTrade
+      ) => {
+        if (
+          !isAdmin ||
+          editingStopTradeIds.has(
+            trade.id
+          )
+        ) {
+          return;
+        }
+
+        const currentStop =
+          trade.stopPrice !== null &&
+          Number.isFinite(
+            trade.stopPrice
+          )
+            ? String(
+                trade.stopPrice
+              )
+            : "";
+
+        const enteredValue =
+          window.prompt(
+            `تعديل وقف صفقة ${trade.symbol}\n\nأدخل وقف السهم الجديد:`,
+            currentStop
+          );
+
+        if (enteredValue === null) {
+          return;
+        }
+
+        const normalizedInput =
+          enteredValue
+            .trim()
+            .replace(
+              ",",
+              "."
+            );
+
+        const stopPrice =
+          Number(
+            normalizedInput
+          );
+
+        if (
+          !Number.isFinite(
+            stopPrice
+          ) ||
+          stopPrice <= 0
+        ) {
+          setEditStopError(
+            "أدخل سعر وقف صحيحًا أكبر من صفر"
+          );
+          return;
+        }
+
+        const confirmed =
+          window.confirm(
+            `هل تريد تعديل وقف صفقة ${trade.symbol}؟\n\nالوقف الحالي: ${
+              trade.stopPrice !== null
+                ? numberText(
+                    trade.stopPrice,
+                    4
+                  )
+                : "غير متوفر"
+            }\nالوقف الجديد: ${numberText(
+              stopPrice,
+              4
+            )}`
+          );
+
+        if (!confirmed) {
+          return;
+        }
+
+        setEditingStopTradeIds(
+          (current) =>
+            new Set(
+              current
+            ).add(
+              trade.id
+            )
+        );
+
+        setEditStopError("");
+
+        try {
+          const response =
+            await fetch(
+              "/api/admin/active-trades",
+              {
+                method:
+                  "PATCH",
+                cache:
+                  "no-store",
+                credentials:
+                  "include",
+                headers: {
+                  "Content-Type":
+                    "application/json",
+                },
+                body:
+                  JSON.stringify({
+                    tradeId:
+                      trade.id,
+                    stopPrice,
+                  }),
+              }
+            );
+
+          const payload =
+            (await response.json()) as {
+              ok?: boolean;
+              error?: string;
+              stopPrice?: number;
+            };
+
+          if (
+            !response.ok ||
+            !payload.ok ||
+            !Number.isFinite(
+              Number(
+                payload.stopPrice
+              )
+            )
+          ) {
+            throw new Error(
+              payload.error ||
+                "تعذر تعديل وقف الصفقة"
+            );
+          }
+
+          const updatedStop =
+            Number(
+              payload.stopPrice
+            );
+
+          setTrades(
+            (current) => {
+              const next =
+                current.map(
+                  (item) =>
+                    item.id ===
+                    trade.id
+                      ? {
+                          ...item,
+                          stopPrice:
+                            updatedStop,
+                        }
+                      : item
+                );
+
+              tradesRef.current =
+                next;
+
+              return next;
+            }
+          );
+        } catch (editError) {
+          setEditStopError(
+            editError instanceof Error
+              ? editError.message
+              : "تعذر تعديل وقف الصفقة"
+          );
+        } finally {
+          setEditingStopTradeIds(
+            (current) => {
+              const next =
+                new Set(
+                  current
+                );
+
+              next.delete(
+                trade.id
+              );
+
+              return next;
+            }
+          );
+        }
+      },
+      [
+        isAdmin,
+        editingStopTradeIds,
       ]
     );
 
@@ -1339,6 +1541,12 @@ export default function ActiveTradesPage() {
           </div>
         ) : null}
 
+        {editStopError ? (
+          <div className="mb-4 rounded-2xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm font-bold text-amber-200">
+            {editStopError}
+          </div>
+        ) : null}
+
         {favoritesError ? (
           <div className="mb-6 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm font-bold text-amber-200">
             {favoritesError}
@@ -1612,13 +1820,56 @@ export default function ActiveTradesPage() {
                             </button>
 
                             {isAdmin ? (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  void deleteTrade(
-                                    trade
-                                  )
-                                }
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    void editTradeStop(
+                                      trade
+                                    )
+                                  }
+                                  disabled={
+                                    editingStopTradeIds.has(
+                                      trade.id
+                                    ) ||
+                                    trade.contractStatus ===
+                                      "STOPPED" ||
+                                    Boolean(
+                                      trade.closedAt
+                                    )
+                                  }
+                                  aria-label="تعديل وقف الصفقة"
+                                  title="تعديل وقف السهم لهذه الصفقة"
+                                  className={[
+                                    "mt-2 inline-flex h-10 w-10 items-center justify-center rounded-xl border border-amber-400/30 bg-amber-400/10 text-lg text-amber-200 transition hover:border-amber-400/60 hover:bg-amber-400/20",
+                                    editingStopTradeIds.has(
+                                      trade.id
+                                    ) ||
+                                    trade.contractStatus ===
+                                      "STOPPED" ||
+                                    Boolean(
+                                      trade.closedAt
+                                    )
+                                      ? "cursor-not-allowed opacity-50"
+                                      : "",
+                                  ].join(" ")}
+                                >
+                                  {
+                                    editingStopTradeIds.has(
+                                      trade.id
+                                    )
+                                      ? "…"
+                                      : "✏️"
+                                  }
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    void deleteTrade(
+                                      trade
+                                    )
+                                  }
                                 disabled={
                                   deletingTradeIds.has(
                                     trade.id
@@ -1642,7 +1893,8 @@ export default function ActiveTradesPage() {
                                     ? "…"
                                     : "🗑"
                                 }
-                              </button>
+                                </button>
+                              </>
                             ) : null}
                           </td>
 
@@ -1989,13 +2241,56 @@ export default function ActiveTradesPage() {
                           }                        </button>
 
                         {isAdmin ? (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              void deleteTrade(
-                                trade
-                              )
-                            }
+                          <>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void editTradeStop(
+                                  trade
+                                )
+                              }
+                              disabled={
+                                editingStopTradeIds.has(
+                                  trade.id
+                                ) ||
+                                trade.contractStatus ===
+                                  "STOPPED" ||
+                                Boolean(
+                                  trade.closedAt
+                                )
+                              }
+                              aria-label="تعديل وقف الصفقة"
+                              title="تعديل وقف السهم لهذه الصفقة"
+                              className={[
+                                "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-amber-400/30 bg-amber-400/10 text-lg text-amber-200 transition hover:border-amber-400/60 hover:bg-amber-400/20",
+                                editingStopTradeIds.has(
+                                  trade.id
+                                ) ||
+                                trade.contractStatus ===
+                                  "STOPPED" ||
+                                Boolean(
+                                  trade.closedAt
+                                )
+                                  ? "cursor-not-allowed opacity-50"
+                                  : "",
+                              ].join(" ")}
+                            >
+                              {
+                                editingStopTradeIds.has(
+                                  trade.id
+                                )
+                                  ? "…"
+                                  : "✏️"
+                              }
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void deleteTrade(
+                                  trade
+                                )
+                              }
                             disabled={
                               deletingTradeIds.has(
                                 trade.id
@@ -2019,7 +2314,8 @@ export default function ActiveTradesPage() {
                                 ? "…"
                                 : "🗑"
                             }
-                          </button>
+                            </button>
+                          </>
                         ) : null}
                       </div>
                     </div>
