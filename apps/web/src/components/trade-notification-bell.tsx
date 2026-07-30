@@ -62,11 +62,14 @@ const ACTIVE_BASELINE_KEY =
 const SPX_BASELINE_KEY =
   "st_market_spx_trade_seen_ids";
 
+const AUTO_ENABLE_MIGRATION_KEY =
+  "st_market_trade_alerts_auto_enabled_v1";
+
 const POLL_INTERVAL_MS = 5_000;
 
 const DEFAULT_SETTINGS: NotificationSettings = {
-  activeTradesEnabled: false,
-  spxTradesEnabled: false,
+  activeTradesEnabled: true,
+  spxTradesEnabled: true,
   soundEnabled: true,
 };
 
@@ -277,6 +280,39 @@ export default function TradeNotificationBell() {
   const notificationsEnabled =
     settings.activeTradesEnabled ||
     settings.spxTradesEnabled;
+
+  const unlockAudio =
+    useCallback(async () => {
+      try {
+        const AudioContextClass =
+          window.AudioContext ||
+          (
+            window as typeof window & {
+              webkitAudioContext?: typeof AudioContext;
+            }
+          ).webkitAudioContext;
+
+        if (!AudioContextClass) {
+          return;
+        }
+
+        const context =
+          audioContextRef.current ||
+          new AudioContextClass();
+
+        audioContextRef.current =
+          context;
+
+        if (
+          context.state ===
+          "suspended"
+        ) {
+          await context.resume();
+        }
+      } catch {
+        // المتصفح قد يمنع الصوت حتى أول تفاعل حقيقي.
+      }
+    }, []);
 
   const playSound =
     useCallback(() => {
@@ -644,12 +680,44 @@ export default function TradeNotificationBell() {
     ]);
 
   useEffect(() => {
-    setSettings(
+    const migrationDone =
+      window.localStorage.getItem(
+        AUTO_ENABLE_MIGRATION_KEY
+      ) === "1";
+
+    const storedSettings =
       readJson<NotificationSettings>(
         SETTINGS_KEY,
         DEFAULT_SETTINGS
-      )
+      );
+
+    const nextSettings =
+      migrationDone
+        ? storedSettings
+        : {
+            activeTradesEnabled:
+              true,
+            spxTradesEnabled:
+              true,
+            soundEnabled:
+              true,
+          };
+
+    setSettings(
+      nextSettings
     );
+
+    if (!migrationDone) {
+      writeJson(
+        SETTINGS_KEY,
+        nextSettings
+      );
+
+      window.localStorage.setItem(
+        AUTO_ENABLE_MIGRATION_KEY,
+        "1"
+      );
+    }
 
     setItems(
       readJson<NotificationItem[]>(
@@ -660,6 +728,77 @@ export default function TradeNotificationBell() {
 
     setReady(true);
   }, []);
+
+  useEffect(() => {
+    if (!ready) {
+      return;
+    }
+
+    let unlocked = false;
+
+    const handleFirstInteraction =
+      () => {
+        if (unlocked) {
+          return;
+        }
+
+        unlocked = true;
+        void unlockAudio();
+
+        window.removeEventListener(
+          "pointerdown",
+          handleFirstInteraction
+        );
+
+        window.removeEventListener(
+          "keydown",
+          handleFirstInteraction
+        );
+
+        window.removeEventListener(
+          "touchstart",
+          handleFirstInteraction
+        );
+      };
+
+    window.addEventListener(
+      "pointerdown",
+      handleFirstInteraction,
+      {
+        passive: true,
+      }
+    );
+
+    window.addEventListener(
+      "keydown",
+      handleFirstInteraction
+    );
+
+    window.addEventListener(
+      "touchstart",
+      handleFirstInteraction,
+      {
+        passive: true,
+      }
+    );
+
+    return () => {
+      window.removeEventListener(
+        "pointerdown",
+        handleFirstInteraction
+      );
+
+      window.removeEventListener(
+        "keydown",
+        handleFirstInteraction
+      );
+
+      window.removeEventListener(
+        "touchstart",
+        handleFirstInteraction
+      );
+    };
+  }, [ready, unlockAudio]);
 
   useEffect(() => {
     if (!ready) {
