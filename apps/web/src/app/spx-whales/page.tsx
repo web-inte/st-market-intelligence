@@ -727,11 +727,26 @@ export default function SpxWhalesPage() {
           من المسار الكامل بعد رد quote الأحدث.
         */
         setLiveTrade((previous) => {
+          /*
+            لا نسمح لرد صفقة قديمة أن يستبدل
+            أو يرفع بيانات صفقة جديدة مختلفة.
+          */
+          if (
+            previous?.id &&
+            previous.id !==
+              updatedTrade.id
+          ) {
+            return previous;
+          }
+
           const previousBest =
-            Number(
-              previous?.best_price ||
-              0
-            );
+            previous?.id ===
+            updatedTrade.id
+              ? Number(
+                  previous.best_price ||
+                  0
+                )
+              : 0;
 
           const returnedBest =
             Number(
@@ -741,7 +756,8 @@ export default function SpxWhalesPage() {
 
           const returnedCurrent =
             Number(
-              updatedTrade.current_price ||
+              updatedTrade.display_price ??
+              updatedTrade.current_price ??
               0
             );
 
@@ -767,11 +783,26 @@ export default function SpxWhalesPage() {
           const currentActive =
             current.activeTrade;
 
+          /*
+            إذا كانت الصفحة تعرض صفقة جديدة
+            ووصل رد قديم لصفقة مختلفة، نرفضه.
+          */
+          if (
+            currentActive?.id &&
+            currentActive.id !==
+              updatedTrade.id
+          ) {
+            return current;
+          }
+
           const previousBest =
-            Number(
-              currentActive?.best_price ||
-              0
-            );
+            currentActive?.id ===
+            updatedTrade.id
+              ? Number(
+                  currentActive.best_price ||
+                  0
+                )
+              : 0;
 
           const returnedBest =
             Number(
@@ -781,7 +812,8 @@ export default function SpxWhalesPage() {
 
           const returnedCurrent =
             Number(
-              updatedTrade.current_price ||
+              updatedTrade.display_price ??
+              updatedTrade.current_price ??
               0
             );
 
