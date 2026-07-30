@@ -1060,13 +1060,6 @@ export default function TradeNotificationBell() {
                       checked,
                   })
                 );
-
-                if (checked) {
-                  window.setTimeout(
-                    playSound,
-                    0
-                  );
-                }
               }}
               label="تشغيل صوت التنبيه"
             />
