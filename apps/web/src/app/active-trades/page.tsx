@@ -1489,7 +1489,7 @@ export default function ActiveTradesPage() {
 
             <div
               className={[
-                "hidden overflow-hidden rounded-3xl border border-slate-800 bg-slate-900/70 xl:block",
+                "hidden",
                 normalizedTradeSymbolSearch &&
                 filteredTrades.length === 0
                   ? "xl:hidden"
@@ -1870,7 +1870,7 @@ export default function ActiveTradesPage() {
               </div>
             </div>
 
-            <div className="grid gap-4 xl:hidden">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
               {filteredTrades.map(
                 (trade) => (
                   <article
@@ -2024,7 +2024,7 @@ export default function ActiveTradesPage() {
                       </div>
                     </div>
 
-                    <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                    <div className="mt-5 grid grid-cols-2 gap-3">
                       <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-3">
                         <p className="text-xs text-slate-500">
                           السترايك
