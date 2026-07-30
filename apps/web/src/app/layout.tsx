@@ -1,5 +1,6 @@
 import GlobalBackButton from "@/components/global-back-button";
 import SiteAnnouncementModal from "@/components/site-announcement-modal";
+import TradeNotificationBell from "@/components/trade-notification-bell";
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
@@ -71,6 +72,7 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col">
         <GlobalBackButton />
         <SiteAnnouncementModal />
+        <TradeNotificationBell />
         {children}
       </body>
     </html>
