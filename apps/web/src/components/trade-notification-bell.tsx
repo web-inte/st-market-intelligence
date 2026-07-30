@@ -136,6 +136,43 @@ function numberValue(value: unknown) {
     : null;
 }
 
+function timestampValue(
+  value: unknown
+) {
+  if (
+    typeof value === "number" &&
+    Number.isFinite(value)
+  ) {
+    return value < 10_000_000_000
+      ? value * 1_000
+      : value;
+  }
+
+  const raw =
+    textValue(value);
+
+  if (!raw) {
+    return null;
+  }
+
+  const numeric =
+    Number(raw);
+
+  if (Number.isFinite(numeric)) {
+    return numeric <
+      10_000_000_000
+      ? numeric * 1_000
+      : numeric;
+  }
+
+  const parsed =
+    Date.parse(raw);
+
+  return Number.isFinite(parsed)
+    ? parsed
+    : null;
+}
+
 function getActiveRows(
   payload: ActiveTradesPayload
 ): ActiveTradeRow[] {
@@ -258,6 +295,12 @@ export default function TradeNotificationBell() {
 
   const activeRequestRunning =
     useRef(false);
+
+  const activeBaselineReady =
+    useRef(false);
+
+  const activeWatcherStartedAt =
+    useRef(Date.now());
 
   const spxRequestRunning =
     useRef(false);
@@ -591,10 +634,28 @@ export default function TradeNotificationBell() {
             []
           );
 
-        if (storedIds.length === 0) {
+        /*
+          أول استجابة ناجحة بعد فتح الصفحة
+          تعتبر خط أساس فقط.
+
+          بهذه الطريقة لا يصدر الجرس تنبيهًا
+          عن عقد كان موجودًا قبل تشغيله،
+          حتى لو لم يكن معرّفه محفوظًا سابقًا.
+        */
+        if (
+          !activeBaselineReady.current
+        ) {
+          activeBaselineReady.current =
+            true;
+
           writeJson(
             ACTIVE_BASELINE_KEY,
-            currentIds
+            Array.from(
+              new Set([
+                ...storedIds,
+                ...currentIds,
+              ])
+            ).slice(-500)
           );
 
           return;
@@ -611,6 +672,28 @@ export default function TradeNotificationBell() {
             !id ||
             seen.has(id)
           ) {
+            continue;
+          }
+
+          const activatedAt =
+            timestampValue(
+              trade.activatedAt
+            );
+
+          /*
+            العقد غير المعروف لا يُعد جديدًا
+            إلا إذا كان وقت تفعيله بعد تشغيل
+            مراقب التنبيهات في هذه الجلسة.
+
+            العقود القديمة أو التي لا تحتوي
+            على وقت تفعيل تُحفظ بصمت فقط.
+          */
+          const isActuallyNew =
+            activatedAt !== null &&
+            activatedAt >=
+              activeWatcherStartedAt.current;
+
+          if (!isActuallyNew) {
             continue;
           }
 
@@ -641,6 +724,11 @@ export default function TradeNotificationBell() {
           });
         }
 
+        /*
+          نحفظ جميع المعرّفات، سواء كانت
+          جديدة أو قديمة، حتى لا يعاد
+          فحصها أو التنبيه عنها مرة أخرى.
+        */
         writeJson(
           ACTIVE_BASELINE_KEY,
           Array.from(
