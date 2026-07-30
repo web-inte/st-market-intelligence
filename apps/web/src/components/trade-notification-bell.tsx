@@ -8,10 +8,18 @@ import {
   useState,
 } from "react";
 
+type NotificationSound =
+  | "classic"
+  | "pulse"
+  | "alert"
+  | "soft";
+
 type NotificationSettings = {
   activeTradesEnabled: boolean;
   spxTradesEnabled: boolean;
   soundEnabled: boolean;
+  activeSound: NotificationSound;
+  spxSound: NotificationSound;
 };
 
 type NotificationItem = {
@@ -71,6 +79,8 @@ const DEFAULT_SETTINGS: NotificationSettings = {
   activeTradesEnabled: true,
   spxTradesEnabled: true,
   soundEnabled: true,
+  activeSound: "pulse",
+  spxSound: "alert",
 };
 
 const HIDDEN_PATHS = new Set([
@@ -298,83 +308,186 @@ export default function TradeNotificationBell() {
     }, []);
 
   const playSound =
-    useCallback(() => {
-      if (!settings.soundEnabled) {
-        return;
-      }
-
-      try {
-        const AudioContextClass =
-          window.AudioContext ||
-          (
-            window as typeof window & {
-              webkitAudioContext?: typeof AudioContext;
-            }
-          ).webkitAudioContext;
-
-        if (!AudioContextClass) {
+    useCallback(
+      (
+        preset: NotificationSound,
+        force = false
+      ) => {
+        if (
+          !force &&
+          !settings.soundEnabled
+        ) {
           return;
         }
 
-        const context =
-          audioContextRef.current ||
-          new AudioContextClass();
+        try {
+          const AudioContextClass =
+            window.AudioContext ||
+            (
+              window as typeof window & {
+                webkitAudioContext?:
+                  typeof AudioContext;
+              }
+            ).webkitAudioContext;
 
-        audioContextRef.current =
-          context;
+          if (!AudioContextClass) {
+            return;
+          }
 
-        if (
-          context.state ===
-          "suspended"
-        ) {
-          void context.resume();
+          const context =
+            audioContextRef.current ||
+            new AudioContextClass();
+
+          audioContextRef.current =
+            context;
+
+          if (
+            context.state ===
+            "suspended"
+          ) {
+            void context.resume();
+          }
+
+          const tones: Record<
+            NotificationSound,
+            Array<{
+              frequency: number;
+              delay: number;
+              duration: number;
+              volume: number;
+              type:
+                | OscillatorType;
+            }>
+          > = {
+            classic: [
+              {
+                frequency: 980,
+                delay: 0,
+                duration: 0.3,
+                volume: 0.2,
+                type: "sine",
+              },
+            ],
+            pulse: [
+              {
+                frequency: 820,
+                delay: 0,
+                duration: 0.16,
+                volume: 0.2,
+                type: "sine",
+              },
+              {
+                frequency: 1_080,
+                delay: 0.19,
+                duration: 0.2,
+                volume: 0.22,
+                type: "sine",
+              },
+            ],
+            alert: [
+              {
+                frequency: 760,
+                delay: 0,
+                duration: 0.13,
+                volume: 0.2,
+                type: "triangle",
+              },
+              {
+                frequency: 980,
+                delay: 0.15,
+                duration: 0.13,
+                volume: 0.22,
+                type: "triangle",
+              },
+              {
+                frequency: 1_240,
+                delay: 0.3,
+                duration: 0.23,
+                volume: 0.24,
+                type: "triangle",
+              },
+            ],
+            soft: [
+              {
+                frequency: 620,
+                delay: 0,
+                duration: 0.22,
+                volume: 0.12,
+                type: "sine",
+              },
+              {
+                frequency: 760,
+                delay: 0.24,
+                duration: 0.28,
+                volume: 0.14,
+                type: "sine",
+              },
+            ],
+          };
+
+          const startAt =
+            context.currentTime +
+            0.01;
+
+          for (
+            const tone of tones[preset]
+          ) {
+            const oscillator =
+              context.createOscillator();
+
+            const gain =
+              context.createGain();
+
+            const toneStart =
+              startAt + tone.delay;
+
+            const toneEnd =
+              toneStart +
+              tone.duration;
+
+            oscillator.type =
+              tone.type;
+
+            oscillator.frequency.setValueAtTime(
+              tone.frequency,
+              toneStart
+            );
+
+            gain.gain.setValueAtTime(
+              0.0001,
+              toneStart
+            );
+
+            gain.gain.exponentialRampToValueAtTime(
+              tone.volume,
+              toneStart + 0.025
+            );
+
+            gain.gain.exponentialRampToValueAtTime(
+              0.0001,
+              toneEnd
+            );
+
+            oscillator.connect(gain);
+
+            gain.connect(
+              context.destination
+            );
+
+            oscillator.start(
+              toneStart
+            );
+
+            oscillator.stop(
+              toneEnd + 0.02
+            );
+          }
+        } catch {
+          // بعض المتصفحات تمنع الصوت قبل أول تفاعل.
         }
-
-        const oscillator =
-          context.createOscillator();
-
-        const gain =
-          context.createGain();
-
-        oscillator.type = "sine";
-        oscillator.frequency.setValueAtTime(
-          880,
-          context.currentTime
-        );
-
-        oscillator.frequency.setValueAtTime(
-          1_080,
-          context.currentTime + 0.12
-        );
-
-        gain.gain.setValueAtTime(
-          0.0001,
-          context.currentTime
-        );
-
-        gain.gain.exponentialRampToValueAtTime(
-          0.22,
-          context.currentTime + 0.02
-        );
-
-        gain.gain.exponentialRampToValueAtTime(
-          0.0001,
-          context.currentTime + 0.35
-        );
-
-        oscillator.connect(gain);
-        gain.connect(
-          context.destination
-        );
-
-        oscillator.start();
-        oscillator.stop(
-          context.currentTime + 0.36
-        );
-      } catch {
-        // بعض المتصفحات تمنع الصوت قبل أول تفاعل.
-      }
-    }, [settings.soundEnabled]);
+      },
+      [settings.soundEnabled]
+    );
 
   const addNotification =
     useCallback(
@@ -410,12 +523,21 @@ export default function TradeNotificationBell() {
             next
           );
 
-          playSound();
+          playSound(
+            item.type ===
+              "SPX_TRADE"
+              ? settings.spxSound
+              : settings.activeSound
+          );
 
           return next;
         });
       },
-      [playSound]
+      [
+        playSound,
+        settings.activeSound,
+        settings.spxSound,
+      ]
     );
 
   const checkActiveTrades =
@@ -668,23 +790,20 @@ export default function TradeNotificationBell() {
         AUTO_ENABLE_MIGRATION_KEY
       ) === "1";
 
-    const storedSettings =
-      readJson<NotificationSettings>(
+    const storedSettings = {
+      ...DEFAULT_SETTINGS,
+      ...readJson<
+        Partial<NotificationSettings>
+      >(
         SETTINGS_KEY,
-        DEFAULT_SETTINGS
-      );
+        {}
+      ),
+    };
 
     const nextSettings =
       migrationDone
         ? storedSettings
-        : {
-            activeTradesEnabled:
-              true,
-            spxTradesEnabled:
-              true,
-            soundEnabled:
-              true,
-          };
+        : DEFAULT_SETTINGS;
 
     setSettings(
       nextSettings
@@ -1063,6 +1182,126 @@ export default function TradeNotificationBell() {
               }}
               label="تشغيل صوت التنبيه"
             />
+
+            <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <label
+                  htmlFor="active-trade-sound"
+                  className="text-xs font-bold text-slate-300"
+                >
+                  نغمة الصفقات النشطة
+                </label>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    void unlockAudio();
+
+                    playSound(
+                      settings.activeSound,
+                      true
+                    );
+                  }}
+                  className="rounded-lg border border-sky-400/30 bg-sky-400/10 px-3 py-1.5 text-[11px] font-black text-sky-300 transition hover:bg-sky-400/20"
+                >
+                  تجربة
+                </button>
+              </div>
+
+              <select
+                id="active-trade-sound"
+                value={
+                  settings.activeSound
+                }
+                onChange={(event) =>
+                  setSettings(
+                    (previous) => ({
+                      ...previous,
+                      activeSound:
+                        event.target
+                          .value as NotificationSound,
+                    })
+                  )
+                }
+                className="w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2.5 text-sm font-bold text-white outline-none transition focus:border-sky-400/50"
+              >
+                <option value="classic">
+                  كلاسيكية — نغمة واحدة
+                </option>
+
+                <option value="pulse">
+                  نبض — تن تن
+                </option>
+
+                <option value="alert">
+                  تنبيه — ثلاث نغمات
+                </option>
+
+                <option value="soft">
+                  هادئة — نغمتان خفيفتان
+                </option>
+              </select>
+            </div>
+
+            <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <label
+                  htmlFor="spx-trade-sound"
+                  className="text-xs font-bold text-slate-300"
+                >
+                  نغمة صفقات SPX
+                </label>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    void unlockAudio();
+
+                    playSound(
+                      settings.spxSound,
+                      true
+                    );
+                  }}
+                  className="rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-1.5 text-[11px] font-black text-amber-300 transition hover:bg-amber-400/20"
+                >
+                  تجربة
+                </button>
+              </div>
+
+              <select
+                id="spx-trade-sound"
+                value={
+                  settings.spxSound
+                }
+                onChange={(event) =>
+                  setSettings(
+                    (previous) => ({
+                      ...previous,
+                      spxSound:
+                        event.target
+                          .value as NotificationSound,
+                    })
+                  )
+                }
+                className="w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2.5 text-sm font-bold text-white outline-none transition focus:border-amber-400/50"
+              >
+                <option value="classic">
+                  كلاسيكية — نغمة واحدة
+                </option>
+
+                <option value="pulse">
+                  نبض — تن تن
+                </option>
+
+                <option value="alert">
+                  تنبيه — ثلاث نغمات
+                </option>
+
+                <option value="soft">
+                  هادئة — نغمتان خفيفتان
+                </option>
+              </select>
+            </div>
           </div>
 
           <div className="border-t border-white/10">
