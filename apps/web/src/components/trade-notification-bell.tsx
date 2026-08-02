@@ -1189,7 +1189,7 @@ export default function TradeNotificationBell() {
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-3 max-h-[calc(100dvh-5rem)] w-[min(92vw,360px)] overflow-y-auto overscroll-contain rounded-2xl border border-white/10 bg-slate-950/98 shadow-2xl backdrop-blur">
+        <div className="fixed inset-x-3 bottom-3 top-20 w-auto overflow-y-auto overscroll-y-contain touch-pan-y [-webkit-overflow-scrolling:touch] rounded-2xl border border-white/10 bg-slate-950/98 pb-[env(safe-area-inset-bottom)] shadow-2xl backdrop-blur md:absolute md:inset-x-auto md:bottom-auto md:right-0 md:top-auto md:mt-3 md:max-h-[calc(100dvh-5rem)] md:w-[min(92vw,360px)] md:pb-0">
           <div className="border-b border-white/10 px-4 py-4">
             <div className="flex items-center justify-between gap-3">
               <div>
@@ -1409,7 +1409,7 @@ export default function TradeNotificationBell() {
               )}
             </div>
 
-            <div className="max-h-72 overflow-y-auto px-3 pb-3">
+            <div className="px-3 pb-3 md:max-h-72 md:overflow-y-auto md:overscroll-contain">
               {items.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-white/10 px-4 py-6 text-center text-sm text-slate-500">
                   لا توجد تنبيهات جديدة
