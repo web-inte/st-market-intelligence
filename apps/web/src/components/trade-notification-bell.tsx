@@ -1189,7 +1189,7 @@ export default function TradeNotificationBell() {
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-3 w-[min(92vw,360px)] overflow-hidden rounded-2xl border border-white/10 bg-slate-950/98 shadow-2xl backdrop-blur">
+        <div className="absolute right-0 mt-3 max-h-[calc(100dvh-5rem)] w-[min(92vw,360px)] overflow-y-auto overscroll-contain rounded-2xl border border-white/10 bg-slate-950/98 shadow-2xl backdrop-blur">
           <div className="border-b border-white/10 px-4 py-4">
             <div className="flex items-center justify-between gap-3">
               <div>
