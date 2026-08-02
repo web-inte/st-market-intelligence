@@ -145,6 +145,17 @@ type ApiData = {
   updatedAt?: string;
 };
 
+type DailyStatistics = {
+  tradeDate: string;
+  tradesCount: number;
+  winsCount: number;
+  lossesCount: number;
+  profitAmount: number;
+  lossAmount: number;
+  netProfit: number;
+  updatedAt: string | null;
+};
+
 function formatNumber(
   value: unknown,
   digits = 2
@@ -607,6 +618,60 @@ export default function SpxWhalesPage() {
   const [error, setError] =
     useState("");
 
+  const [
+    dailyStatistics,
+    setDailyStatistics,
+  ] = useState<DailyStatistics>({
+    tradeDate: "",
+    tradesCount: 0,
+    winsCount: 0,
+    lossesCount: 0,
+    profitAmount: 0,
+    lossAmount: 0,
+    netProfit: 0,
+    updatedAt: null,
+  });
+
+  const loadDailyStatistics =
+    useCallback(async () => {
+      try {
+        const response =
+          await fetch(
+            `/api/spx-daily-statistics?t=${Date.now()}`,
+            {
+              cache: "no-store",
+            }
+          );
+
+        const payload =
+          (await response.json()) as {
+            ok: boolean;
+            statistics?: DailyStatistics;
+            error?: string;
+          };
+
+        if (
+          !response.ok ||
+          !payload.ok ||
+          !payload.statistics
+        ) {
+          throw new Error(
+            payload.error ||
+              "تعذر تحميل إحصائية SPX اليومية"
+          );
+        }
+
+        setDailyStatistics(
+          payload.statistics
+        );
+      } catch (statisticsError) {
+        console.warn(
+          "تعذر تحميل إحصائية SPX اليومية:",
+          statisticsError
+        );
+      }
+    }, []);
+
   /*
     آخر تحديث حي للعقد منفصل عن نتيجة التحليل الكامل،
     حتى لا يعيد طلب التحليل كتابة السعر بقيمة أقدم.
@@ -651,6 +716,12 @@ export default function SpxWhalesPage() {
         }
 
         setData(payload);
+
+        /*
+          نحدّث إحصائية اليوم بعد تحديث
+          بيانات الصفقة، خصوصًا عند الإغلاق.
+        */
+        await loadDailyStatistics();
       } catch (loadError) {
         setError(
           loadError instanceof Error
@@ -662,7 +733,7 @@ export default function SpxWhalesPage() {
         setRefreshing(false);
       }
     },
-    []
+    [loadDailyStatistics]
   );
 
   const quoteRequestRunning =
@@ -1861,6 +1932,89 @@ export default function SpxWhalesPage() {
             </div>
           </div>
         </header>
+
+        <section className="mt-6">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-black text-white">
+                إحصائية SPX اليوم
+              </h2>
+
+              <p className="mt-1 text-xs font-bold text-slate-500">
+                {dailyStatistics.tradeDate ||
+                  "تاريخ اليوم بتوقيت السعودية"}
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <article className="rounded-2xl border border-cyan-400/20 bg-cyan-400/[0.06] p-4">
+              <p className="text-xs font-black text-cyan-300">
+                صفقات اليوم
+              </p>
+
+              <p className="mt-2 text-2xl font-black text-white">
+                {dailyStatistics.tradesCount}
+              </p>
+            </article>
+
+            <article className="rounded-2xl border border-emerald-400/20 bg-emerald-400/[0.06] p-4">
+              <p className="text-xs font-black text-emerald-300">
+                المكسب
+              </p>
+
+              <p className="mt-2 text-2xl font-black text-emerald-300">
+                ${formatNumber(
+                  dailyStatistics.profitAmount,
+                  2
+                )}
+              </p>
+            </article>
+
+            <article className="rounded-2xl border border-rose-400/20 bg-rose-400/[0.06] p-4">
+              <p className="text-xs font-black text-rose-300">
+                الخسارة
+              </p>
+
+              <p className="mt-2 text-2xl font-black text-rose-300">
+                ${formatNumber(
+                  dailyStatistics.lossAmount,
+                  2
+                )}
+              </p>
+            </article>
+
+            <article className="rounded-2xl border border-violet-400/20 bg-violet-400/[0.06] p-4">
+              <p className="text-xs font-black text-violet-300">
+                الصافي
+              </p>
+
+              <p
+                className={[
+                  "mt-2 text-2xl font-black",
+                  dailyStatistics.netProfit > 0
+                    ? "text-emerald-300"
+                    : dailyStatistics.netProfit < 0
+                      ? "text-rose-300"
+                      : "text-white",
+                ].join(" ")}
+              >
+                {dailyStatistics.netProfit > 0
+                  ? "+"
+                  : dailyStatistics.netProfit < 0
+                    ? "-"
+                    : ""}
+                ${formatNumber(
+                  Math.abs(
+                    dailyStatistics.netProfit
+                  ),
+                  2
+                )}
+              </p>
+            </article>
+          </div>
+        </section>
+
 
         {error ? (
           <div className="mt-5 rounded-2xl border border-rose-400/30 bg-rose-400/10 p-4 font-bold text-rose-200">

@@ -319,7 +319,7 @@ async function fetchSpxSignal(
 
   if (!response.ok) {
     throw new Error(
-      `تعذر جلب تحليل SPX: ${response.status}`
+      "السوق مغلق"
     );
   }
 
@@ -946,6 +946,38 @@ export async function GET(
             "تعذر تحديث صفقة SPX"
           )
         );
+      }
+
+      /*
+        عند إغلاق الصفقة نسجلها في إحصائية
+        يوم الإغلاق بتوقيت السعودية مرة واحدة فقط.
+
+        فشل الإحصائية لا يلغي إغلاق الصفقة؛
+        تبقى statistics_recorded=false حتى
+        يمكن إعادة المحاولة في الطلب التالي.
+      */
+      if (stopped) {
+        const {
+          error: statisticsError,
+        } = await supabase.rpc(
+          "record_spx_trade_statistics",
+          {
+            p_trade_id:
+              updatedTrade.id,
+          }
+        );
+
+        if (statisticsError) {
+          console.error(
+            "تعذر تسجيل إحصائية صفقة SPX:",
+            {
+              tradeId:
+                updatedTrade.id,
+              message:
+                statisticsError.message,
+            }
+          );
+        }
       }
 
       await supabase
