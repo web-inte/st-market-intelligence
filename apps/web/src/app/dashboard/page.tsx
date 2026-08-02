@@ -1340,10 +1340,10 @@ ${url}`);
           </a>
         </header>
 
-        <section className="mb-8 grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
+        <section className="mb-8 grid gap-4 lg:grid-cols-2 xl:grid-cols-3 xl:gap-5">
           <form
             onSubmit={handleSearch}
-            className="rounded-3xl border border-white/[0.08] bg-slate-950/65 p-5 shadow-2xl shadow-black/20 backdrop-blur-xl sm:p-6 lg:col-span-2 xl:col-span-2"
+            className="rounded-3xl border border-white/[0.08] bg-slate-950/65 p-5 shadow-2xl shadow-black/20 backdrop-blur-xl sm:p-6 lg:col-span-2 xl:col-span-3"
           >
             <p className="mb-3 text-sm text-slate-400">ابحث عن أي سهم</p>
 
@@ -1537,151 +1537,202 @@ ${url}`);
             ) : null}
           </form>
 
-          <button
-            type="button"
-            onClick={() => router.push("/gamma-liquidity?symbol=NVDA")}
-            className="group flex items-center justify-between gap-4 rounded-3xl border border-violet-400/20 bg-slate-950/65 p-5 text-right shadow-2xl shadow-violet-950/20 backdrop-blur-xl transition duration-300 hover:-translate-y-1 hover:border-violet-400/40 sm:p-6"
-          >
-            <div>
-              <p className="text-xs font-bold uppercase tracking-[0.15em] text-violet-400">
+          <div className="grid gap-4 lg:grid-cols-2 xl:contents">
+            <button
+              type="button"
+              onClick={() => router.push("/active-trades")}
+              className="group relative min-h-[160px] overflow-hidden xl:min-h-[205px] rounded-[28px] border border-emerald-400/25 bg-gradient-to-br from-emerald-500/[0.14] via-slate-950/95 to-cyan-500/[0.08] p-5 text-right shadow-[0_20px_55px_rgba(16,185,129,0.08)] transition duration-300 hover:-translate-y-1 hover:border-emerald-300/50 hover:shadow-[0_24px_65px_rgba(16,185,129,0.16)] sm:p-6"
+            >
+              <div className="pointer-events-none absolute -left-16 -top-20 h-48 w-48 rounded-full bg-emerald-400/10 blur-3xl" />
+
+              <div className="relative flex h-full flex-col justify-between gap-7">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-emerald-300/20 bg-emerald-400/10 text-xl font-black text-emerald-300">
+                    ST
+                  </div>
+
+                  <span className="inline-flex items-center gap-2 rounded-full border border-emerald-300/20 bg-emerald-400/10 px-3 py-1.5 text-[11px] font-black tracking-wide text-emerald-300">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-300 shadow-[0_0_10px_rgba(110,231,183,0.9)]" />
+                    LIVE
+                  </span>
+                </div>
+
+                <div className="flex items-end justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-bold tracking-[0.14em] text-emerald-400/90">
+                      المتابعة المباشرة
+                    </p>
+
+                    <h2 className="mt-2 text-2xl font-black text-white">
+                      الصفقات النشطة
+                    </h2>
+
+                    <p className="mt-2 text-sm leading-6 text-slate-400">
+                      تابع سعر العقد والربح والوقف وحالة الصفقة لحظيًا.
+                    </p>
+                  </div>
+
+                  <span className="shrink-0 text-2xl text-emerald-300/70 transition duration-300 group-hover:-translate-x-1 group-hover:text-emerald-200">
+                    ←
+                  </span>
+                </div>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => router.push("/spx-whales")}
+              className="group relative min-h-[160px] overflow-hidden xl:min-h-[205px] rounded-[28px] border border-fuchsia-400/25 bg-gradient-to-br from-fuchsia-500/[0.14] via-slate-950/95 to-violet-500/[0.09] p-5 text-right shadow-[0_20px_55px_rgba(217,70,239,0.08)] transition duration-300 hover:-translate-y-1 hover:border-fuchsia-300/50 hover:shadow-[0_24px_65px_rgba(217,70,239,0.16)] sm:p-6"
+            >
+              <div className="pointer-events-none absolute -left-16 -top-20 h-48 w-48 rounded-full bg-fuchsia-400/10 blur-3xl" />
+
+              <div className="relative flex h-full flex-col justify-between gap-7">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-fuchsia-300/20 bg-fuchsia-400/10 text-sm font-black text-fuchsia-300">
+                    SPX
+                  </div>
+
+                  <span className="rounded-full border border-fuchsia-300/20 bg-fuchsia-400/10 px-3 py-1.5 text-[11px] font-black tracking-wide text-fuchsia-300">
+                    0DTE
+                  </span>
+                </div>
+
+                <div className="flex items-end justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-bold tracking-[0.14em] text-fuchsia-400/90">
+                      فرصة يومية مميزة
+                    </p>
+
+                    <h2 className="mt-2 text-2xl font-black text-white">
+                      فرصة SPX اليومية
+                    </h2>
+
+                    <p className="mt-2 text-sm leading-6 text-slate-400">
+                      رصد لحظي لأقوى فرصة اعتمادًا على القاما والسيولة والزخم.
+                    </p>
+                  </div>
+
+                  <span className="shrink-0 text-2xl text-fuchsia-300/70 transition duration-300 group-hover:-translate-x-1 group-hover:text-fuchsia-200">
+                    ←
+                  </span>
+                </div>
+              </div>
+            </button>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:contents">
+            <button
+              type="button"
+              onClick={() => router.push("/gamma-liquidity?symbol=NVDA")}
+              className="group relative overflow-hidden rounded-[24px] xl:min-h-[205px] border border-violet-400/15 bg-slate-950/70 p-4 text-right transition duration-300 hover:-translate-y-1 hover:border-violet-400/40 hover:bg-violet-400/[0.06] sm:p-5"
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-violet-400/20 bg-violet-400/10 text-lg font-black text-violet-300">
+                  Γ
+                </div>
+
+                <span className="text-xl text-slate-600 transition duration-300 group-hover:-translate-x-1 group-hover:text-violet-300">
+                  ←
+                </span>
+              </div>
+
+              <p className="mt-5 text-[11px] font-bold tracking-[0.12em] text-violet-400">
                 القاما والسيولة
               </p>
 
-              <h2 className="mt-2 text-xl font-black text-white">
+              <h2 className="mt-1.5 text-lg font-black text-white">
                 تحليل القاما والسيولة
               </h2>
 
-              <p className="mt-2 text-sm leading-6 text-slate-400">
-                اعرض صافي GEX والجدران والمغناطيس وتدفق CALL وPUT وأفضل العقود.
+              <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-500">
+                اعرض GEX والجدران والمغناطيس وتدفق العقود.
               </p>
-            </div>
+            </button>
 
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-violet-400/20 bg-violet-400/10 text-xl text-violet-300 transition group-hover:-translate-x-1">
-              ←
-            </div>
-          </button>
+            <button
+              type="button"
+              onClick={() => router.push("/options-analyzer")}
+              className="group relative overflow-hidden rounded-[24px] xl:min-h-[205px] border border-cyan-400/15 bg-slate-950/70 p-4 text-right transition duration-300 hover:-translate-y-1 hover:border-cyan-400/40 hover:bg-cyan-400/[0.06] sm:p-5"
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-cyan-400/20 bg-cyan-400/10 text-lg font-black text-cyan-300">
+                  ◎
+                </div>
 
-          <button
-            type="button"
-            onClick={() =>
-              router.push("/active-trades")
-            }
-            className="group flex items-center justify-between gap-4 rounded-3xl border border-emerald-400/20 bg-gradient-to-br from-emerald-500/10 via-slate-950/80 to-cyan-500/10 p-6 text-right transition duration-300 hover:-translate-y-1 hover:border-emerald-300/40 hover:shadow-[0_18px_45px_rgba(16,185,129,0.15)]"
-          >
-            <div>
-              <p className="text-xs font-bold uppercase tracking-[0.15em] text-emerald-400">
-                المتابعة المباشرة
-              </p>
+                <span className="text-xl text-slate-600 transition duration-300 group-hover:-translate-x-1 group-hover:text-cyan-300">
+                  ←
+                </span>
+              </div>
 
-              <h2 className="mt-2 text-xl font-black text-white">
-                الصفقات النشطة
-              </h2>
-
-              <p className="mt-2 text-sm leading-6 text-slate-400">
-                متابعة سعر العقد والربح والوقف وحالة الصفقة لحظيًا.
-              </p>
-            </div>
-
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-emerald-400/20 bg-emerald-400/10 text-2xl text-emerald-300 transition group-hover:scale-110">
-              ←
-            </div>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => router.push("/options-analyzer")}
-            className="group flex items-center justify-between gap-4 rounded-3xl border border-cyan-400/20 bg-slate-950/65 p-5 text-right shadow-2xl shadow-cyan-950/20 backdrop-blur-xl transition duration-300 hover:-translate-y-1 hover:border-cyan-400/40 sm:p-6"
-          >
-            <div>
-              <p className="text-xs font-bold uppercase tracking-[0.15em] text-cyan-400">
+              <p className="mt-5 text-[11px] font-bold tracking-[0.12em] text-cyan-400">
                 محلل العقود
               </p>
 
-              <h2 className="mt-2 text-xl font-black text-white">
+              <h2 className="mt-1.5 text-lg font-black text-white">
                 تحليل عقود الشركات
               </h2>
 
-              <p className="mt-2 text-sm leading-6 text-slate-400">
-                اختر الشركة ونوع العقد وتاريخ الانتهاء واعرض أفضل العقود.
+              <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-500">
+                اختر الشركة والتاريخ واعرض أفضل العقود.
               </p>
-            </div>
+            </button>
 
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-cyan-400/20 bg-cyan-400/10 text-xl text-cyan-300 transition group-hover:-translate-x-1">
-              ←
-            </div>
-          </button>
+            <button
+              type="button"
+              onClick={() => router.push("/whale-trades")}
+              className="group relative overflow-hidden rounded-[24px] xl:min-h-[205px] border border-amber-400/15 bg-slate-950/70 p-4 text-right transition duration-300 hover:-translate-y-1 hover:border-amber-400/40 hover:bg-amber-400/[0.06] sm:p-5"
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-amber-400/20 bg-amber-400/10 text-lg text-amber-300">
+                  ◈
+                </div>
 
-          <button
-            type="button"
-            onClick={() => router.push("/whale-trades")}
-            className="group flex items-center justify-between gap-4 rounded-3xl border border-amber-400/20 bg-slate-950/65 p-5 text-right shadow-2xl shadow-amber-950/20 backdrop-blur-xl transition duration-300 hover:-translate-y-1 hover:border-amber-400/40 sm:p-6"
-          >
-            <div>
-              <p className="text-xs font-bold uppercase tracking-[0.15em] text-amber-400">
+                <span className="text-xl text-slate-600 transition duration-300 group-hover:-translate-x-1 group-hover:text-amber-300">
+                  ←
+                </span>
+              </div>
+
+              <p className="mt-5 text-[11px] font-bold tracking-[0.12em] text-amber-400">
                 الرصد المؤسسي
               </p>
 
-              <h2 className="mt-2 text-xl font-black text-white">
+              <h2 className="mt-1.5 text-lg font-black text-white">
                 صفقات الحيتان
               </h2>
 
-              <p className="mt-2 text-sm leading-6 text-slate-400">
-                اعرض العقود الكبيرة المرصودة تلقائيًا وتحليل قوتها وسيولتها.
+              <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-500">
+                راقب العقود الكبيرة وقوة السيولة والاتجاه.
               </p>
-            </div>
+            </button>
 
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-amber-400/20 bg-amber-400/10 text-xl text-amber-300 transition group-hover:-translate-x-1">
-              ←
-            </div>
-          </button>
+            <button
+              type="button"
+              onClick={() => router.push("/market-news")}
+              className="group relative overflow-hidden rounded-[24px] xl:min-h-[205px] border border-sky-400/15 bg-slate-950/70 p-4 text-right transition duration-300 hover:-translate-y-1 hover:border-sky-400/40 hover:bg-sky-400/[0.06] sm:p-5"
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-sky-400/20 bg-sky-400/10 text-lg text-sky-300">
+                  ◫
+                </div>
 
-          <button
-            type="button"
-            onClick={() => router.push("/market-news")}
-            className="group flex items-center justify-between gap-4 rounded-3xl border border-sky-400/20 bg-gradient-to-br from-sky-500/10 via-slate-950/80 to-cyan-500/10 p-5 text-right shadow-2xl shadow-sky-950/20 backdrop-blur-xl transition duration-300 hover:-translate-y-1 hover:border-sky-400/40 sm:p-6"
-          >
-            <div>
-              <p className="text-xs font-bold uppercase tracking-[0.15em] text-sky-400">
+                <span className="text-xl text-slate-600 transition duration-300 group-hover:-translate-x-1 group-hover:text-sky-300">
+                  ←
+                </span>
+              </div>
+
+              <p className="mt-5 text-[11px] font-bold tracking-[0.12em] text-sky-400">
                 محركات السوق
               </p>
 
-              <h2 className="mt-2 text-xl font-black text-white">
+              <h2 className="mt-1.5 text-lg font-black text-white">
                 أهم أخبار السوق
               </h2>
 
-              <p className="mt-2 text-sm leading-6 text-slate-400">
-                تابع الأرباح والعقود والاستحواذات والأخبار التي قد تحرك الأسهم.
+              <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-500">
+                تابع الأخبار والأرباح والأحداث المؤثرة.
               </p>
-            </div>
-
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-sky-400/20 bg-sky-400/10 text-xl text-sky-300 transition group-hover:-translate-x-1">
-              ←
-            </div>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => router.push("/spx-whales")}
-            className="group flex items-center justify-between gap-4 rounded-3xl border border-fuchsia-400/20 bg-gradient-to-br from-fuchsia-500/10 via-slate-950/80 to-violet-500/10 p-5 text-right shadow-2xl shadow-fuchsia-950/20 backdrop-blur-xl transition duration-300 hover:-translate-y-1 hover:border-fuchsia-400/40 sm:p-6"
-          >
-            <div>
-              <p className="text-xs font-bold uppercase tracking-[0.15em] text-fuchsia-400">
-                فرصة يومية مميزة
-              </p>
-
-              <h2 className="mt-2 text-xl font-black text-white">
-                فرصة SPX اليومية
-              </h2>
-
-              <p className="mt-2 text-sm leading-6 text-slate-400">
-                رصد لحظي لأقوى عقد SPX 0DTE اعتمادًا على القاما والسيولة والزخم.
-              </p>
-            </div>
-
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-fuchsia-400/20 bg-fuchsia-400/10 text-xl text-fuchsia-300 transition group-hover:-translate-x-1">
-              ←
-            </div>
-          </button>
+            </button>
+          </div>
         </section>
 
         <section className="mb-10 grid gap-4 lg:grid-cols-[1.4fr_1fr]">
