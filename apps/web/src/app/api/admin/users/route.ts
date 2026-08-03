@@ -286,6 +286,124 @@ export async function GET(
       );
     }
 
+    /*
+     * قراءة مطالبات الأجهزة لمعرفة سبب
+     * عدم منح الفترة التجريبية لكل مستخدم.
+     */
+    const deviceHashes = Array.from(
+      new Set(
+        selectedUsers
+          .map((authUser) =>
+            String(
+              authUser.user_metadata
+                ?.device_hash || ""
+            )
+              .trim()
+              .toLowerCase()
+          )
+          .filter(
+            (deviceHash) =>
+              deviceHash.length >= 32
+          )
+      )
+    );
+
+    const deviceClaimsMap = new Map<
+      string,
+      Record<string, unknown>
+    >();
+
+    const deviceClaimOwnerEmails =
+      new Map<string, string>();
+
+    if (deviceHashes.length > 0) {
+      const {
+        data: deviceClaims,
+        error: deviceClaimsError,
+      } = await admin
+        .from("trial_device_claims")
+        .select(
+          "device_hash,user_id,claimed_at"
+        )
+        .in(
+          "device_hash",
+          deviceHashes
+        );
+
+      if (deviceClaimsError) {
+        throw deviceClaimsError;
+      }
+
+      const ownerIds = Array.from(
+        new Set(
+          (deviceClaims || [])
+            .map((claim) =>
+              String(
+                claim.user_id || ""
+              )
+            )
+            .filter(Boolean)
+        )
+      );
+
+      const selectedUserEmailMap =
+        new Map(
+          selectedUsers.map(
+            (authUser) => [
+              authUser.id,
+              authUser.email || "",
+            ]
+          )
+        );
+
+      for (
+        const claim of
+          deviceClaims || []
+      ) {
+        deviceClaimsMap.set(
+          String(
+            claim.device_hash || ""
+          ),
+          claim as Record<
+            string,
+            unknown
+          >
+        );
+      }
+
+      await Promise.all(
+        ownerIds.map(
+          async (ownerId) => {
+            const knownEmail =
+              selectedUserEmailMap.get(
+                ownerId
+              );
+
+            if (knownEmail) {
+              deviceClaimOwnerEmails.set(
+                ownerId,
+                knownEmail
+              );
+              return;
+            }
+
+            const {
+              data: ownerData,
+            } =
+              await admin.auth.admin.getUserById(
+                ownerId
+              );
+
+            deviceClaimOwnerEmails.set(
+              ownerId,
+              ownerData.user?.email ||
+                "حساب آخر"
+            );
+          }
+        )
+      );
+    }
+
     const now = Date.now();
 
     const users = selectedUsers.map(
@@ -328,6 +446,111 @@ export async function GET(
           activeSubscription ||
           subscriptions[0] ||
           null;
+
+        const hasPreviousTrial =
+          subscriptions.some(
+            (subscriptionRow) => {
+              const planValue =
+                subscriptionRow.plans;
+
+              const plan = Array.isArray(
+                planValue
+              )
+                ? planValue[0]
+                : planValue;
+
+              return Boolean(
+                plan &&
+                typeof plan ===
+                  "object" &&
+                (
+                  plan as Record<
+                    string,
+                    unknown
+                  >
+                ).is_trial
+              );
+            }
+          );
+
+        const deviceHash =
+          String(
+            authUser.user_metadata
+              ?.device_hash || ""
+          )
+            .trim()
+            .toLowerCase();
+
+        const deviceClaim =
+          deviceHash.length >= 32
+            ? deviceClaimsMap.get(
+                deviceHash
+              )
+            : null;
+
+        const claimOwnerId =
+          deviceClaim
+            ? String(
+                deviceClaim.user_id ||
+                  ""
+              )
+            : "";
+
+        const claimOwnerEmail =
+          claimOwnerId
+            ? deviceClaimOwnerEmails.get(
+                claimOwnerId
+              ) ||
+              "حساب آخر"
+            : null;
+
+        let trialEligible = true;
+        let trialEligibilityReason =
+          "مستحق لتجربة مجانية لمدة 5 أيام";
+
+        if (
+          (profile?.role || "user") ===
+          "admin"
+        ) {
+          trialEligible = false;
+          trialEligibilityReason =
+            "حساب مسؤول ولا يحتاج إلى فترة تجريبية";
+        } else if (
+          !authUser.email_confirmed_at
+        ) {
+          trialEligible = false;
+          trialEligibilityReason =
+            "لم يتم تأكيد البريد الإلكتروني";
+        } else if (
+          activeSubscription
+        ) {
+          trialEligible = false;
+          trialEligibilityReason =
+            "لديه اشتراك فعال حاليًا";
+        } else if (
+          Boolean(
+            profile?.trial_used
+          ) ||
+          hasPreviousTrial
+        ) {
+          trialEligible = false;
+          trialEligibilityReason =
+            "سبق أن حصل هذا الحساب على الفترة التجريبية";
+        } else if (
+          deviceHash.length < 32
+        ) {
+          trialEligible = false;
+          trialEligibilityReason =
+            "لا توجد بيانات جهاز صالحة للتحقق من استحقاق التجربة";
+        } else if (
+          claimOwnerId &&
+          claimOwnerId !==
+            authUser.id
+        ) {
+          trialEligible = false;
+          trialEligibilityReason =
+            `هذا الجهاز سبق أن حصل على التجربة بواسطة الحساب: ${claimOwnerEmail}`;
+        }
 
         let subscription = null;
 
@@ -425,6 +648,13 @@ export async function GET(
             Boolean(
               profile?.trial_used
             ),
+
+          trialEligible,
+
+          trialEligibilityReason,
+
+          trialClaimOwnerEmail:
+            claimOwnerEmail,
 
           emailConfirmed:
             Boolean(

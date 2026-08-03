@@ -26,6 +26,9 @@ type UserItem = {
   role: "admin" | "user";
   isBlocked: boolean;
   trialUsed: boolean;
+  trialEligible: boolean;
+  trialEligibilityReason: string;
+  trialClaimOwnerEmail: string | null;
   emailConfirmed: boolean;
   createdAt: string;
   lastSignInAt: string | null;
@@ -409,6 +412,37 @@ export default function AdminUsersTable() {
                 </div>
 
                 {user.role !==
+                "admin" ? (
+                  <div
+                    className={[
+                      "mt-5 rounded-2xl border p-4",
+                      user.trialEligible
+                        ? "border-emerald-400/30 bg-emerald-400/10"
+                        : "border-amber-400/30 bg-amber-400/10",
+                    ].join(" ")}
+                  >
+                    <p
+                      className={[
+                        "text-sm font-black",
+                        user.trialEligible
+                          ? "text-emerald-300"
+                          : "text-amber-300",
+                      ].join(" ")}
+                    >
+                      {user.trialEligible
+                        ? "مستحق للفترة التجريبية"
+                        : "سبب عدم منح الفترة التجريبية"}
+                    </p>
+
+                    <p className="mt-2 text-sm leading-6 text-slate-300">
+                      {
+                        user.trialEligibilityReason
+                      }
+                    </p>
+                  </div>
+                ) : null}
+
+                {user.role !==
                   "admin" &&
                 user.subscription ? (
                   <div className="mt-5 rounded-2xl border border-white/10 bg-slate-950/70 p-4">
@@ -509,14 +543,7 @@ export default function AdminUsersTable() {
                   {user.role !==
                   "admin" ? (
                     <>
-                      {!user.trialUsed &&
-                      (
-                        !user.subscription ||
-                        user.subscription.status !==
-                          "active" ||
-                        user.subscription.remainingDays <=
-                          0
-                      ) ? (
+                      {user.trialEligible ? (
                         <button
                           type="button"
                           disabled={working}
