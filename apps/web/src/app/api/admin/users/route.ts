@@ -547,6 +547,118 @@ export async function PATCH(
         );
       }
 
+      /*
+       * التحقق من أن الجهاز لم يحصل على تجربة
+       * بواسطة حساب آخر قبل المنح اليدوي.
+       */
+      const {
+        data: targetAuthData,
+        error: targetAuthError,
+      } =
+        await admin.auth.admin.getUserById(
+          userId
+        );
+
+      if (
+        targetAuthError ||
+        !targetAuthData.user
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "تعذر قراءة بيانات جهاز المستخدم",
+          },
+          {
+            status: 400,
+          }
+        );
+      }
+
+      const deviceHash =
+        String(
+          targetAuthData.user
+            .user_metadata
+            ?.device_hash || ""
+        )
+          .trim()
+          .toLowerCase();
+
+      const fingerprintHash =
+        String(
+          targetAuthData.user
+            .user_metadata
+            ?.fingerprint_hash || ""
+        )
+          .trim()
+          .toLowerCase();
+
+      if (deviceHash.length < 32) {
+        return NextResponse.json(
+          {
+            error:
+              "لا توجد هوية جهاز صالحة لهذا المستخدم، وتعذر التحقق من استحقاق التجربة",
+          },
+          {
+            status: 400,
+          }
+        );
+      }
+
+      const {
+        data: existingDeviceClaim,
+        error: deviceClaimError,
+      } = await admin
+        .from("trial_device_claims")
+        .select(
+          "id,user_id,claimed_at"
+        )
+        .eq(
+          "device_hash",
+          deviceHash
+        )
+        .limit(1)
+        .maybeSingle();
+
+      if (deviceClaimError) {
+        throw deviceClaimError;
+      }
+
+      if (
+        existingDeviceClaim &&
+        String(
+          existingDeviceClaim.user_id
+        ) !== userId
+      ) {
+        let previousEmail =
+          "حساب آخر";
+
+        const {
+          data: previousUserData,
+        } =
+          await admin.auth.admin.getUserById(
+            String(
+              existingDeviceClaim.user_id
+            )
+          );
+
+        if (
+          previousUserData.user?.email
+        ) {
+          previousEmail =
+            previousUserData.user.email;
+        }
+
+        return NextResponse.json(
+          {
+            error:
+              `هذا الجهاز سبق أن حصل على التجربة بواسطة الحساب: ${previousEmail}`,
+          },
+          {
+            status: 400,
+          }
+        );
+      }
+
       if (
         Boolean(
           targetProfile.trial_used
@@ -714,6 +826,57 @@ export async function PATCH(
           );
 
         throw updateProfileError;
+      }
+
+      /*
+       * ربط الجهاز بالحساب بعد نجاح المنح.
+       * device_hash وحده هو سبب المنع،
+       * أما fingerprint_hash فهو سجل أمني فقط.
+       */
+      if (!existingDeviceClaim) {
+        const {
+          error: insertDeviceClaimError,
+        } = await admin
+          .from("trial_device_claims")
+          .insert({
+            user_id: userId,
+            device_hash: deviceHash,
+            fingerprint_hash:
+              fingerprintHash.length >= 32
+                ? fingerprintHash
+                : deviceHash,
+          });
+
+        if (insertDeviceClaimError) {
+          console.error(
+            "Admin trial device claim error:",
+            insertDeviceClaimError
+          );
+
+          /*
+           * نتراجع عن التجربة إذا تعذر تثبيت
+           * مطالبة الجهاز، منعًا لتكرار التجربة.
+           */
+          await admin
+            .from("subscriptions")
+            .delete()
+            .eq(
+              "id",
+              insertedSubscription.id
+            );
+
+          await admin
+            .from("profiles")
+            .update({
+              trial_used: false,
+              trial_started_at: null,
+              trial_ends_at: null,
+              updated_at: nowIso,
+            })
+            .eq("id", userId);
+
+          throw insertDeviceClaimError;
+        }
       }
 
       const {
