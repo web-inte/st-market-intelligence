@@ -145,6 +145,26 @@ export default function LoginPage() {
         </Link>
 </form>
 
+        <div className="mt-6 rounded-2xl border border-cyan-400/20 bg-cyan-400/[0.06] p-4">
+          <p className="text-sm font-black text-cyan-300">
+            هل أنت مستخدم جديد؟
+          </p>
+
+          <p className="mt-2 text-sm leading-6 text-slate-300">
+            إذا واجهتك مشكلة في تفعيل التجربة المجانية لمدة 5 أيام،
+            انضم إلى قناة التلقرام وتواصل مع أحد مشرفي القناة لمراجعة حسابك.
+          </p>
+
+          <a
+            href="https://t.me/ST_Levels"
+            target="_blank"
+            rel="noreferrer"
+            className="mt-4 flex w-full items-center justify-center rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-3 text-sm font-black text-cyan-300 transition hover:bg-cyan-400/15"
+          >
+            الانضمام إلى قناة التلقرام
+          </a>
+        </div>
+
         <p className="mt-6 text-center text-sm text-slate-400">
           ليس لديك حساب؟{" "}
           <Link href="/register" className="font-bold text-cyan-400">
