@@ -101,6 +101,7 @@ export async function GET() {
         id,
         status,
         current_profit_dollars,
+        best_profit_dollars,
         statistics_recorded,
         activated_at,
         created_at
@@ -155,52 +156,36 @@ export async function GET() {
     const activeProfit =
       activeToday.reduce(
         (sum, trade) => {
-          const profit =
+          const bestProfit =
             Number(
-              trade.current_profit_dollars ||
+              trade.best_profit_dollars ||
               0
             );
 
-          return profit > 0
-            ? sum + profit
+          return bestProfit >= 100
+            ? sum + bestProfit
             : sum;
         },
         0
       );
 
-    const activeLoss =
-      activeToday.reduce(
-        (sum, trade) => {
-          const profit =
-            Number(
-              trade.current_profit_dollars ||
-              0
-            );
-
-          return profit < 0
-            ? sum + Math.abs(profit)
-            : sum;
-        },
-        0
-      );
+    /*
+      الصفقة النشطة لا تُحسب خسارة.
+      الخسارة تُسجل فقط عند الإغلاق النهائي
+      إذا لم تحقق الصفقة 100$ أو أكثر.
+    */
+    const activeLoss = 0;
 
     const activeWins =
       activeToday.filter(
         (trade) =>
           Number(
-            trade.current_profit_dollars ||
+            trade.best_profit_dollars ||
             0
-          ) > 0
+          ) >= 100
       ).length;
 
-    const activeLosses =
-      activeToday.filter(
-        (trade) =>
-          Number(
-            trade.current_profit_dollars ||
-            0
-          ) < 0
-      ).length;
+    const activeLosses = 0;
 
     const storedTradesCount =
       Number(
