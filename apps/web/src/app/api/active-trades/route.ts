@@ -872,6 +872,7 @@ async function fetchMassiveContractLivePrice(
 
   const response = await fetch(url, {
     cache: "no-store",
+    signal: AbortSignal.timeout(4000),
   });
 
   if (!response.ok) {
