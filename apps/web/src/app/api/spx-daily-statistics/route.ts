@@ -92,6 +92,139 @@ export async function GET() {
     const row =
       data as DailyStatisticsRow | null;
 
+    const {
+      data: activeTrades,
+      error: activeTradesError,
+    } = await supabase
+      .from("spx_trade_setups")
+      .select(`
+        id,
+        status,
+        current_profit_dollars,
+        statistics_recorded,
+        activated_at,
+        created_at
+      `)
+      .eq("status", "ACTIVE")
+      .eq("statistics_recorded", false);
+
+    if (activeTradesError) {
+      throw activeTradesError;
+    }
+
+    const activeToday =
+      (activeTrades || []).filter(
+        (trade) => {
+          const timestamp =
+            trade.activated_at ||
+            trade.created_at;
+
+          if (!timestamp) {
+            return false;
+          }
+
+          const parts =
+            new Intl.DateTimeFormat(
+              "en-US",
+              {
+                timeZone:
+                  "Asia/Riyadh",
+                year: "numeric",
+                month: "2-digit",
+                day: "2-digit",
+              }
+            ).formatToParts(
+              new Date(timestamp)
+            );
+
+          const values =
+            Object.fromEntries(
+              parts.map((part) => [
+                part.type,
+                part.value,
+              ])
+            );
+
+          const activeDate =
+            `${values.year}-${values.month}-${values.day}`;
+
+          return activeDate === tradeDate;
+        }
+      );
+
+    const activeProfit =
+      activeToday.reduce(
+        (sum, trade) => {
+          const profit =
+            Number(
+              trade.current_profit_dollars ||
+              0
+            );
+
+          return profit > 0
+            ? sum + profit
+            : sum;
+        },
+        0
+      );
+
+    const activeLoss =
+      activeToday.reduce(
+        (sum, trade) => {
+          const profit =
+            Number(
+              trade.current_profit_dollars ||
+              0
+            );
+
+          return profit < 0
+            ? sum + Math.abs(profit)
+            : sum;
+        },
+        0
+      );
+
+    const activeWins =
+      activeToday.filter(
+        (trade) =>
+          Number(
+            trade.current_profit_dollars ||
+            0
+          ) > 0
+      ).length;
+
+    const activeLosses =
+      activeToday.filter(
+        (trade) =>
+          Number(
+            trade.current_profit_dollars ||
+            0
+          ) < 0
+      ).length;
+
+    const storedTradesCount =
+      Number(
+        row?.trades_count || 0
+      );
+
+    const storedProfitAmount =
+      Number(
+        row?.profit_amount || 0
+      );
+
+    const storedLossAmount =
+      Number(
+        row?.loss_amount || 0
+      );
+
+    const totalProfit =
+      storedProfitAmount +
+      activeProfit;
+
+    const totalLoss =
+      storedLossAmount +
+      activeLoss;
+
     return NextResponse.json(
       {
         ok: true,
@@ -99,34 +232,30 @@ export async function GET() {
           tradeDate,
 
           tradesCount:
-            Number(
-              row?.trades_count || 0
-            ),
+            storedTradesCount +
+            activeToday.length,
 
           winsCount:
             Number(
               row?.wins_count || 0
-            ),
+            ) +
+            activeWins,
 
           lossesCount:
             Number(
               row?.losses_count || 0
-            ),
+            ) +
+            activeLosses,
 
           profitAmount:
-            Number(
-              row?.profit_amount || 0
-            ),
+            totalProfit,
 
           lossAmount:
-            Number(
-              row?.loss_amount || 0
-            ),
+            totalLoss,
 
           netProfit:
-            Number(
-              row?.net_profit || 0
-            ),
+            totalProfit -
+            totalLoss,
 
           updatedAt:
             row?.updated_at || null,
