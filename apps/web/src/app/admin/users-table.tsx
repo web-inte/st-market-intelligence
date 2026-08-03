@@ -226,10 +226,15 @@ export default function AdminUsersTable() {
 
       await loadUsers();
     } catch (actionError) {
-      setError(
+      const errorMessage =
         actionError instanceof Error
           ? actionError.message
-          : "تعذر تنفيذ العملية"
+          : "تعذر تنفيذ العملية";
+
+      setError(errorMessage);
+
+      window.alert(
+        `تعذر تنفيذ العملية:\n${errorMessage}`
       );
     } finally {
       setActionUserId("");
