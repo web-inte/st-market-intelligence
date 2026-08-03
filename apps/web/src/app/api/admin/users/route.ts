@@ -515,7 +515,7 @@ export async function PATCH(
     } = await admin
       .from("profiles")
       .select(
-        "id,role,is_blocked"
+        "id,role,is_blocked,trial_used"
       )
       .eq("id", userId)
       .maybeSingle();
@@ -532,6 +532,232 @@ export async function PATCH(
           status: 404,
         }
       );
+    }
+
+    if (action === "grant_trial_5_days") {
+      if (targetProfile.role === "admin") {
+        return NextResponse.json(
+          {
+            error:
+              "لا يمكن منح التجربة لحساب مسؤول",
+          },
+          {
+            status: 400,
+          }
+        );
+      }
+
+      if (
+        Boolean(
+          targetProfile.trial_used
+        )
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "هذا المستخدم سبق أن حصل على التجربة المجانية",
+          },
+          {
+            status: 400,
+          }
+        );
+      }
+
+      const now = new Date();
+      const nowIso =
+        now.toISOString();
+
+      const endsAt =
+        new Date(
+          now.getTime() +
+            5 * DAY_MS
+        ).toISOString();
+
+      const {
+        data: activeSubscription,
+        error:
+          activeSubscriptionError,
+      } = await admin
+        .from("subscriptions")
+        .select(
+          "id,starts_at,ends_at,status"
+        )
+        .eq("user_id", userId)
+        .eq("status", "active")
+        .lte("starts_at", nowIso)
+        .gt("ends_at", nowIso)
+        .limit(1)
+        .maybeSingle();
+
+      if (activeSubscriptionError) {
+        throw activeSubscriptionError;
+      }
+
+      if (activeSubscription) {
+        return NextResponse.json(
+          {
+            error:
+              "المستخدم لديه اشتراك فعال بالفعل",
+          },
+          {
+            status: 400,
+          }
+        );
+      }
+
+      const {
+        data: trialPlan,
+        error: trialPlanError,
+      } = await admin
+        .from("plans")
+        .select(
+          "id,code,name,is_trial"
+        )
+        .eq("is_trial", true)
+        .eq("is_active", true)
+        .limit(1)
+        .maybeSingle();
+
+      if (
+        trialPlanError ||
+        !trialPlan
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "لم يتم العثور على باقة التجربة الفعالة",
+          },
+          {
+            status: 404,
+          }
+        );
+      }
+
+      const {
+        data: previousTrial,
+        error: previousTrialError,
+      } = await admin
+        .from("subscriptions")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("plan_id", trialPlan.id)
+        .limit(1)
+        .maybeSingle();
+
+      if (previousTrialError) {
+        throw previousTrialError;
+      }
+
+      if (previousTrial) {
+        return NextResponse.json(
+          {
+            error:
+              "هذا المستخدم لديه تجربة سابقة في سجل الاشتراكات",
+          },
+          {
+            status: 400,
+          }
+        );
+      }
+
+      const {
+        data: insertedSubscription,
+        error: insertSubscriptionError,
+      } = await admin
+        .from("subscriptions")
+        .insert({
+          user_id: userId,
+          plan_id: trialPlan.id,
+          status: "active",
+          starts_at: nowIso,
+          ends_at: endsAt,
+          source: "admin",
+          created_by:
+            currentUser.id,
+          notes:
+            "تم منح تجربة مجانية لمدة 5 أيام من لوحة المسؤول",
+        })
+        .select("id")
+        .single();
+
+      if (
+        insertSubscriptionError ||
+        !insertedSubscription
+      ) {
+        throw (
+          insertSubscriptionError ||
+          new Error(
+            "تعذر إنشاء اشتراك التجربة"
+          )
+        );
+      }
+
+      const {
+        error: updateProfileError,
+      } = await admin
+        .from("profiles")
+        .update({
+          trial_used: true,
+          trial_started_at: nowIso,
+          trial_ends_at: endsAt,
+          updated_at: nowIso,
+        })
+        .eq("id", userId);
+
+      if (updateProfileError) {
+        await admin
+          .from("subscriptions")
+          .delete()
+          .eq(
+            "id",
+            insertedSubscription.id
+          );
+
+        throw updateProfileError;
+      }
+
+      const {
+        error: trialEventError,
+      } = await admin
+        .from("subscription_events")
+        .insert({
+          subscription_id:
+            insertedSubscription.id,
+
+          user_id: userId,
+
+          event_type:
+            "trial_started",
+
+          new_data: {
+            days: 5,
+            plan: "TRIAL",
+            granted_by_admin: true,
+            starts_at: nowIso,
+            ends_at: endsAt,
+          },
+
+          actor_user_id:
+            currentUser.id,
+
+          note:
+            "تم منح تجربة مجانية لمدة 5 أيام من لوحة المسؤول",
+        });
+
+      if (trialEventError) {
+        console.error(
+          "Admin trial event error:",
+          trialEventError
+        );
+      }
+
+      return NextResponse.json({
+        ok: true,
+        message:
+          "تم منح المستخدم تجربة مجانية لمدة 5 أيام",
+        startsAt: nowIso,
+        endsAt,
+      });
     }
 
     if (action === "set_blocked") {
