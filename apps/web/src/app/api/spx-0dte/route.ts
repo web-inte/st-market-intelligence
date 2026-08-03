@@ -1268,9 +1268,20 @@ export async function GET() {
       - executionContract يُختار بعد اكتمال القرار فقط.
       - جميع البدائل هنا اجتازت أصلًا نفس شروط eligibleContracts.
     */
+    /*
+      العقد التحليلي يُستخدم للتنفيذ مباشرة فقط
+      عندما يكون سعره ضمن الحد الأقصى.
+
+      إذا كان أغلى من 3.50 فلا نرجع إليه تلقائيًا،
+      بل نبحث عن عقد تنفيذ أرخص من نفس الاتجاه.
+    */
     let executionContract:
       ScoredContract | null =
-        bestContract;
+        bestContract &&
+        bestContract.price >= 1 &&
+        bestContract.price <= 3.5
+          ? bestContract
+          : null;
 
     if (
       bestContract &&
@@ -1294,11 +1305,10 @@ export async function GET() {
               candidate.executionPrice <= 3.5 &&
               candidate.bid > 0 &&
               candidate.ask > 0 &&
-              candidate.spreadPct <= 20 &&
-              candidate.volume >= 50 &&
+              candidate.spreadPct <= 35 &&
               (
-                candidate.openInterest >= 10 ||
-                candidate.volume >= 200
+                candidate.volume > 0 ||
+                candidate.openInterest > 0
               )
             );
           })
