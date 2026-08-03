@@ -266,9 +266,6 @@ function calculateHighestTarget(
 }
 
 function calculateStatus(
-  side: ActiveSide,
-  currentPrice: number,
-  stopPrice: number | null,
   highestTargetHit: number,
   storedStatus: string
 ) {
@@ -282,18 +279,6 @@ function calculateStatus(
       "STOPPED"
   ) {
     return normalizedStoredStatus;
-  }
-
-  const stopped =
-    stopPrice !== null &&
-    (
-      side === "CALL"
-        ? currentPrice <= stopPrice
-        : currentPrice >= stopPrice
-    );
-
-  if (stopped) {
-    return "STOPPED";
   }
 
   if (highestTargetHit >= 3) {
@@ -448,9 +433,6 @@ function mapTrade(
 
   const contractStatus =
     calculateStatus(
-      row.side,
-      currentPrice,
-      stopPrice,
       highestTargetHit,
       String(
         row.contract_status ||
@@ -999,6 +981,8 @@ async function fetchMassiveContractLivePrice(
 }
 
 export async function GET() {
+  const requestStart = Date.now();
+
   try {
     const supabase =
       createAdminClient();
@@ -1430,6 +1414,11 @@ const regularMarketOpen =
         trade.contractStatus === "TARGET_3"
       );
     });
+
+    console.log(
+      "[ACTIVE_TRADES] total request ms:",
+      Date.now() - requestStart
+    );
 
     return NextResponse.json(
       {
