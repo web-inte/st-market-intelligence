@@ -532,12 +532,51 @@ export async function GET(
       throw visibleError;
     }
 
-    const liveTrade =
-      (visibleTrades || []).find(
+    const liveTrades =
+      (visibleTrades || []).filter(
         (row) =>
           row.status === "WATCH" ||
           row.status === "ACTIVE"
       );
+
+    /*
+      نستمر مؤقتًا في تنفيذ منطق الوقف الكامل
+      على صفقة واحدة في كل دورة، لكن نختار
+      الأقل تحديثًا حتى تدور المتابعة بين جميع
+      الموجات بدل تثبيتها على أحدث صفقة فقط.
+    */
+    const liveTrade =
+      [...liveTrades].sort(
+        (left, right) => {
+          const leftTime =
+            new Date(
+              textValue(
+                left.last_quote_at
+              ) ||
+              textValue(
+                left.activated_at
+              ) ||
+              textValue(
+                left.created_at
+              )
+            ).getTime();
+
+          const rightTime =
+            new Date(
+              textValue(
+                right.last_quote_at
+              ) ||
+              textValue(
+                right.activated_at
+              ) ||
+              textValue(
+                right.created_at
+              )
+            ).getTime();
+
+          return leftTime - rightTime;
+        }
+      )[0] || null;
 
     const sessionOrigin =
       process.env.NODE_ENV === "development"
@@ -1308,16 +1347,103 @@ export async function GET(
       }
 
       /*
-        عند تغير الاتجاه المؤكد:
-        لا نرجع هنا، بل نكمل إلى منطق إنشاء الصفقة
-        حتى يصدر العقد المعاكس مباشرة.
+        السماح بموجة دخول ثانية أو ثالثة لا يغير
+        أي شرط من شروط التحليل أو اختيار العقد.
 
-        بقية الحالات ترجع بشكل طبيعي:
-        - تحديث عادي
-        - كسر وقف SPX
-        - حماية الربح بعد الهبوط إلى -100$
+        الشروط الإضافية فقط:
+        1) الإشارة ما زالت ACTIVE بنفس الاتجاه.
+        2) آخر موجة في الاتجاه حققت 100% أو أكثر.
+        3) العقد المرشح مختلف عن جميع العقود المفتوحة.
+        4) عدد الموجات المفتوحة أقل من 3.
       */
-      if (!oppositeDirectionStopped) {
+      const candidateContract =
+        signal.executionContract ||
+        signal.bestContract ||
+        null;
+
+      const signalSideForWave =
+        signal.status === "ACTIVE"
+          ? candidateContract?.side ||
+            null
+          : null;
+
+      const sameDirectionTrades =
+        (latestTrades || [])
+          .filter(
+            (trade) =>
+              (
+                trade.status === "ACTIVE" ||
+                trade.status === "WATCH"
+              ) &&
+              textValue(
+                trade.side
+              ).toUpperCase() ===
+                signalSideForWave
+          )
+          .sort(
+            (left, right) =>
+              new Date(
+                textValue(
+                  right.activated_at
+                ) ||
+                textValue(
+                  right.created_at
+                )
+              ).getTime() -
+              new Date(
+                textValue(
+                  left.activated_at
+                ) ||
+                textValue(
+                  left.created_at
+                )
+              ).getTime()
+          );
+
+      const latestWave =
+        sameDirectionTrades[0] ||
+        null;
+
+      const latestWaveDoubled =
+        latestWave !== null &&
+        numberValue(
+          latestWave.best_profit_pct
+        ) >= 100;
+
+      const candidateAlreadyOpen =
+        candidateContract !== null &&
+        (latestTrades || []).some(
+          (trade) =>
+            (
+              trade.status === "ACTIVE" ||
+              trade.status === "WATCH"
+            ) &&
+            textValue(
+              trade.option_ticker
+            ) ===
+              candidateContract.ticker
+        );
+
+      const allowSameDirectionWave =
+        !stopped &&
+        signal.status === "ACTIVE" &&
+        signalSideForWave !== null &&
+        signalSideForWave === side &&
+        sameDirectionTrades.length > 0 &&
+        sameDirectionTrades.length < 3 &&
+        latestWaveDoubled &&
+        candidateContract !== null &&
+        !candidateAlreadyOpen;
+
+      /*
+        نكمل إلى إنشاء عقد جديد فقط في حال:
+        - انعكاس مؤكد، كما كان سابقًا.
+        - أو موجة جديدة استوفت الشروط أعلاه.
+      */
+      if (
+        !oppositeDirectionStopped &&
+        !allowSameDirectionWave
+      ) {
         return NextResponse.json(
           {
             ok: true,
