@@ -662,7 +662,270 @@ export async function GET(
       );
     }
 
-    if (liveTrade) {
+    /*
+      عند ظهور إشارة ACTIVE مؤكدة في اتجاه جديد،
+      نغلق جميع الموجات المفتوحة في الاتجاه المعاكس.
+
+      هذا لا يغيّر شروط الإشارة أو اختيار العقد؛
+      بل يوسّع منطق الإغلاق القديم من صفقة واحدة
+      إلى جميع الصفقات المفتوحة في الاتجاه السابق.
+    */
+    const confirmedSignalSide =
+      signal.status === "ACTIVE"
+        ? signal.bestContract?.side ||
+          null
+        : null;
+
+    const oppositeOpenTrades =
+      confirmedSignalSide
+        ? liveTrades.filter(
+            (trade) =>
+              textValue(
+                trade.side
+              ).toUpperCase() !==
+                confirmedSignalSide
+          )
+        : [];
+
+    const closedOppositeDirectionTrades: DataRecord[] =
+      [];
+
+    if (
+      confirmedSignalSide &&
+      oppositeOpenTrades.length > 0
+    ) {
+      for (
+        const oppositeTrade of
+          oppositeOpenTrades
+      ) {
+        const oppositeEntryPrice =
+          numberValue(
+            oppositeTrade.entry_price
+          );
+
+        const oppositeCurrentPrice =
+          numberValue(
+            oppositeTrade.current_price,
+            oppositeEntryPrice
+          );
+
+        const oppositeProfitDollars =
+          round(
+            (
+              oppositeCurrentPrice -
+              oppositeEntryPrice
+            ) * 100
+          );
+
+        const oppositeProfitPct =
+          oppositeEntryPrice > 0
+            ? round(
+                (
+                  (
+                    oppositeCurrentPrice -
+                    oppositeEntryPrice
+                  ) /
+                  oppositeEntryPrice
+                ) * 100
+              )
+            : 0;
+
+        const oppositeSide =
+          textValue(
+            oppositeTrade.side
+          ).toUpperCase();
+
+        const closeReasonText =
+          `تغير الاتجاه المؤكد من ${oppositeSide} إلى ${confirmedSignalSide}`;
+
+        const hiddenAfter =
+          new Date(
+            Date.now() +
+              30 * 60 * 1000
+          ).toISOString();
+
+        const {
+          data: closedTrade,
+          error: closeError,
+        } = await supabase
+          .from("spx_trade_setups")
+          .update({
+            status:
+              "STOPPED",
+
+            stopped_at:
+              nowIso,
+
+            closed_at:
+              nowIso,
+
+            hidden_after:
+              hiddenAfter,
+
+            stop_contract_price:
+              oppositeCurrentPrice,
+
+            stop_profit_dollars:
+              oppositeProfitDollars,
+
+            stop_profit_pct:
+              oppositeProfitPct,
+
+            stop_reason:
+              closeReasonText,
+
+            close_reason:
+              "OPPOSITE_DIRECTION",
+          })
+          .eq(
+            "id",
+            oppositeTrade.id
+          )
+          .in("status", [
+            "ACTIVE",
+            "WATCH",
+          ])
+          .select("*")
+          .maybeSingle();
+
+        if (closeError) {
+          throw closeError;
+        }
+
+        if (!closedTrade) {
+          continue;
+        }
+
+        closedOppositeDirectionTrades.push(
+          closedTrade
+        );
+
+        /*
+          تسجيل كل صفقة مغلقة في الإحصائية
+          بشكل مستقل ومنع فقد أي موجة.
+        */
+        const {
+          error: statisticsError,
+        } = await supabase.rpc(
+          "record_spx_trade_statistics",
+          {
+            p_trade_id:
+              closedTrade.id,
+          }
+        );
+
+        if (statisticsError) {
+          console.error(
+            "تعذر تسجيل إحصائية موجة SPX المغلقة:",
+            {
+              tradeId:
+                closedTrade.id,
+              error:
+                statisticsError.message,
+            }
+          );
+        }
+
+        await supabase
+          .from("spx_trade_updates")
+          .insert({
+            setup_id:
+              closedTrade.id,
+
+            event_type:
+              "STOPPED",
+
+            contract_price:
+              oppositeCurrentPrice,
+
+            profit_dollars:
+              oppositeProfitDollars,
+
+            profit_pct:
+              oppositeProfitPct,
+
+            message:
+              closeReasonText,
+
+            metadata: {
+              closeReason:
+                "OPPOSITE_DIRECTION",
+
+              previousSide:
+                oppositeSide,
+
+              newSide:
+                confirmedSignalSide,
+            },
+          });
+
+        /*
+          فشل تيليجرام لا يعطل الإغلاق.
+        */
+        try {
+          const telegramUrl =
+            `${new URL(request.url).origin}/spx-whales`;
+
+          const telegramResult =
+            await sendSpxTelegramMessage(
+              [
+                "🛑 انتهت صفقة SPX",
+                "",
+                `📊 الاتجاه السابق: ${oppositeSide}`,
+                `🔄 الاتجاه الجديد: ${confirmedSignalSide}`,
+                `📍 سبب الإغلاق: ${closeReasonText}`,
+                "",
+                `💵 النتيجة عند الإغلاق: ${
+                  oppositeProfitDollars >= 0
+                    ? "+"
+                    : ""
+                }${formatSpxNumber(
+                  oppositeProfitDollars,
+                  0
+                )}$`,
+                "",
+                "🌐 تفاصيل الصفقة:",
+                telegramUrl,
+              ].join("\n")
+            );
+
+          if (!telegramResult.ok) {
+            console.error(
+              "تعذر إرسال إغلاق موجة SPX إلى تيليجرام:",
+              {
+                tradeId:
+                  closedTrade.id,
+                error:
+                  telegramResult.error,
+              }
+            );
+          }
+        } catch (telegramError) {
+          console.error(
+            "خطأ جانبي في إشعار إغلاق موجة SPX:",
+            telegramError
+          );
+        }
+      }
+    }
+
+    /*
+      قد تكون liveTrade ضمن الموجات التي أُغلقت
+      جماعيًا بسبب انعكاس الاتجاه. لا نعالجها
+      مرة أخرى حتى لا تعود حالتها إلى ACTIVE.
+    */
+    const liveTradeClosedByDirection =
+      liveTrade !== null &&
+      closedOppositeDirectionTrades.some(
+        (trade) =>
+          textValue(trade.id) ===
+          textValue(liveTrade.id)
+      );
+
+    if (
+      liveTrade &&
+      !liveTradeClosedByDirection
+    ) {
       const entryPrice =
         numberValue(
           liveTrade.entry_price
@@ -861,10 +1124,12 @@ export async function GET(
             null
           : null;
 
+      /*
+        الإغلاق المعاكس أصبح يُنفذ جماعيًا
+        قبل معالجة الصفقة الفردية.
+      */
       const oppositeDirectionStopped =
-        signal.status === "ACTIVE" &&
-        signalSide !== null &&
-        signalSide !== side;
+        false;
 
       const stopped =
         spxInvalidationStopped ||
@@ -1441,7 +1706,7 @@ export async function GET(
         - أو موجة جديدة استوفت الشروط أعلاه.
       */
       if (
-        !oppositeDirectionStopped &&
+        closedOppositeDirectionTrades.length === 0 &&
         !allowSameDirectionWave
       ) {
         return NextResponse.json(
