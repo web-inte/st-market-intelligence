@@ -312,101 +312,10 @@ export async function GET() {
           ok: true,
           activeTrade: {
             ...liveTrade,
-
             display_price:
               snapshot.displayPrice,
-
             display_price_source:
               snapshot.priceSource,
-
-            /*
-              قيم العرض تُحسب من نفس السعر
-              الظاهر داخل البطاقة.
-            */
-            current_profit_dollars:
-              round(
-                (
-                  snapshot.displayPrice -
-                  numberValue(
-                    liveTrade.entry_price
-                  )
-                ) * 100
-              ),
-
-            current_profit_pct:
-              numberValue(
-                liveTrade.entry_price
-              ) > 0
-                ? round(
-                    (
-                      (
-                        snapshot.displayPrice -
-                        numberValue(
-                          liveTrade.entry_price
-                        )
-                      ) /
-                      numberValue(
-                        liveTrade.entry_price
-                      )
-                    ) * 100
-                  )
-                : 0,
-
-            best_price:
-              Math.max(
-                numberValue(
-                  liveTrade.best_price,
-                  numberValue(
-                    liveTrade.entry_price
-                  )
-                ),
-                snapshot.displayPrice
-              ),
-
-            best_profit_dollars:
-              round(
-                (
-                  Math.max(
-                    numberValue(
-                      liveTrade.best_price,
-                      numberValue(
-                        liveTrade.entry_price
-                      )
-                    ),
-                    snapshot.displayPrice
-                  ) -
-                  numberValue(
-                    liveTrade.entry_price
-                  )
-                ) * 100
-              ),
-
-            best_profit_pct:
-              numberValue(
-                liveTrade.entry_price
-              ) > 0
-                ? round(
-                    (
-                      (
-                        Math.max(
-                          numberValue(
-                            liveTrade.best_price,
-                            numberValue(
-                              liveTrade.entry_price
-                            )
-                          ),
-                          snapshot.displayPrice
-                        ) -
-                        numberValue(
-                          liveTrade.entry_price
-                        )
-                      ) /
-                      numberValue(
-                        liveTrade.entry_price
-                      )
-                    ) * 100
-                  )
-                : 0,
           },
           updated: false,
           stale: true,
@@ -627,72 +536,10 @@ export async function GET() {
             ? null
             : {
                 ...updatedTrade,
-
                 display_price:
                   snapshot.displayPrice,
-
                 display_price_source:
                   snapshot.priceSource,
-
-                /*
-                  أرقام العرض تُبنى من نفس
-                  displayPrice الظاهر للمستخدم.
-                  أما الحماية والوقف فتبقى على
-                  currentPrice المبني على Bid.
-                */
-                current_profit_dollars:
-                  round(
-                    (
-                      snapshot.displayPrice -
-                      entryPrice
-                    ) * 100
-                  ),
-
-                current_profit_pct:
-                  entryPrice > 0
-                    ? round(
-                        (
-                          (
-                            snapshot.displayPrice -
-                            entryPrice
-                          ) /
-                          entryPrice
-                        ) * 100
-                      )
-                    : 0,
-
-                best_price:
-                  Math.max(
-                    bestPrice,
-                    snapshot.displayPrice
-                  ),
-
-                best_profit_dollars:
-                  round(
-                    (
-                      Math.max(
-                        bestPrice,
-                        snapshot.displayPrice
-                      ) -
-                      entryPrice
-                    ) * 100
-                  ),
-
-                best_profit_pct:
-                  entryPrice > 0
-                    ? round(
-                        (
-                          (
-                            Math.max(
-                              bestPrice,
-                              snapshot.displayPrice
-                            ) -
-                            entryPrice
-                          ) /
-                          entryPrice
-                        ) * 100
-                      )
-                    : 0,
               },
 
         stopped:
