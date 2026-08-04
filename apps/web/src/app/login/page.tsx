@@ -2,7 +2,12 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type FormEvent, useMemo, useState } from "react";
+import {
+  type FormEvent,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
 import { getDeviceSecurityData } from "@/lib/device-security";
 import { createClient } from "@/lib/supabase/client";
@@ -10,6 +15,32 @@ import { createClient } from "@/lib/supabase/client";
 export default function LoginPage() {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
+
+  /*
+   * عند فتح صفحة تسجيل الدخول، نتحقق من وجود
+   * جلسة سابقة صالحة. إذا كان المستخدم لا يزال
+   * مسجلًا، نعيده للحساب بدل طلب تسجيل الدخول مجددًا.
+   */
+  useEffect(() => {
+    let cancelled = false;
+
+    async function restoreExistingSession() {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!cancelled && user) {
+        router.replace("/account");
+        router.refresh();
+      }
+    }
+
+    void restoreExistingSession();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [router, supabase]);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
