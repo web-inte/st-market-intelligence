@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import {
+  formatSpxKsaTime,
+  formatSpxNumber,
+  sendSpxTelegramMessage,
+} from "@/lib/spx-telegram";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -949,6 +954,268 @@ export async function GET(
       }
 
       /*
+        نشر نسخة من تحديث صفقة SPX إلى تيليجرام.
+
+        هذا الجزء لا يدخل في قرار الصفقة ولا في
+        حساب الوقف أو السعر أو الربح. أي فشل في
+        تيليجرام يُسجل فقط ولا يعطل استجابة الموقع.
+      */
+      try {
+        const telegramUrl =
+          `${new URL(request.url).origin}/spx-whales`;
+
+        const previousBestProfitDollars =
+          round(
+            (previousBest - entryPrice) *
+              100
+          );
+
+        const previousMilestone =
+          Math.floor(
+            Math.max(
+              0,
+              previousBestProfitDollars
+            ) / 50
+          ) * 50;
+
+        const currentMilestone =
+          Math.floor(
+            Math.max(
+              0,
+              bestProfitDollars
+            ) / 50
+          ) * 50;
+
+        /*
+          إذا قفز العقد أكثر من 50 دولار بين تحديثين،
+          نرسل كل المستويات التي تجاوزها بالترتيب.
+        */
+        if (
+          !stopped &&
+          currentMilestone >
+            previousMilestone
+        ) {
+          for (
+            let milestone =
+              Math.max(
+                50,
+                previousMilestone + 50
+              );
+            milestone <= currentMilestone;
+            milestone += 50
+          ) {
+            const telegramResult =
+              await sendSpxTelegramMessage(
+                [
+                  "📈 تحديث صفقة SPX",
+                  "",
+                  `📊 الاتجاه: ${side}`,
+                  `💰 أفضل ربح: +${milestone}$`,
+                  `📈 أعلى نسبة ربح: +${formatSpxNumber(
+                    bestProfitPct
+                  )}%`,
+                  "",
+                  `🎟️ سعر العقد الحالي: ${formatSpxNumber(
+                    currentPrice
+                  )}`,
+                  `🏆 أعلى سعر للعقد: ${formatSpxNumber(
+                    bestPrice
+                  )}`,
+                  "",
+                  "🌐 متابعة الصفقة:",
+                  telegramUrl,
+                ].join("\n")
+              );
+
+            if (!telegramResult.ok) {
+              console.error(
+                "تعذر إرسال تحديث ربح SPX إلى تيليجرام:",
+                {
+                  tradeId:
+                    updatedTrade.id,
+                  milestone,
+                  error:
+                    telegramResult.error,
+                }
+              );
+            }
+          }
+        }
+
+        /*
+          الهدف الهيكلي مأخوذ مباشرة من بيانات
+          الموقع الحالية:
+          CALL = Call Wall
+          PUT  = Put Wall
+        */
+        const structuralTarget =
+          side === "CALL"
+            ? numberValue(
+                signal.gamma?.callWall
+              )
+            : numberValue(
+                signal.gamma?.putWall
+              );
+
+        const previousSpxPrice =
+          numberValue(
+            liveTrade.spx_current_price,
+            numberValue(
+              liveTrade.spx_entry_price
+            )
+          );
+
+        const targetReached =
+          structuralTarget > 0 &&
+          spxCurrentPrice > 0 &&
+          (
+            (
+              side === "CALL" &&
+              spxCurrentPrice >=
+                structuralTarget &&
+              previousSpxPrice <
+                structuralTarget
+            ) ||
+            (
+              side === "PUT" &&
+              spxCurrentPrice <=
+                structuralTarget &&
+              previousSpxPrice >
+                structuralTarget
+            )
+          );
+
+        if (
+          !stopped &&
+          targetReached
+        ) {
+          const nextTarget =
+            side === "CALL"
+              ? numberValue(
+                  signal.gamma?.callWall
+                )
+              : numberValue(
+                  signal.gamma?.putWall
+                );
+
+          const targetMessage = [
+            "🎯 الهدف الهيكلي تحقق",
+            "",
+            `📈 SPX ${side}`,
+            "",
+            `✅ الهدف المحقق: ${formatSpxNumber(
+              structuralTarget,
+              0
+            )} ✔️`,
+            nextTarget > 0 &&
+            nextTarget !==
+              structuralTarget
+              ? `🎯 الهدف التالي: ${formatSpxNumber(
+                  nextTarget,
+                  0
+                )}`
+              : "🎯 الهدف التالي يتحدث تلقائيًا من الموقع",
+            "",
+            `💰 أفضل ربح: ${
+              bestProfitDollars >= 0
+                ? "+"
+                : ""
+            }${formatSpxNumber(
+              bestProfitDollars,
+              0
+            )}$`,
+            `📊 نسبة الربح: ${
+              bestProfitPct >= 0
+                ? "+"
+                : ""
+            }${formatSpxNumber(
+              bestProfitPct
+            )}%`,
+            "",
+            "🌐 متابعة الصفقة:",
+            telegramUrl,
+          ].join("\n");
+
+          const telegramResult =
+            await sendSpxTelegramMessage(
+              targetMessage
+            );
+
+          if (!telegramResult.ok) {
+            console.error(
+              "تعذر إرسال هدف SPX إلى تيليجرام:",
+              {
+                tradeId:
+                  updatedTrade.id,
+                structuralTarget,
+                error:
+                  telegramResult.error,
+              }
+            );
+          }
+        }
+
+        if (stopped) {
+          const telegramResult =
+            await sendSpxTelegramMessage(
+              [
+                "🛑 انتهت صفقة SPX",
+                "",
+                `📊 الاتجاه: ${side}`,
+                `📍 سبب الإغلاق: ${
+                  stopReason ||
+                  "تم إغلاق الصفقة"
+                }`,
+                "",
+                `💰 أفضل ربح: ${
+                  bestProfitDollars >= 0
+                    ? "+"
+                    : ""
+                }${formatSpxNumber(
+                  bestProfitDollars,
+                  0
+                )}$`,
+                `📊 أعلى نسبة ربح: ${
+                  bestProfitPct >= 0
+                    ? "+"
+                    : ""
+                }${formatSpxNumber(
+                  bestProfitPct
+                )}%`,
+                `💵 النتيجة عند الإغلاق: ${
+                  currentProfitDollars >= 0
+                    ? "+"
+                    : ""
+                }${formatSpxNumber(
+                  currentProfitDollars,
+                  0
+                )}$`,
+                "",
+                "🌐 تفاصيل الصفقة:",
+                telegramUrl,
+              ].join("\n")
+            );
+
+          if (!telegramResult.ok) {
+            console.error(
+              "تعذر إرسال إغلاق SPX إلى تيليجرام:",
+              {
+                tradeId:
+                  updatedTrade.id,
+                error:
+                  telegramResult.error,
+              }
+            );
+          }
+        }
+      } catch (telegramError) {
+        console.error(
+          "خطأ جانبي في ناشر تيليجرام لصفقة SPX:",
+          telegramError
+        );
+      }
+
+      /*
         عند إغلاق الصفقة نسجلها في إحصائية
         يوم الإغلاق بتوقيت السعودية مرة واحدة فقط.
 
@@ -1324,6 +1591,76 @@ export async function GET(
         new Error(
           "تعذر إنشاء صفقة SPX"
         )
+      );
+    }
+
+    /*
+      نشر الصفقة الجديدة بعد نجاح حفظها في الموقع.
+      لا يؤثر فشل تيليجرام على إنشاء الصفقة.
+    */
+    try {
+      const telegramUrl =
+        `${new URL(request.url).origin}/spx-whales`;
+
+      const structuralTarget =
+        contract.side === "CALL"
+          ? numberValue(
+              signal.gamma?.callWall
+            )
+          : numberValue(
+              signal.gamma?.putWall
+            );
+
+      const telegramResult =
+        await sendSpxTelegramMessage(
+          [
+            "🚨 صفقة SPX جديدة",
+            "",
+            `📈 الاتجاه: ${contract.side}`,
+            `🎯 سعر الدخول: ${formatSpxNumber(
+              spxEntryPrice
+            )}`,
+            `🛑 وقف الخسارة: ${formatSpxNumber(
+              invalidationLevel
+            )}`,
+            "",
+            `🎯 الهدف الهيكلي: ${
+              structuralTarget > 0
+                ? formatSpxNumber(
+                    structuralTarget,
+                    0
+                  )
+                : "يتحدث تلقائيًا من الموقع"
+            }`,
+            "",
+            `🎟️ العقد: ${contract.ticker}`,
+            `💵 سعر العقد: ${formatSpxNumber(
+              entryPrice
+            )}`,
+            "",
+            `⏰ الوقت: ${formatSpxKsaTime(
+              nowIso
+            )} (KSA)`,
+            "",
+            `🌐 ${telegramUrl}`,
+          ].join("\n")
+        );
+
+      if (!telegramResult.ok) {
+        console.error(
+          "تعذر إرسال صفقة SPX الجديدة إلى تيليجرام:",
+          {
+            tradeId:
+              createdTrade.id,
+            error:
+              telegramResult.error,
+          }
+        );
+      }
+    } catch (telegramError) {
+      console.error(
+        "خطأ جانبي عند نشر صفقة SPX الجديدة:",
+        telegramError
       );
     }
 
