@@ -532,12 +532,51 @@ export async function GET(
       throw visibleError;
     }
 
-    const liveTrade =
-      (visibleTrades || []).find(
+    const liveTrades =
+      (visibleTrades || []).filter(
         (row) =>
           row.status === "WATCH" ||
           row.status === "ACTIVE"
       );
+
+    /*
+      نستمر مؤقتًا في تنفيذ منطق الوقف الكامل
+      على صفقة واحدة في كل دورة، لكن نختار
+      الأقل تحديثًا حتى تدور المتابعة بين جميع
+      الموجات بدل تثبيتها على أحدث صفقة فقط.
+    */
+    const liveTrade =
+      [...liveTrades].sort(
+        (left, right) => {
+          const leftTime =
+            new Date(
+              textValue(
+                left.last_quote_at
+              ) ||
+              textValue(
+                left.activated_at
+              ) ||
+              textValue(
+                left.created_at
+              )
+            ).getTime();
+
+          const rightTime =
+            new Date(
+              textValue(
+                right.last_quote_at
+              ) ||
+              textValue(
+                right.activated_at
+              ) ||
+              textValue(
+                right.created_at
+              )
+            ).getTime();
+
+          return leftTime - rightTime;
+        }
+      )[0] || null;
 
     const sessionOrigin =
       process.env.NODE_ENV === "development"
@@ -623,7 +662,270 @@ export async function GET(
       );
     }
 
-    if (liveTrade) {
+    /*
+      عند ظهور إشارة ACTIVE مؤكدة في اتجاه جديد،
+      نغلق جميع الموجات المفتوحة في الاتجاه المعاكس.
+
+      هذا لا يغيّر شروط الإشارة أو اختيار العقد؛
+      بل يوسّع منطق الإغلاق القديم من صفقة واحدة
+      إلى جميع الصفقات المفتوحة في الاتجاه السابق.
+    */
+    const confirmedSignalSide =
+      signal.status === "ACTIVE"
+        ? signal.bestContract?.side ||
+          null
+        : null;
+
+    const oppositeOpenTrades =
+      confirmedSignalSide
+        ? liveTrades.filter(
+            (trade) =>
+              textValue(
+                trade.side
+              ).toUpperCase() !==
+                confirmedSignalSide
+          )
+        : [];
+
+    const closedOppositeDirectionTrades: DataRecord[] =
+      [];
+
+    if (
+      confirmedSignalSide &&
+      oppositeOpenTrades.length > 0
+    ) {
+      for (
+        const oppositeTrade of
+          oppositeOpenTrades
+      ) {
+        const oppositeEntryPrice =
+          numberValue(
+            oppositeTrade.entry_price
+          );
+
+        const oppositeCurrentPrice =
+          numberValue(
+            oppositeTrade.current_price,
+            oppositeEntryPrice
+          );
+
+        const oppositeProfitDollars =
+          round(
+            (
+              oppositeCurrentPrice -
+              oppositeEntryPrice
+            ) * 100
+          );
+
+        const oppositeProfitPct =
+          oppositeEntryPrice > 0
+            ? round(
+                (
+                  (
+                    oppositeCurrentPrice -
+                    oppositeEntryPrice
+                  ) /
+                  oppositeEntryPrice
+                ) * 100
+              )
+            : 0;
+
+        const oppositeSide =
+          textValue(
+            oppositeTrade.side
+          ).toUpperCase();
+
+        const closeReasonText =
+          `تغير الاتجاه المؤكد من ${oppositeSide} إلى ${confirmedSignalSide}`;
+
+        const hiddenAfter =
+          new Date(
+            Date.now() +
+              30 * 60 * 1000
+          ).toISOString();
+
+        const {
+          data: closedTrade,
+          error: closeError,
+        } = await supabase
+          .from("spx_trade_setups")
+          .update({
+            status:
+              "STOPPED",
+
+            stopped_at:
+              nowIso,
+
+            closed_at:
+              nowIso,
+
+            hidden_after:
+              hiddenAfter,
+
+            stop_contract_price:
+              oppositeCurrentPrice,
+
+            stop_profit_dollars:
+              oppositeProfitDollars,
+
+            stop_profit_pct:
+              oppositeProfitPct,
+
+            stop_reason:
+              closeReasonText,
+
+            close_reason:
+              "OPPOSITE_DIRECTION",
+          })
+          .eq(
+            "id",
+            oppositeTrade.id
+          )
+          .in("status", [
+            "ACTIVE",
+            "WATCH",
+          ])
+          .select("*")
+          .maybeSingle();
+
+        if (closeError) {
+          throw closeError;
+        }
+
+        if (!closedTrade) {
+          continue;
+        }
+
+        closedOppositeDirectionTrades.push(
+          closedTrade
+        );
+
+        /*
+          تسجيل كل صفقة مغلقة في الإحصائية
+          بشكل مستقل ومنع فقد أي موجة.
+        */
+        const {
+          error: statisticsError,
+        } = await supabase.rpc(
+          "record_spx_trade_statistics",
+          {
+            p_trade_id:
+              closedTrade.id,
+          }
+        );
+
+        if (statisticsError) {
+          console.error(
+            "تعذر تسجيل إحصائية موجة SPX المغلقة:",
+            {
+              tradeId:
+                closedTrade.id,
+              error:
+                statisticsError.message,
+            }
+          );
+        }
+
+        await supabase
+          .from("spx_trade_updates")
+          .insert({
+            setup_id:
+              closedTrade.id,
+
+            event_type:
+              "STOPPED",
+
+            contract_price:
+              oppositeCurrentPrice,
+
+            profit_dollars:
+              oppositeProfitDollars,
+
+            profit_pct:
+              oppositeProfitPct,
+
+            message:
+              closeReasonText,
+
+            metadata: {
+              closeReason:
+                "OPPOSITE_DIRECTION",
+
+              previousSide:
+                oppositeSide,
+
+              newSide:
+                confirmedSignalSide,
+            },
+          });
+
+        /*
+          فشل تيليجرام لا يعطل الإغلاق.
+        */
+        try {
+          const telegramUrl =
+            `${new URL(request.url).origin}/spx-whales`;
+
+          const telegramResult =
+            await sendSpxTelegramMessage(
+              [
+                "🛑 انتهت صفقة SPX",
+                "",
+                `📊 الاتجاه السابق: ${oppositeSide}`,
+                `🔄 الاتجاه الجديد: ${confirmedSignalSide}`,
+                `📍 سبب الإغلاق: ${closeReasonText}`,
+                "",
+                `💵 النتيجة عند الإغلاق: ${
+                  oppositeProfitDollars >= 0
+                    ? "+"
+                    : ""
+                }${formatSpxNumber(
+                  oppositeProfitDollars,
+                  0
+                )}$`,
+                "",
+                "🌐 تفاصيل الصفقة:",
+                telegramUrl,
+              ].join("\n")
+            );
+
+          if (!telegramResult.ok) {
+            console.error(
+              "تعذر إرسال إغلاق موجة SPX إلى تيليجرام:",
+              {
+                tradeId:
+                  closedTrade.id,
+                error:
+                  telegramResult.error,
+              }
+            );
+          }
+        } catch (telegramError) {
+          console.error(
+            "خطأ جانبي في إشعار إغلاق موجة SPX:",
+            telegramError
+          );
+        }
+      }
+    }
+
+    /*
+      قد تكون liveTrade ضمن الموجات التي أُغلقت
+      جماعيًا بسبب انعكاس الاتجاه. لا نعالجها
+      مرة أخرى حتى لا تعود حالتها إلى ACTIVE.
+    */
+    const liveTradeClosedByDirection =
+      liveTrade !== null &&
+      closedOppositeDirectionTrades.some(
+        (trade) =>
+          textValue(trade.id) ===
+          textValue(liveTrade.id)
+      );
+
+    if (
+      liveTrade &&
+      !liveTradeClosedByDirection
+    ) {
       const entryPrice =
         numberValue(
           liveTrade.entry_price
@@ -822,10 +1124,12 @@ export async function GET(
             null
           : null;
 
+      /*
+        الإغلاق المعاكس أصبح يُنفذ جماعيًا
+        قبل معالجة الصفقة الفردية.
+      */
       const oppositeDirectionStopped =
-        signal.status === "ACTIVE" &&
-        signalSide !== null &&
-        signalSide !== side;
+        false;
 
       const stopped =
         spxInvalidationStopped ||
@@ -1308,16 +1612,103 @@ export async function GET(
       }
 
       /*
-        عند تغير الاتجاه المؤكد:
-        لا نرجع هنا، بل نكمل إلى منطق إنشاء الصفقة
-        حتى يصدر العقد المعاكس مباشرة.
+        السماح بموجة دخول ثانية أو ثالثة لا يغير
+        أي شرط من شروط التحليل أو اختيار العقد.
 
-        بقية الحالات ترجع بشكل طبيعي:
-        - تحديث عادي
-        - كسر وقف SPX
-        - حماية الربح بعد الهبوط إلى -100$
+        الشروط الإضافية فقط:
+        1) الإشارة ما زالت ACTIVE بنفس الاتجاه.
+        2) آخر موجة في الاتجاه حققت 100% أو أكثر.
+        3) العقد المرشح مختلف عن جميع العقود المفتوحة.
+        4) عدد الموجات المفتوحة أقل من 3.
       */
-      if (!oppositeDirectionStopped) {
+      const candidateContract =
+        signal.executionContract ||
+        signal.bestContract ||
+        null;
+
+      const signalSideForWave =
+        signal.status === "ACTIVE"
+          ? candidateContract?.side ||
+            null
+          : null;
+
+      const sameDirectionTrades =
+        (latestTrades || [])
+          .filter(
+            (trade) =>
+              (
+                trade.status === "ACTIVE" ||
+                trade.status === "WATCH"
+              ) &&
+              textValue(
+                trade.side
+              ).toUpperCase() ===
+                signalSideForWave
+          )
+          .sort(
+            (left, right) =>
+              new Date(
+                textValue(
+                  right.activated_at
+                ) ||
+                textValue(
+                  right.created_at
+                )
+              ).getTime() -
+              new Date(
+                textValue(
+                  left.activated_at
+                ) ||
+                textValue(
+                  left.created_at
+                )
+              ).getTime()
+          );
+
+      const latestWave =
+        sameDirectionTrades[0] ||
+        null;
+
+      const latestWaveDoubled =
+        latestWave !== null &&
+        numberValue(
+          latestWave.best_profit_pct
+        ) >= 100;
+
+      const candidateAlreadyOpen =
+        candidateContract !== null &&
+        (latestTrades || []).some(
+          (trade) =>
+            (
+              trade.status === "ACTIVE" ||
+              trade.status === "WATCH"
+            ) &&
+            textValue(
+              trade.option_ticker
+            ) ===
+              candidateContract.ticker
+        );
+
+      const allowSameDirectionWave =
+        !stopped &&
+        signal.status === "ACTIVE" &&
+        signalSideForWave !== null &&
+        signalSideForWave === side &&
+        sameDirectionTrades.length > 0 &&
+        sameDirectionTrades.length < 3 &&
+        latestWaveDoubled &&
+        candidateContract !== null &&
+        !candidateAlreadyOpen;
+
+      /*
+        نكمل إلى إنشاء عقد جديد فقط في حال:
+        - انعكاس مؤكد، كما كان سابقًا.
+        - أو موجة جديدة استوفت الشروط أعلاه.
+      */
+      if (
+        closedOppositeDirectionTrades.length === 0 &&
+        !allowSameDirectionWave
+      ) {
         return NextResponse.json(
           {
             ok: true,

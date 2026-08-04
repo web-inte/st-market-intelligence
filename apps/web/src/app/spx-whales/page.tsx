@@ -673,11 +673,11 @@ export default function SpxWhalesPage() {
     }, []);
 
   /*
-    آخر تحديث حي للعقد منفصل عن نتيجة التحليل الكامل،
-    حتى لا يعيد طلب التحليل كتابة السعر بقيمة أقدم.
+    آخر تحديث حي لكل عقد منفصل حسب trade.id،
+    حتى لا تنتقل بيانات عقد إلى صفقة أخرى.
   */
-  const [liveTrade, setLiveTrade] =
-    useState<SpxTrade | null>(null);
+  const [liveTrades, setLiveTrades] =
+    useState<Record<string, SpxTrade>>({});
 
   const [openInterestOpen, setOpenInterestOpen] =
     useState(false);
@@ -753,7 +753,7 @@ export default function SpxWhalesPage() {
       try {
         const response =
           await fetch(
-            `/api/spx-active-trade/quote?t=${Date.now()}`,
+            `/api/spx-active-trade/quotes?t=${Date.now()}`,
             {
               cache: "no-store",
               credentials: "include",
@@ -768,8 +768,8 @@ export default function SpxWhalesPage() {
         const payload =
           (await response.json()) as {
             ok: boolean;
-            activeTrade?:
-              SpxTrade | null;
+            activeTrades?:
+              SpxTrade[];
             error?: string;
           };
 
@@ -779,71 +779,77 @@ export default function SpxWhalesPage() {
         ) {
           throw new Error(
             payload.error ||
-              "تعذر تحديث سعر عقد SPX"
+              "تعذر تحديث أسعار عقود SPX"
           );
         }
 
-        const updatedTrade =
-          payload.activeTrade;
+        const updatedTrades =
+          payload.activeTrades || [];
 
-        if (!updatedTrade) {
-          return;
-        }
+        setLiveTrades((previous) => {
+          const next = {
+            ...previous,
+          };
 
-        /*
-          لا نسمح أبدًا أن يكون السعر الحالي
-          أعلى من أعلى سعر تحقق في الواجهة.
-
-          هذا يحمي البطاقة من وصول رد أقدم
-          من المسار الكامل بعد رد quote الأحدث.
-        */
-        setLiveTrade((previous) => {
-          /*
-            لا نسمح لرد صفقة قديمة أن يستبدل
-            أو يرفع بيانات صفقة جديدة مختلفة.
-          */
-          if (
-            previous?.id &&
-            previous.id !==
-              updatedTrade.id
+          for (
+            const updatedTrade of updatedTrades
           ) {
-            return previous;
+            const oldTrade =
+              previous[
+                updatedTrade.id
+              ];
+
+            const previousBest =
+              oldTrade?.id ===
+              updatedTrade.id
+                ? Number(
+                    oldTrade.best_price ||
+                    0
+                  )
+                : 0;
+
+            const returnedBest =
+              Number(
+                updatedTrade.best_price ||
+                0
+              );
+
+            const returnedCurrent =
+              Number(
+                updatedTrade.display_price ??
+                updatedTrade.current_price ??
+                0
+              );
+
+            next[updatedTrade.id] = {
+              ...updatedTrade,
+              best_price:
+                Math.max(
+                  previousBest,
+                  returnedBest,
+                  returnedCurrent
+                ),
+            };
           }
 
-          const previousBest =
-            previous?.id ===
-            updatedTrade.id
-              ? Number(
-                  previous.best_price ||
-                  0
-                )
-              : 0;
-
-          const returnedBest =
-            Number(
-              updatedTrade.best_price ||
-              0
+          const activeIds =
+            new Set(
+              updatedTrades.map(
+                (trade) => trade.id
+              )
             );
 
-          const returnedCurrent =
-            Number(
-              updatedTrade.display_price ??
-              updatedTrade.current_price ??
-              0
-            );
+          for (
+            const id of Object.keys(
+              next
+            )
+          ) {
+            if (!activeIds.has(id)) {
+              delete next[id];
+            }
+          }
 
-          const safeBest =
-            Math.max(
-              previousBest,
-              returnedBest,
-              returnedCurrent
-            );
-
-          return {
-            ...updatedTrade,
-            best_price:
-              safeBest,
-          };
+          return next;
         });
 
         setData((current) => {
@@ -851,92 +857,71 @@ export default function SpxWhalesPage() {
             return current;
           }
 
-          const currentActive =
-            current.activeTrade;
-
-          /*
-            إذا كانت الصفحة تعرض صفقة جديدة
-            ووصل رد قديم لصفقة مختلفة، نرفضه.
-          */
-          if (
-            currentActive?.id &&
-            currentActive.id !==
-              updatedTrade.id
-          ) {
-            return current;
-          }
-
-          const previousBest =
-            currentActive?.id ===
-            updatedTrade.id
-              ? Number(
-                  currentActive.best_price ||
-                  0
-                )
-              : 0;
-
-          const returnedBest =
-            Number(
-              updatedTrade.best_price ||
-              0
+          const updatedById =
+            new Map(
+              updatedTrades.map(
+                (trade) => [
+                  trade.id,
+                  trade,
+                ]
+              )
             );
 
-          const returnedCurrent =
-            Number(
-              updatedTrade.display_price ??
-              updatedTrade.current_price ??
-              0
-            );
+          const nextTrades =
+            (current.trades || [])
+              .map((trade) => {
+                const updated =
+                  updatedById.get(
+                    trade.id
+                  );
 
-          const safeBest =
-            Math.max(
-              previousBest,
-              returnedBest,
-              returnedCurrent
-            );
+                if (!updated) {
+                  return trade;
+                }
 
-          const safeTrade = {
-            ...updatedTrade,
-            best_price:
-              safeBest,
-          };
+                const previousBest =
+                  Number(
+                    trade.best_price ||
+                    0
+                  );
+
+                const returnedBest =
+                  Number(
+                    updated.best_price ||
+                    0
+                  );
+
+                const returnedCurrent =
+                  Number(
+                    updated.display_price ??
+                      updated.current_price ??
+                      0
+                  );
+
+                return {
+                  ...updated,
+                  best_price:
+                    Math.max(
+                      previousBest,
+                      returnedBest,
+                      returnedCurrent
+                    ),
+                };
+              });
 
           return {
             ...current,
-
             activeTrade:
-              safeTrade,
-
+              updatedTrades[0] ||
+              current.activeTrade ||
+              null,
             trades:
-              (current.trades || [])
-                .map((trade) => {
-                  if (
-                    trade.id !==
-                    updatedTrade.id
-                  ) {
-                    return trade;
-                  }
-
-                  const rowBest =
-                    Number(
-                      trade.best_price ||
-                      0
-                    );
-
-                  return {
-                    ...safeTrade,
-                    best_price:
-                      Math.max(
-                        rowBest,
-                        safeBest
-                      ),
-                  };
-                }),
+              nextTrades,
           };
         });
       } catch (quoteError) {
         console.warn(
-          "تعذر تحديث سعر عقد SPX:",
+          "تعذر تحديث أسعار عقود SPX:",
           quoteError
         );
       } finally {
@@ -1162,51 +1147,24 @@ export default function SpxWhalesPage() {
   const trades =
     data?.trades || [];
 
-  const storedActiveTrade =
-    data?.activeTrade ||
-    trades.find(
-      (trade) =>
-        trade.status === "ACTIVE" ||
-        trade.status === "WATCH"
-    ) ||
-    null;
+  const activeTrades =
+    trades
+      .filter(
+        (trade) =>
+          trade.status === "ACTIVE" ||
+          trade.status === "WATCH"
+      )
+      .map((trade) => {
+        const live =
+          liveTrades[trade.id];
 
-  /*
-    بيانات quote الحية لها الأولوية في العرض،
-    بينما تبقى بقية معلومات الصفقة من التحليل الكامل.
-  */
-  const activeTrade =
-    storedActiveTrade &&
-    liveTrade?.id === storedActiveTrade.id
-      ? {
-          ...storedActiveTrade,
-          ...liveTrade,
-        }
-      : storedActiveTrade;
-
-  useEffect(() => {
-    if (
-      !liveTrade ||
-      !storedActiveTrade ||
-      liveTrade.id !== storedActiveTrade.id
-    ) {
-      if (liveTrade && !storedActiveTrade) {
-        setLiveTrade(null);
-      }
-
-      return;
-    }
-
-    if (
-      storedActiveTrade.status !== "ACTIVE" &&
-      storedActiveTrade.status !== "WATCH"
-    ) {
-      setLiveTrade(null);
-    }
-  }, [
-    liveTrade,
-    storedActiveTrade,
-  ]);
+        return live
+          ? {
+              ...trade,
+              ...live,
+            }
+          : trade;
+      });
 
   const stoppedTrades =
     trades.filter(
@@ -1215,8 +1173,8 @@ export default function SpxWhalesPage() {
     );
 
   const decisionMessage =
-    activeTrade
-      ? "توجد صفقة SPX تحت المتابعة — لن يتم إصدار عقد آخر حتى انتهاء متابعتها."
+    activeTrades.length > 0
+      ? `توجد ${activeTrades.length} صفقة SPX تحت المتابعة.`
       : marketSession?.isOpen === false
         ? "السوق مغلق — لا يتم إصدار فرصة SPX جديدة."
         : data?.message ||
@@ -2825,13 +2783,23 @@ export default function SpxWhalesPage() {
                 الصفقة تحت المتابعة
               </h2>
 
-              {activeTrade ? (
-                <TradeCard
-                  trade={activeTrade}
-                
-              onRefresh={() => void load(false)}
-              refreshing={refreshing}
-            />
+              {activeTrades.length > 0 ? (
+                <div className="space-y-4">
+                  {activeTrades.map(
+                    (trade) => (
+                      <TradeCard
+                        key={trade.id}
+                        trade={trade}
+                        onRefresh={() =>
+                          void load(false)
+                        }
+                        refreshing={
+                          refreshing
+                        }
+                      />
+                    )
+                  )}
+                </div>
               ) : (
                 <div className="rounded-3xl border border-dashed border-white/10 bg-slate-900/50 p-10 text-center font-bold text-slate-500">
                   {marketSession?.isOpen === false
