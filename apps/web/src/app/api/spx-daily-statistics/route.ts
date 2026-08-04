@@ -153,39 +153,70 @@ export async function GET() {
         }
       );
 
+    /*
+      الإحصائية الحية لكل عقد نشط:
+
+      - إذا كان current_profit_dollars موجبًا:
+        يسجل مكسبًا والخسارة تكون صفرًا.
+
+      - إذا كان current_profit_dollars سالبًا:
+        يسجل خسارة حالية والمكسب يكون صفرًا.
+
+      إذا تحولت الصفقة من خسارة إلى ربح،
+      تنخفض الخسارة تلقائيًا إلى صفر.
+    */
     const activeProfit =
       activeToday.reduce(
         (sum, trade) => {
-          const bestProfit =
+          const currentProfit =
             Number(
-              trade.best_profit_dollars ||
+              trade.current_profit_dollars ||
               0
             );
 
-          return bestProfit >= 100
-            ? sum + bestProfit
+          return currentProfit > 0
+            ? sum + currentProfit
             : sum;
         },
         0
       );
 
-    /*
-      الصفقة النشطة لا تُحسب خسارة.
-      الخسارة تُسجل فقط عند الإغلاق النهائي
-      إذا لم تحقق الصفقة 100$ أو أكثر.
-    */
-    const activeLoss = 0;
+    const activeLoss =
+      activeToday.reduce(
+        (sum, trade) => {
+          const currentProfit =
+            Number(
+              trade.current_profit_dollars ||
+              0
+            );
+
+          return currentProfit < 0
+            ? sum +
+              Math.abs(
+                currentProfit
+              )
+            : sum;
+        },
+        0
+      );
 
     const activeWins =
       activeToday.filter(
         (trade) =>
           Number(
-            trade.best_profit_dollars ||
+            trade.current_profit_dollars ||
             0
-          ) >= 100
+          ) > 0
       ).length;
 
-    const activeLosses = 0;
+    const activeLosses =
+      activeToday.filter(
+        (trade) =>
+          Number(
+            trade.current_profit_dollars ||
+            0
+          ) < 0
+      ).length;
 
     const storedTradesCount =
       Number(
