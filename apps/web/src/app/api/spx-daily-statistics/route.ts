@@ -154,69 +154,46 @@ export async function GET() {
       );
 
     /*
-      الإحصائية الحية لكل عقد نشط:
+      الإحصائية الحية للعقود النشطة:
 
-      - إذا كان current_profit_dollars موجبًا:
-        يسجل مكسبًا والخسارة تكون صفرًا.
+      - المكسب يعتمد على أعلى ربح محفوظ للعقد،
+        لذلك لا ينخفض إذا تراجع السعر لاحقًا.
 
-      - إذا كان current_profit_dollars سالبًا:
-        يسجل خسارة حالية والمكسب يكون صفرًا.
+      - الصفقة النشطة تُصنف ناجحة بمجرد وصول
+        best_profit_dollars إلى 100$ أو أكثر.
 
-      إذا تحولت الصفقة من خسارة إلى ربح،
-      تنخفض الخسارة تلقائيًا إلى صفر.
+      - لا تُسجل أي خسارة نهائية أثناء بقاء
+        الصفقة ACTIVE. الخسارة تُسجل فقط عند
+        الإيقاف النهائي إذا لم تحقق شرط النجاح.
     */
     const activeProfit =
       activeToday.reduce(
         (sum, trade) => {
-          const currentProfit =
+          const bestProfit =
             Number(
-              trade.current_profit_dollars ||
+              trade.best_profit_dollars ||
               0
             );
 
-          return currentProfit > 0
-            ? sum + currentProfit
+          return bestProfit > 0
+            ? sum + bestProfit
             : sum;
         },
         0
       );
 
-    const activeLoss =
-      activeToday.reduce(
-        (sum, trade) => {
-          const currentProfit =
-            Number(
-              trade.current_profit_dollars ||
-              0
-            );
-
-          return currentProfit < 0
-            ? sum +
-              Math.abs(
-                currentProfit
-              )
-            : sum;
-        },
-        0
-      );
+    const activeLoss = 0;
 
     const activeWins =
       activeToday.filter(
         (trade) =>
           Number(
-            trade.current_profit_dollars ||
+            trade.best_profit_dollars ||
             0
-          ) > 0
+          ) >= 100
       ).length;
 
-    const activeLosses =
-      activeToday.filter(
-        (trade) =>
-          Number(
-            trade.current_profit_dollars ||
-            0
-          ) < 0
-      ).length;
+    const activeLosses = 0;
 
     const storedTradesCount =
       Number(
