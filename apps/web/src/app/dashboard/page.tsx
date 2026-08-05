@@ -1721,15 +1721,15 @@ ${url}`);
               </div>
 
               <p className="mt-5 text-[11px] font-bold tracking-[0.12em] text-sky-400">
-                محركات السوق
+                محتوى الفريق
               </p>
 
               <h2 className="mt-1.5 text-lg font-black text-white">
-                أهم أخبار السوق
+                مركز الأخبار
               </h2>
 
               <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-500">
-                تابع الأخبار والأرباح والأحداث المؤثرة.
+                أخبار وتنبيهات وإعلانات ينشرها فريق ST Market Intelligence.
               </p>
             </button>
           </div>

@@ -1,5 +1,4 @@
 import {
-  NextRequest,
   NextResponse,
 } from "next/server";
 
@@ -10,106 +9,90 @@ import {
 export const dynamic =
   "force-dynamic";
 
-const MAX_LIMIT = 100;
-const DEFAULT_LIMIT = 60;
+const BUCKET_NAME =
+  "market-news";
 
-function normalizeSymbol(
-  value: string | null
+type MarketNewsPostRow = {
+  id: string;
+  title: string | null;
+  content: string | null;
+  image_url: string | null;
+  news_type:
+    | "URGENT"
+    | "IMPORTANT"
+    | "UPDATE"
+    | "ANNOUNCEMENT";
+  is_pinned: boolean;
+  published_at: string;
+  expires_at: string | null;
+};
+
+async function addSignedImageUrl(
+  post: MarketNewsPostRow
 ) {
-  return String(value || "")
-    .trim()
-    .toUpperCase()
-    .replace(/[^A-Z0-9.-]/g, "")
-    .slice(0, 10);
-}
-
-function normalizeFilter(
-  value: string | null
-) {
-  return String(value || "")
-    .trim()
-    .toUpperCase();
-}
-
-function parseLimit(
-  value: string | null
-) {
-  const parsed =
-    Number.parseInt(
-      String(value || ""),
-      10
-    );
-
-  if (!Number.isFinite(parsed)) {
-    return DEFAULT_LIMIT;
+  if (!post.image_url) {
+    return {
+      ...post,
+      image_signed_url: null,
+    };
   }
 
-  return Math.min(
-    MAX_LIMIT,
-    Math.max(1, parsed)
-  );
+  const admin =
+    createAdminClient();
+
+  const {
+    data,
+    error,
+  } =
+    await admin.storage
+      .from(BUCKET_NAME)
+      .createSignedUrl(
+        post.image_url,
+        60 * 60
+      );
+
+  if (error) {
+    console.error(
+      "تعذر إنشاء رابط الصورة:",
+      error
+    );
+  }
+
+  return {
+    ...post,
+    image_signed_url:
+      data?.signedUrl || null,
+  };
 }
 
-export async function GET(
-  request: NextRequest
-) {
+export async function GET() {
   try {
-    const symbol =
-      normalizeSymbol(
-        request.nextUrl.searchParams.get(
-          "symbol"
-        )
-      );
-
-    const eventType =
-      normalizeFilter(
-        request.nextUrl.searchParams.get(
-          "eventType"
-        )
-      );
-
-    const impact =
-      normalizeFilter(
-        request.nextUrl.searchParams.get(
-          "impact"
-        )
-      );
-
-    const limit =
-      parseLimit(
-        request.nextUrl.searchParams.get(
-          "limit"
-        )
-      );
-
-    const supabase =
+    const admin =
       createAdminClient();
 
-    let query =
-      supabase
+    const now =
+      new Date().toISOString();
+
+    const {
+      data,
+      error,
+    } =
+      await admin
         .from(
-          "market_news_events"
+          "market_news_posts"
         )
         .select(
-          [
-            "id",
-            "external_id",
-            "symbol",
-            "headline",
-            "summary",
-            "source",
-            "source_url",
-            "image_url",
-            "event_type",
-            "impact",
-            "importance",
-            "classification_reason",
-            "published_at",
-            "detected_at",
-          ].join(",")
+          "id,title,content,image_url,news_type,is_pinned,published_at,expires_at"
+        )
+        .eq(
+          "is_published",
+          true
+        )
+        .or(
+          `expires_at.is.null,expires_at.gt.${now}`
         )
         .order(
-          "importance",
+          "is_pinned",
           {
             ascending: false,
           }
@@ -120,75 +103,42 @@ export async function GET(
             ascending: false,
           }
         )
-        .limit(limit);
-
-    if (symbol) {
-      query =
-        query.eq(
-          "symbol",
-          symbol
-        );
-    }
-
-    if (
-      eventType &&
-      eventType !== "ALL"
-    ) {
-      query =
-        query.eq(
-          "event_type",
-          eventType
-        );
-    }
-
-    if (
-      impact &&
-      impact !== "ALL"
-    ) {
-      query =
-        query.eq(
-          "impact",
-          impact
-        );
-    }
-
-    const {
-      data,
-      error,
-    } = await query;
+        .limit(100);
 
     if (error) {
-      throw new Error(
-        error.message
-      );
+      throw error;
     }
+
+    const rows =
+      (data || []) as unknown as
+        MarketNewsPostRow[];
+
+    const posts =
+      await Promise.all(
+        rows.map(
+          addSignedImageUrl
+        )
+      );
 
     return NextResponse.json({
       ok: true,
-      news: data || [],
-      count:
-        data?.length || 0,
-      filters: {
-        symbol:
-          symbol || null,
-        eventType:
-          eventType || "ALL",
-        impact:
-          impact || "ALL",
-        limit,
-      },
+      posts,
+      count: posts.length,
       updatedAt:
-        new Date()
-          .toISOString(),
+        new Date().toISOString(),
     });
   } catch (error) {
+    console.error(
+      "GET /api/market-news failed:",
+      error
+    );
+
     return NextResponse.json(
       {
         ok: false,
+        posts: [],
         error:
-          error instanceof Error
-            ? error.message
-            : "تعذر تحميل أخبار السوق.",
+          "تعذر تحميل مركز الأخبار",
       },
       {
         status: 500,
