@@ -17,6 +17,19 @@ export const dynamic =
 const MAX_MESSAGE_LENGTH = 500;
 const MAX_MESSAGES = 500;
 
+const CHAT_IMAGE_BUCKET =
+  "market-chat-images";
+
+const MAX_IMAGE_SIZE =
+  5 * 1024 * 1024;
+
+const ALLOWED_IMAGE_TYPES =
+  new Set([
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+  ]);
+
 type ChatProfile = {
   role: string | null;
   full_name: string | null;
@@ -34,6 +47,11 @@ type ChatMessageRow = {
   reply_user_name: string | null;
   reply_message: string | null;
   edited_at: string | null;
+  image_url: string | null;
+  image_signed_url?: string | null;
+  message_type:
+    | "TEXT"
+    | "IMAGE";
   created_at: string;
   updated_at: string;
 };
@@ -172,6 +190,53 @@ function containsBlockedLink(
   );
 }
 
+async function withSignedImageUrl(
+  row: ChatMessageRow
+) {
+  if (!row.image_url) {
+    return {
+      ...row,
+      image_signed_url:
+        null,
+    };
+  }
+
+  const admin =
+    createAdminClient();
+
+  const {
+    data,
+    error,
+  } =
+    await admin.storage
+      .from(
+        CHAT_IMAGE_BUCKET
+      )
+      .createSignedUrl(
+        row.image_url,
+        60 * 60
+      );
+
+  if (error) {
+    console.error(
+      "تعذر إنشاء رابط صورة غرفة السوق:",
+      error
+    );
+
+    return {
+      ...row,
+      image_signed_url:
+        null,
+    };
+  }
+
+  return {
+    ...row,
+    image_signed_url:
+      data.signedUrl,
+  };
+}
+
 function visibleMessage(
   row: ChatMessageRow
 ) {
@@ -223,6 +288,8 @@ export async function GET() {
             "reply_user_name",
             "reply_message",
             "edited_at",
+            "image_url",
+            "message_type",
             "created_at",
             "updated_at",
           ].join(",")
@@ -293,10 +360,20 @@ export async function GET() {
           ?.role === "admin",
       currentUserId:
         authorization.user.id,
-      messages: [
-        ...pinned,
-        ...regular,
-      ].map(visibleMessage),
+      messages:
+        await Promise.all(
+          [
+            ...pinned,
+            ...regular,
+          ].map(
+            async (row) =>
+              withSignedImageUrl(
+                visibleMessage(
+                  row
+                )
+              )
+          )
+        ),
     });
   } catch (error) {
     console.error(
@@ -348,27 +425,77 @@ export async function POST(
       return authorization.error;
     }
 
-    const body =
-      await request.json();
+    const contentType =
+      request.headers.get(
+        "content-type"
+      ) || "";
 
-    const message =
-      normalizeMessage(
-        body.message
-      );
+    let message = "";
+    let replyToId = "";
 
-    const replyToId =
-      String(
-        body.replyToId || ""
+    let imageFile:
+      | File
+      | null = null;
+
+    if (
+      contentType.includes(
+        "multipart/form-data"
       )
-        .trim()
-        .slice(0, 100);
+    ) {
+      const formData =
+        await request.formData();
 
-    if (!message) {
+      message =
+        normalizeMessage(
+          formData.get(
+            "message"
+          )
+        );
+
+      replyToId =
+        String(
+          formData.get(
+            "replyToId"
+          ) || ""
+        )
+          .trim()
+          .slice(0, 100);
+
+      const fileValue =
+        formData.get(
+          "image"
+        );
+
+      imageFile =
+        fileValue instanceof File
+          ? fileValue
+          : null;
+    } else {
+      const body =
+        await request.json();
+
+      message =
+        normalizeMessage(
+          body.message
+        );
+
+      replyToId =
+        String(
+          body.replyToId || ""
+        )
+          .trim()
+          .slice(0, 100);
+    }
+
+    if (
+      !message &&
+      !imageFile
+    ) {
       return NextResponse.json(
         {
           ok: false,
           error:
-            "اكتب الرسالة أولًا",
+            "اكتب رسالة أو اختر صورة",
         },
         {
           status: 400,
@@ -395,6 +522,41 @@ export async function POST(
     const isAdmin =
       authorization.profile
         ?.role === "admin";
+
+    if (
+      imageFile &&
+      !ALLOWED_IMAGE_TYPES.has(
+        imageFile.type
+      )
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "يسمح فقط بصور JPG أو PNG أو WEBP",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    if (
+      imageFile &&
+      imageFile.size >
+        MAX_IMAGE_SIZE
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "حجم الصورة يجب ألا يتجاوز 5MB",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
 
     if (
       !isAdmin &&
@@ -569,6 +731,51 @@ export async function POST(
             80
           );
 
+    let imagePath:
+      | string
+      | null = null;
+
+    if (imageFile) {
+      const extension =
+        imageFile.type ===
+        "image/png"
+          ? "png"
+          : imageFile.type ===
+              "image/webp"
+            ? "webp"
+            : "jpg";
+
+      imagePath =
+        `${authorization.user.id}/` +
+        `${Date.now()}-` +
+        `${crypto.randomUUID()}.` +
+        extension;
+
+      const bytes =
+        await imageFile.arrayBuffer();
+
+      const {
+        error: uploadError,
+      } =
+        await admin.storage
+          .from(
+            CHAT_IMAGE_BUCKET
+          )
+          .upload(
+            imagePath,
+            bytes,
+            {
+              contentType:
+                imageFile.type,
+              upsert: false,
+            }
+          );
+
+      if (uploadError) {
+        throw uploadError;
+      }
+    }
+
     const {
       data,
       error,
@@ -599,6 +806,12 @@ export async function POST(
             null,
           edited_at:
             null,
+          image_url:
+            imagePath,
+          message_type:
+            imagePath
+              ? "IMAGE"
+              : "TEXT",
         })
         .select(
           [
@@ -613,6 +826,8 @@ export async function POST(
             "reply_user_name",
             "reply_message",
             "edited_at",
+            "image_url",
+            "message_type",
             "created_at",
             "updated_at",
           ].join(",")
@@ -627,8 +842,10 @@ export async function POST(
       {
         ok: true,
         message:
-          data as unknown as
-            ChatMessageRow,
+          await withSignedImageUrl(
+            data as unknown as
+              ChatMessageRow
+          ),
       },
       {
         status: 201,
@@ -899,6 +1116,8 @@ export async function PATCH(
             "reply_user_name",
             "reply_message",
             "edited_at",
+            "image_url",
+            "message_type",
             "created_at",
             "updated_at",
           ].join(",")

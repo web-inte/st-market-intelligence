@@ -4,6 +4,7 @@ import {
   type FormEvent,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -26,6 +27,11 @@ type ChatMessage = {
   reply_user_name: string | null;
   reply_message: string | null;
   edited_at: string | null;
+  image_url: string | null;
+  image_signed_url?: string | null;
+  message_type:
+    | "TEXT"
+    | "IMAGE";
   created_at: string;
   updated_at: string;
 };
@@ -135,11 +141,22 @@ export default function MarketChatClient() {
       null
     );
 
+  const imageInputRef =
+    useRef<HTMLInputElement | null>(
+      null
+    );
+
   const [
     messages,
     setMessages,
   ] =
     useState<ChatMessage[]>([]);
+
+  const [
+    pinnedMessageIndex,
+    setPinnedMessageIndex,
+  ] =
+    useState(0);
 
   const [
     reactions,
@@ -162,6 +179,62 @@ export default function MarketChatClient() {
     setMessage,
   ] =
     useState("");
+
+  const [
+    selectedImage,
+    setSelectedImage,
+  ] =
+    useState<File | null>(
+      null
+    );
+
+  const [
+    selectedImagePreview,
+    setSelectedImagePreview,
+  ] =
+    useState<string | null>(
+      null
+    );
+
+  const [
+    openedImage,
+    setOpenedImage,
+  ] =
+    useState<string | null>(
+      null
+    );
+
+  const [
+    searchQuery,
+    setSearchQuery,
+  ] =
+    useState("");
+
+
+  const filteredMessages =
+    useMemo(() => {
+      const keyword =
+        searchQuery
+          .trim()
+          .toLowerCase();
+
+      if (!keyword) {
+        return messages;
+      }
+
+      return messages.filter(
+        (message) =>
+          message.user_name
+            .toLowerCase()
+            .includes(keyword) ||
+          message.message
+            .toLowerCase()
+            .includes(keyword)
+      );
+    }, [
+      messages,
+      searchQuery,
+    ]);
 
   const [
     replyingTo,
@@ -410,6 +483,90 @@ export default function MarketChatClient() {
       });
   }, [messages.length]);
 
+  function clearSelectedImage() {
+    if (selectedImagePreview) {
+      URL.revokeObjectURL(
+        selectedImagePreview
+      );
+    }
+
+    setSelectedImage(null);
+    setSelectedImagePreview(
+      null
+    );
+
+    if (imageInputRef.current) {
+      imageInputRef.current.value =
+        "";
+    }
+  }
+
+  function handleImageChange(
+    event:
+      React.ChangeEvent<HTMLInputElement>
+  ) {
+    const file =
+      event.target.files?.[0] ||
+      null;
+
+    if (!file) {
+      return;
+    }
+
+    const allowedTypes =
+      new Set([
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+      ]);
+
+    if (
+      !allowedTypes.has(
+        file.type
+      )
+    ) {
+      setError(
+        "يسمح فقط بصور JPG أو PNG أو WEBP"
+      );
+
+      event.target.value =
+        "";
+
+      return;
+    }
+
+    if (
+      file.size >
+      5 * 1024 * 1024
+    ) {
+      setError(
+        "حجم الصورة يجب ألا يتجاوز 5MB"
+      );
+
+      event.target.value =
+        "";
+
+      return;
+    }
+
+    if (selectedImagePreview) {
+      URL.revokeObjectURL(
+        selectedImagePreview
+      );
+    }
+
+    setSelectedImage(file);
+
+    setSelectedImagePreview(
+      URL.createObjectURL(
+        file
+      )
+    );
+
+    setEditingMessage(null);
+    setError("");
+  }
+
   async function handleSubmit(
     event: FormEvent
   ) {
@@ -418,9 +575,22 @@ export default function MarketChatClient() {
     const normalized =
       message.trim();
 
-    if (!normalized) {
+    if (
+      !normalized &&
+      !selectedImage
+    ) {
       setError(
-        "اكتب الرسالة أولًا"
+        "اكتب رسالة أو اختر صورة"
+      );
+      return;
+    }
+
+    if (
+      editingMessage &&
+      selectedImage
+    ) {
+      setError(
+        "لا يمكن إضافة صورة أثناء تعديل رسالة"
       );
       return;
     }
@@ -430,6 +600,67 @@ export default function MarketChatClient() {
     setSuccess("");
 
     try {
+      let requestBody:
+        | string
+        | FormData;
+
+      let requestHeaders:
+        | Record<string, string>
+        | undefined;
+
+      if (
+        selectedImage &&
+        !editingMessage
+      ) {
+        const formData =
+          new FormData();
+
+        formData.append(
+          "message",
+          normalized
+        );
+
+        formData.append(
+          "replyToId",
+          replyingTo?.id ||
+            ""
+        );
+
+        formData.append(
+          "image",
+          selectedImage
+        );
+
+        requestBody =
+          formData;
+
+        requestHeaders =
+          undefined;
+      } else {
+        requestBody =
+          JSON.stringify(
+            editingMessage
+              ? {
+                  messageId:
+                    editingMessage.id,
+                  message:
+                    normalized,
+                }
+              : {
+                  message:
+                    normalized,
+                  replyToId:
+                    replyingTo?.id ||
+                    null,
+                }
+          );
+
+        requestHeaders = {
+          "Content-Type":
+            "application/json",
+        };
+      }
+
       const response =
         await fetch(
           "/api/market-chat",
@@ -438,26 +669,10 @@ export default function MarketChatClient() {
               editingMessage
                 ? "PATCH"
                 : "POST",
-            headers: {
-              "Content-Type":
-                "application/json",
-            },
-            body: JSON.stringify(
-              editingMessage
-                ? {
-                    messageId:
-                      editingMessage.id,
-                    message:
-                      normalized,
-                  }
-                : {
-                    message:
-                      normalized,
-                    replyToId:
-                      replyingTo?.id ||
-                      null,
-                  }
-            ),
+            headers:
+              requestHeaders,
+            body:
+              requestBody,
           }
         );
 
@@ -475,6 +690,7 @@ export default function MarketChatClient() {
       setMessage("");
       setReplyingTo(null);
       setEditingMessage(null);
+      clearSelectedImage();
 
       if (data.message) {
         setMessages(
@@ -874,6 +1090,60 @@ export default function MarketChatClient() {
           </div>
         </header>
 
+        <div className="border-b border-white/[0.07] bg-[#0b1625]/95 px-3 py-3 backdrop-blur-xl sm:border-x sm:px-4">
+            <div className="flex items-center gap-2">
+              <div className="relative min-w-0 flex-1">
+                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-slate-500">
+                  🔍
+                </span>
+
+                <input
+                  type="search"
+                  value={searchQuery}
+                  onChange={(event) =>
+                    setSearchQuery(
+                      event.target.value
+                    )
+                  }
+                  placeholder="ابحث في الرسائل أو أسماء الأعضاء..."
+                  autoFocus
+                  className="h-11 w-full rounded-2xl border border-white/[0.08] bg-[#152234] pr-10 pl-4 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-sky-400/40"
+                />
+              </div>
+
+              {searchQuery ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setSearchQuery("")
+                  }
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/[0.08] bg-white/[0.04] text-lg text-slate-400 transition hover:text-rose-300"
+                  aria-label="مسح البحث"
+                >
+                  ×
+                </button>
+              ) : null}
+            </div>
+
+            <div className="mt-2 flex items-center justify-between gap-3 text-[11px] font-bold">
+              <span className="text-slate-500">
+                البحث يشمل نص الرسالة واسم المرسل
+              </span>
+
+              <span
+                className={
+                  searchQuery.trim()
+                    ? "text-sky-300"
+                    : "text-slate-600"
+                }
+              >
+                {searchQuery.trim()
+                  ? `${filteredMessages.length} نتيجة`
+                  : `${messages.length} رسالة`}
+              </span>
+            </div>
+          </div>
+
         <div className="border-b border-amber-400/15 bg-amber-400/[0.06] px-4 py-2.5 text-center text-[11px] leading-5 text-amber-200 sm:border-x">
           الآراء المنشورة تمثل أصحابها وليست توصيات استثمارية. لا يسمح للمشتركين بإرسال الروابط أو وسائل التواصل.
         </div>
@@ -891,32 +1161,143 @@ export default function MarketChatClient() {
         ) : null}
 
         <section className="overflow-hidden bg-[#0b1625] shadow-2xl shadow-black/30 sm:rounded-b-3xl sm:border sm:border-t-0 sm:border-white/[0.08]">
-          {messages.find((item) => item.is_pinned && !item.is_deleted) ? (
-            <div className="border-b border-violet-400/15 bg-violet-400/[0.06] px-4 py-3">
-              <div className="flex items-start gap-3">
-                <span className="mt-0.5 text-violet-300">📌</span>
+          {(() => {
+            const pinnedMessages =
+              messages.filter(
+                (item) =>
+                  item.is_pinned &&
+                  !item.is_deleted
+              );
 
-                <div className="min-w-0">
-                  <p className="text-[11px] font-black text-violet-300">
-                    رسالة مثبتة
-                  </p>
+            if (
+              pinnedMessages.length === 0
+            ) {
+              return null;
+            }
 
-                  <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-300">
-                    {messages.find(
-                      (item) =>
-                        item.is_pinned &&
-                        !item.is_deleted
-                    )?.message}
-                  </p>
+            const safeIndex =
+              pinnedMessageIndex %
+              pinnedMessages.length;
+
+            const activePinnedMessage =
+              pinnedMessages[
+                safeIndex
+              ];
+
+            return (
+              <div className="sticky top-[68px] z-20 border-b border-violet-400/15 bg-[#10182a]/95 px-3 py-3 shadow-lg shadow-black/20 backdrop-blur-xl sm:px-4">
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      document
+                        .getElementById(
+                          `chat-message-${activePinnedMessage.id}`
+                        )
+                        ?.scrollIntoView({
+                          behavior:
+                            "smooth",
+                          block:
+                            "center",
+                        });
+                    }}
+                    className="flex min-w-0 flex-1 items-start gap-3 text-right"
+                    title="الانتقال إلى الرسالة المثبتة"
+                  >
+                    <span className="mt-0.5 shrink-0 text-violet-300">
+                      📌
+                    </span>
+
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <p className="text-[11px] font-black text-violet-300">
+                          رسالة مثبتة
+                        </p>
+
+                        <span className="text-[10px] font-bold text-slate-500">
+                          {safeIndex + 1}/
+                          {pinnedMessages.length}
+                        </span>
+                      </div>
+
+                      <p className="mt-1 truncate text-xs font-bold text-sky-300">
+                        {
+                          activePinnedMessage.user_name
+                        }
+                      </p>
+
+                      <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-300">
+                        {
+                          activePinnedMessage.message
+                        }
+                      </p>
+                    </div>
+                  </button>
+
+                  {pinnedMessages.length >
+                  1 ? (
+                    <div className="flex shrink-0 items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setPinnedMessageIndex(
+                            (
+                              safeIndex -
+                              1 +
+                              pinnedMessages.length
+                            ) %
+                              pinnedMessages.length
+                          )
+                        }
+                        className="flex h-8 w-8 items-center justify-center rounded-full border border-white/[0.08] bg-white/[0.04] text-sm font-black text-slate-300 transition hover:border-violet-400/30 hover:text-violet-300"
+                        aria-label="الرسالة المثبتة السابقة"
+                      >
+                        ›
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setPinnedMessageIndex(
+                            (
+                              safeIndex +
+                              1
+                            ) %
+                              pinnedMessages.length
+                          )
+                        }
+                        className="flex h-8 w-8 items-center justify-center rounded-full border border-white/[0.08] bg-white/[0.04] text-sm font-black text-slate-300 transition hover:border-violet-400/30 hover:text-violet-300"
+                        aria-label="الرسالة المثبتة التالية"
+                      >
+                        ‹
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
               </div>
-            </div>
-          ) : null}
+            );
+          })()}
 
           <div className="h-[calc(100dvh-250px)] min-h-[440px] overflow-y-auto bg-[radial-gradient(circle_at_top,#12233a_0%,#0b1625_48%,#08111e_100%)] px-3 py-5 sm:h-[68vh] sm:px-6">
             {loading ? (
               <div className="flex h-full items-center justify-center text-sm font-bold text-slate-500">
                 جارٍ تحميل الرسائل...
+              </div>
+            ) : searchQuery.trim() &&
+              filteredMessages.length ===
+                0 ? (
+              <div className="flex h-full flex-col items-center justify-center px-6 text-center">
+                <div className="text-4xl text-slate-600">
+                  🔍
+                </div>
+
+                <h3 className="mt-4 font-black text-slate-200">
+                  لا توجد نتائج
+                </h3>
+
+                <p className="mt-2 max-w-sm text-sm leading-6 text-slate-500">
+                  لم نعثر على رسالة أو اسم يطابق بحثك.
+                </p>
               </div>
             ) : messages.length ===
               0 ? (
@@ -935,7 +1316,7 @@ export default function MarketChatClient() {
               </div>
             ) : (
               <div className="grid gap-2.5">
-                {messages.map(
+                {filteredMessages.map(
                   (
                     chatMessage
                   ) => {
@@ -1100,6 +1481,29 @@ export default function MarketChatClient() {
                             ) : null}
                           </div>
 
+                          {chatMessage.image_signed_url ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setOpenedImage(
+                                  chatMessage.image_signed_url ||
+                                    null
+                                )
+                              }
+                              className="mt-2 block max-w-full overflow-hidden rounded-xl border border-white/[0.08] bg-black/20"
+                              aria-label="تكبير الصورة"
+                            >
+                              <img
+                                src={
+                                  chatMessage.image_signed_url
+                                }
+                                alt="صورة داخل غرفة السوق"
+                                loading="lazy"
+                                className="max-h-[420px] w-auto max-w-full object-contain"
+                              />
+                            </button>
+                          ) : null}
+
                           {chatMessage.reply_to_id ? (
                             <button
                               type="button"
@@ -1130,16 +1534,18 @@ export default function MarketChatClient() {
                             </button>
                           ) : null}
 
-                          <p
-                            className={[
-                              "mt-1.5 whitespace-pre-wrap break-words text-sm leading-6",
-                              chatMessage.is_deleted
-                                ? "italic text-slate-500"
-                                : "text-slate-100",
-                            ].join(" ")}
-                          >
-                            {chatMessage.message}
-                          </p>
+                          {chatMessage.message ? (
+                            <p
+                              className={[
+                                "mt-1.5 whitespace-pre-wrap break-words text-sm leading-6",
+                                chatMessage.is_deleted
+                                  ? "italic text-slate-500"
+                                  : "text-slate-100",
+                              ].join(" ")}
+                            >
+                              {chatMessage.message}
+                            </p>
+                          ) : null}
 
                           {!chatMessage.is_deleted ? (
                             <div className="mt-2 flex flex-wrap items-center gap-1.5">
@@ -1253,6 +1659,55 @@ export default function MarketChatClient() {
             }
             className="sticky bottom-0 z-30 border-t border-white/[0.07] bg-[#0b1625]/95 p-3 shadow-[0_-12px_30px_rgba(0,0,0,0.22)] backdrop-blur-xl sm:p-4"
           >
+            {selectedImagePreview ? (
+              <div className="mb-3 overflow-hidden rounded-2xl border border-violet-400/20 bg-violet-400/[0.06] p-3">
+                <div className="flex items-start gap-3">
+                  <img
+                    src={
+                      selectedImagePreview
+                    }
+                    alt="معاينة الصورة"
+                    className="h-20 w-20 shrink-0 rounded-xl object-cover"
+                  />
+
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-black text-violet-300">
+                      صورة جاهزة للإرسال
+                    </p>
+
+                    <p className="mt-1 truncate text-xs text-slate-400">
+                      {
+                        selectedImage?.name
+                      }
+                    </p>
+
+                    <p className="mt-1 text-[11px] text-slate-500">
+                      {selectedImage
+                        ? `${(
+                            selectedImage.size /
+                            1024 /
+                            1024
+                          ).toFixed(
+                            2
+                          )} MB`
+                        : ""}
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={
+                      clearSelectedImage
+                    }
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-lg text-slate-400 transition hover:bg-white/[0.07] hover:text-rose-300"
+                    aria-label="إزالة الصورة"
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
             {editingMessage ? (
               <div className="mb-3 flex items-center gap-3 rounded-2xl border border-amber-400/20 bg-amber-400/[0.07] px-3 py-2.5">
                 <div className="min-w-0 flex-1 border-r-2 border-amber-400 pr-3">
@@ -1309,6 +1764,35 @@ export default function MarketChatClient() {
             ) : null}
 
             <div className="flex items-end gap-2">
+              <input
+                ref={imageInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                onChange={
+                  handleImageChange
+                }
+                className="hidden"
+              />
+
+              <button
+                type="button"
+                disabled={
+                  sending ||
+                  Boolean(
+                    editingMessage
+                  )
+                }
+                onClick={() =>
+                  imageInputRef.current
+                    ?.click()
+                }
+                className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-white/[0.08] bg-[#152234] text-xl text-slate-400 transition hover:border-violet-400/30 hover:text-violet-300 disabled:cursor-not-allowed disabled:opacity-40"
+                aria-label="اختيار صورة"
+                title="إرفاق صورة"
+              >
+                📎
+              </button>
+
               <textarea
                 value={message}
                 onChange={(event) => {
@@ -1346,7 +1830,10 @@ export default function MarketChatClient() {
                 type="submit"
                 disabled={
                   sending ||
-                  !message.trim()
+                  (
+                    !message.trim() &&
+                    !selectedImage
+                  )
                 }
                 className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-sky-400 to-cyan-600 text-lg font-black text-white shadow-lg shadow-cyan-950/40 transition hover:scale-105 disabled:cursor-not-allowed disabled:opacity-40"
               >
@@ -1370,6 +1857,35 @@ export default function MarketChatClient() {
           </form>
         </section>
       </div>
+
+      {openedImage ? (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 p-4 backdrop-blur-sm"
+          onClick={() =>
+            setOpenedImage(null)
+          }
+        >
+          <button
+            type="button"
+            onClick={() =>
+              setOpenedImage(null)
+            }
+            className="absolute left-4 top-4 flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-black/60 text-2xl text-white"
+            aria-label="إغلاق الصورة"
+          >
+            ×
+          </button>
+
+          <img
+            src={openedImage}
+            alt="عرض الصورة"
+            onClick={(event) =>
+              event.stopPropagation()
+            }
+            className="max-h-[92vh] max-w-[96vw] rounded-2xl object-contain shadow-2xl shadow-black"
+          />
+        </div>
+      ) : null}
     </main>
   );
 }
