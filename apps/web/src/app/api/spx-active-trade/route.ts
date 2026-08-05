@@ -1466,10 +1466,6 @@ export async function GET(
                 "🛑 انتهت صفقة SPX",
                 "",
                 `📊 الاتجاه: ${side}`,
-                `📍 سبب الإغلاق: ${
-                  stopReason ||
-                  "تم إغلاق الصفقة"
-                }`,
                 "",
                 `💰 أفضل ربح: ${
                   bestProfitDollars >= 0
@@ -1494,6 +1490,10 @@ export async function GET(
                   currentProfitDollars,
                   0
                 )}$`,
+                "",
+                bestProfitDollars >= 100
+                  ? "🟢 صفقة ناجحة"
+                  : "🔴 صفقة خاسرة",
                 "",
                 "🌐 تفاصيل الصفقة:",
                 telegramUrl,
