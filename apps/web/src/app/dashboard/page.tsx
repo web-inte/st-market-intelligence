@@ -1326,18 +1326,32 @@ ${url}`);
             العقد في قراءة واحدة تساعدك على اكتشاف الفرص الأقوى بوضوح وسرعة.
           </p>
 
-          <a
-            href={TELEGRAM_CHANNEL_URL}
-            target="_blank"
-            rel="noreferrer"
-            className="group mx-auto mt-6 inline-flex items-center gap-3 rounded-2xl border border-sky-400/20 bg-sky-400/[0.08] px-5 py-3 text-sm font-black text-sky-300 shadow-lg shadow-sky-950/20 transition duration-300 hover:-translate-y-0.5 hover:border-sky-400/40 hover:bg-sky-400/[0.14]"
-          >
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-sky-400/10 text-lg">
-              ✈
-            </span>
+          <div className="mx-auto mt-6 flex w-full max-w-xl flex-col items-stretch justify-center gap-3 sm:flex-row">
+            <a
+              href={TELEGRAM_CHANNEL_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="group inline-flex flex-1 items-center justify-center gap-3 rounded-2xl border border-sky-400/20 bg-sky-400/[0.08] px-5 py-3 text-sm font-black text-sky-300 shadow-lg shadow-sky-950/20 transition duration-300 hover:-translate-y-0.5 hover:border-sky-400/40 hover:bg-sky-400/[0.14]"
+            >
+              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-sky-400/10 text-lg">
+                ✈
+              </span>
 
-            <span>انضم إلى قناة تيليجرام</span>
-          </a>
+              <span>انضم إلى قناة تيليجرام</span>
+            </a>
+
+            <button
+              type="button"
+              onClick={() => router.push("/market-chat")}
+              className="group inline-flex flex-1 items-center justify-center gap-3 rounded-2xl border border-emerald-400/20 bg-emerald-400/[0.08] px-5 py-3 text-sm font-black text-emerald-300 shadow-lg shadow-emerald-950/20 transition duration-300 hover:-translate-y-0.5 hover:border-emerald-400/40 hover:bg-emerald-400/[0.14]"
+            >
+              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-400/10 text-lg">
+                💬
+              </span>
+
+              <span>الدخول إلى غرفة السوق</span>
+            </button>
+          </div>
         </header>
 
         <section className="mb-8 grid gap-4 lg:grid-cols-2 xl:grid-cols-3 xl:gap-5">
