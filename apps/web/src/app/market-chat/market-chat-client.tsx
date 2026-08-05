@@ -1090,7 +1090,7 @@ export default function MarketChatClient() {
           </div>
         </header>
 
-        <div className="border-b border-white/[0.07] bg-[#0b1625]/95 px-3 py-3 backdrop-blur-xl sm:border-x sm:px-4">
+        <div className="sticky top-[68px] z-30 border-b border-white/[0.07] bg-[#0b1625]/95 px-3 py-3 shadow-lg shadow-black/20 backdrop-blur-xl sm:border-x sm:px-4">
             <div className="flex items-center gap-2">
               <div className="relative min-w-0 flex-1">
                 <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-slate-500">
@@ -1185,7 +1185,7 @@ export default function MarketChatClient() {
               ];
 
             return (
-              <div className="sticky top-[68px] z-20 border-b border-violet-400/15 bg-[#10182a]/95 px-3 py-3 shadow-lg shadow-black/20 backdrop-blur-xl sm:px-4">
+              <div className="sticky top-[154px] z-20 border-b border-violet-400/15 bg-[#10182a]/95 px-3 py-3 shadow-lg shadow-black/20 backdrop-blur-xl sm:px-4">
                 <div className="flex items-center gap-3">
                   <button
                     type="button"
