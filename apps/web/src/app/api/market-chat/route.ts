@@ -30,6 +30,10 @@ type ChatMessageRow = {
   is_admin: boolean;
   is_pinned: boolean;
   is_deleted: boolean;
+  reply_to_id: string | null;
+  reply_user_name: string | null;
+  reply_message: string | null;
+  edited_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -215,6 +219,10 @@ export async function GET() {
             "is_admin",
             "is_pinned",
             "is_deleted",
+            "reply_to_id",
+            "reply_user_name",
+            "reply_message",
+            "edited_at",
             "created_at",
             "updated_at",
           ].join(",")
@@ -348,6 +356,13 @@ export async function POST(
         body.message
       );
 
+    const replyToId =
+      String(
+        body.replyToId || ""
+      )
+        .trim()
+        .slice(0, 100);
+
     if (!message) {
       return NextResponse.json(
         {
@@ -467,6 +482,76 @@ export async function POST(
         );
     }
 
+    let replyTo:
+      | {
+          id: string;
+          user_name: string;
+          message: string;
+          is_deleted: boolean;
+        }
+      | null = null;
+
+    if (replyToId) {
+      const {
+        data: replyData,
+        error: replyError,
+      } =
+        await admin
+          .from(
+            "market_chat_messages"
+          )
+          .select(
+            "id,user_name,message,is_deleted"
+          )
+          .eq(
+            "id",
+            replyToId
+          )
+          .maybeSingle();
+
+      if (replyError) {
+        throw replyError;
+      }
+
+      if (
+        !replyData ||
+        replyData.is_deleted
+      ) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error:
+              "الرسالة التي تحاول الرد عليها غير متاحة",
+          },
+          {
+            status: 400,
+          }
+        );
+      }
+
+      replyTo = {
+        id:
+          String(
+            replyData.id
+          ),
+        user_name:
+          String(
+            replyData.user_name ||
+              "مستخدم"
+          )
+            .trim()
+            .slice(0, 80),
+        message:
+          String(
+            replyData.message ||
+              ""
+          )
+            .trim()
+            .slice(0, 180),
+        is_deleted: false,
+      };
+    }
+
     const fallbackName =
       authorization.user.email
         ?.split("@")[0]
@@ -504,6 +589,16 @@ export async function POST(
             false,
           is_deleted:
             false,
+          reply_to_id:
+            replyTo?.id || null,
+          reply_user_name:
+            replyTo?.user_name ||
+            null,
+          reply_message:
+            replyTo?.message ||
+            null,
+          edited_at:
+            null,
         })
         .select(
           [
@@ -514,6 +609,10 @@ export async function POST(
             "is_admin",
             "is_pinned",
             "is_deleted",
+            "reply_to_id",
+            "reply_user_name",
+            "reply_message",
+            "edited_at",
             "created_at",
             "updated_at",
           ].join(",")
@@ -555,3 +654,285 @@ export async function POST(
     );
   }
 }
+
+export async function PATCH(
+  request: NextRequest
+) {
+  try {
+    if (
+      !isAllowedRequestOrigin(
+        request
+      )
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "طلب غير مسموح",
+        },
+        {
+          status: 403,
+        }
+      );
+    }
+
+    const authorization =
+      await getAuthenticatedUser();
+
+    if (
+      authorization.error ||
+      !authorization.user
+    ) {
+      return authorization.error;
+    }
+
+    const body =
+      await request.json();
+
+    const messageId =
+      String(
+        body.messageId || ""
+      )
+        .trim()
+        .slice(0, 100);
+
+    const message =
+      normalizeMessage(
+        body.message
+      );
+
+    if (!messageId) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "معرّف الرسالة مطلوب",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    if (!message) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "لا يمكن حفظ رسالة فارغة",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    if (
+      message.length >
+      MAX_MESSAGE_LENGTH
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "الرسالة يجب ألا تتجاوز 500 حرف",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    const isAdmin =
+      authorization.profile
+        ?.role === "admin";
+
+    if (
+      !isAdmin &&
+      containsBlockedLink(
+        message
+      )
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "لا يُسمح بإرسال الروابط أو وسائل التواصل داخل غرفة السوق",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    const admin =
+      createAdminClient();
+
+    const {
+      data: currentData,
+      error: currentError,
+    } =
+      await admin
+        .from(
+          "market_chat_messages"
+        )
+        .select(
+          "id,user_id,is_deleted,created_at"
+        )
+        .eq(
+          "id",
+          messageId
+        )
+        .maybeSingle();
+
+    if (currentError) {
+      throw currentError;
+    }
+
+    if (!currentData) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "الرسالة غير موجودة",
+        },
+        {
+          status: 404,
+        }
+      );
+    }
+
+    if (
+      currentData.is_deleted
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "لا يمكن تعديل رسالة محذوفة",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    if (
+      currentData.user_id !==
+      authorization.user.id
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "لا يمكنك تعديل رسالة مستخدم آخر",
+        },
+        {
+          status: 403,
+        }
+      );
+    }
+
+    if (!isAdmin) {
+      const createdAt =
+        new Date(
+          currentData.created_at
+        ).getTime();
+
+      const elapsed =
+        Date.now() -
+        createdAt;
+
+      if (
+        !Number.isFinite(
+          createdAt
+        ) ||
+        elapsed >
+          2 * 60 * 1000
+      ) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error:
+              "انتهت مهلة تعديل الرسالة",
+          },
+          {
+            status: 403,
+          }
+        );
+      }
+    }
+
+    const editedAt =
+      new Date()
+        .toISOString();
+
+    const {
+      data,
+      error,
+    } =
+      await admin
+        .from(
+          "market_chat_messages"
+        )
+        .update({
+          message,
+          edited_at:
+            editedAt,
+          updated_at:
+            editedAt,
+        })
+        .eq(
+          "id",
+          messageId
+        )
+        .select(
+          [
+            "id",
+            "user_id",
+            "user_name",
+            "message",
+            "is_admin",
+            "is_pinned",
+            "is_deleted",
+            "reply_to_id",
+            "reply_user_name",
+            "reply_message",
+            "edited_at",
+            "created_at",
+            "updated_at",
+          ].join(",")
+        )
+        .single();
+
+    if (error) {
+      throw error;
+    }
+
+    return NextResponse.json({
+      ok: true,
+      message:
+        data as unknown as
+          ChatMessageRow,
+    });
+  } catch (error) {
+    console.error(
+      "PATCH /api/market-chat failed:",
+      error
+    );
+
+    return NextResponse.json(
+      {
+        ok: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "تعذر تعديل الرسالة",
+      },
+      {
+        status: 500,
+      }
+    );
+  }
+}
+

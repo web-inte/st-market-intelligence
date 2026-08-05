@@ -22,9 +22,26 @@ type ChatMessage = {
   is_admin: boolean;
   is_pinned: boolean;
   is_deleted: boolean;
+  reply_to_id: string | null;
+  reply_user_name: string | null;
+  reply_message: string | null;
+  edited_at: string | null;
   created_at: string;
   updated_at: string;
 };
+
+type ReactionInfo = {
+  count: number;
+  reactedByCurrentUser: boolean;
+};
+
+type ReactionsByMessage = Record<
+  string,
+  Record<
+    string,
+    ReactionInfo
+  >
+>;
 
 type ChatResponse = {
   ok?: boolean;
@@ -35,6 +52,13 @@ type ChatResponse = {
   error?: string;
   retryAfter?: number;
 };
+
+const REACTION_EMOJIS = [
+  "👍",
+  "❤️",
+  "😂",
+  "🔥",
+] as const;
 
 function formatMessageTime(
   value: string
@@ -118,10 +142,42 @@ export default function MarketChatClient() {
     useState<ChatMessage[]>([]);
 
   const [
+    reactions,
+    setReactions,
+  ] =
+    useState<ReactionsByMessage>(
+      {}
+    );
+
+  const [
+    reactingKey,
+    setReactingKey,
+  ] =
+    useState<string | null>(
+      null
+    );
+
+  const [
     message,
     setMessage,
   ] =
     useState("");
+
+  const [
+    replyingTo,
+    setReplyingTo,
+  ] =
+    useState<ChatMessage | null>(
+      null
+    );
+
+  const [
+    editingMessage,
+    setEditingMessage,
+  ] =
+    useState<ChatMessage | null>(
+      null
+    );
 
   const [
     loading,
@@ -172,6 +228,46 @@ export default function MarketChatClient() {
     setSuccess,
   ] =
     useState("");
+
+  const loadReactions =
+    useCallback(
+      async () => {
+        try {
+          const response =
+            await fetch(
+              "/api/market-chat/reactions",
+              {
+                cache:
+                  "no-store",
+              }
+            );
+
+          const data =
+            (await response.json()) as {
+              ok?: boolean;
+              reactions?: ReactionsByMessage;
+              error?: string;
+            };
+
+          if (!response.ok) {
+            throw new Error(
+              data.error ||
+                "تعذر تحميل التفاعلات"
+            );
+          }
+
+          setReactions(
+            data.reactions || {}
+          );
+        } catch (reactionError) {
+          console.error(
+            "تعذر تحميل التفاعلات:",
+            reactionError
+          );
+        }
+      },
+      []
+    );
 
   const loadMessages =
     useCallback(
@@ -246,6 +342,7 @@ export default function MarketChatClient() {
 
   useEffect(() => {
     void loadMessages();
+    void loadReactions();
 
     const supabase =
       createClient();
@@ -269,6 +366,18 @@ export default function MarketChatClient() {
             );
           }
         )
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table:
+              "market_chat_reactions",
+          },
+          () => {
+            void loadReactions();
+          }
+        )
         .subscribe(
           (status) => {
             setConnected(
@@ -283,7 +392,10 @@ export default function MarketChatClient() {
         channel
       );
     };
-  }, [loadMessages]);
+  }, [
+    loadMessages,
+    loadReactions,
+  ]);
 
   useEffect(() => {
     if (
@@ -322,15 +434,30 @@ export default function MarketChatClient() {
         await fetch(
           "/api/market-chat",
           {
-            method: "POST",
+            method:
+              editingMessage
+                ? "PATCH"
+                : "POST",
             headers: {
               "Content-Type":
                 "application/json",
             },
-            body: JSON.stringify({
-              message:
-                normalized,
-            }),
+            body: JSON.stringify(
+              editingMessage
+                ? {
+                    messageId:
+                      editingMessage.id,
+                    message:
+                      normalized,
+                  }
+                : {
+                    message:
+                      normalized,
+                    replyToId:
+                      replyingTo?.id ||
+                      null,
+                  }
+            ),
           }
         );
 
@@ -346,6 +473,8 @@ export default function MarketChatClient() {
       }
 
       setMessage("");
+      setReplyingTo(null);
+      setEditingMessage(null);
 
       if (data.message) {
         setMessages(
@@ -369,6 +498,101 @@ export default function MarketChatClient() {
       );
     } finally {
       setSending(false);
+    }
+  }
+
+  function startEditing(
+    chatMessage: ChatMessage
+  ) {
+    setEditingMessage(
+      chatMessage
+    );
+
+    setReplyingTo(null);
+
+    setMessage(
+      chatMessage.message
+    );
+
+    setError("");
+
+    requestAnimationFrame(() => {
+      const textarea =
+        document.querySelector<HTMLTextAreaElement>(
+          'textarea[placeholder^="اكتب رسالتك"]'
+        );
+
+      textarea?.focus();
+    });
+  }
+
+  async function toggleReaction(
+    chatMessage: ChatMessage,
+    emoji: string
+  ) {
+    if (
+      chatMessage.is_deleted
+    ) {
+      return;
+    }
+
+    const key =
+      `${chatMessage.id}:${emoji}`;
+
+    setReactingKey(key);
+    setError("");
+
+    try {
+      const response =
+        await fetch(
+          "/api/market-chat/reactions",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+            body: JSON.stringify({
+              messageId:
+                chatMessage.id,
+              emoji,
+            }),
+          }
+        );
+
+      const data =
+        (await response.json()) as {
+          ok?: boolean;
+          messageId?: string;
+          reactions?: Record<
+            string,
+            ReactionInfo
+          >;
+          error?: string;
+        };
+
+      if (!response.ok) {
+        throw new Error(
+          data.error ||
+            "تعذر تحديث التفاعل"
+        );
+      }
+
+      setReactions(
+        (current) => ({
+          ...current,
+          [chatMessage.id]:
+            data.reactions || {},
+        })
+      );
+    } catch (reactionError) {
+      setError(
+        reactionError instanceof Error
+          ? reactionError.message
+          : "تعذر تحديث التفاعل"
+      );
+    } finally {
+      setReactingKey(null);
     }
   }
 
@@ -752,6 +976,7 @@ export default function MarketChatClient() {
                         ) : null}
 
                         <article
+                          id={`chat-message-${chatMessage.id}`}
                           className={[
                             "group relative max-w-[86%] rounded-2xl px-3.5 py-2.5 shadow-lg sm:max-w-[72%]",
                             chatMessage.is_deleted
@@ -792,6 +1017,22 @@ export default function MarketChatClient() {
                               ) : null}
                             </div>
 
+                            {!chatMessage.is_deleted ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setReplyingTo(
+                                    chatMessage
+                                  );
+                                }}
+                                className="flex h-7 w-7 items-center justify-center rounded-full text-sm text-slate-500 transition hover:bg-white/[0.06] hover:text-sky-300"
+                                aria-label="الرد على الرسالة"
+                                title="رد"
+                              >
+                                ↩
+                              </button>
+                            ) : null}
+
                             {isAdmin && !chatMessage.is_deleted ? (
                               <details className="relative">
                                 <summary className="flex h-7 w-7 cursor-pointer list-none items-center justify-center rounded-full text-lg leading-none text-slate-500 transition hover:bg-white/[0.06] hover:text-white">
@@ -811,6 +1052,25 @@ export default function MarketChatClient() {
                                       ? "إلغاء التثبيت"
                                       : "تثبيت الرسالة"}
                                   </button>
+
+                                  {chatMessage.user_id ===
+                                  currentUserId ? (
+                                    <button
+                                      type="button"
+                                      disabled={
+                                        actionId ===
+                                        chatMessage.id
+                                      }
+                                      onClick={() =>
+                                        startEditing(
+                                          chatMessage
+                                        )
+                                      }
+                                      className="block w-full px-3 py-2 text-right text-xs font-bold text-sky-300 hover:bg-white/[0.05]"
+                                    >
+                                      تعديل الرسالة
+                                    </button>
+                                  ) : null}
 
                                   {!chatMessage.is_admin ? (
                                     <button
@@ -840,6 +1100,36 @@ export default function MarketChatClient() {
                             ) : null}
                           </div>
 
+                          {chatMessage.reply_to_id ? (
+                            <button
+                              type="button"
+                              className="mt-2 block w-full rounded-xl border-r-2 border-sky-400 bg-black/20 px-3 py-2 text-right"
+                              onClick={() => {
+                                const target =
+                                  document.getElementById(
+                                    `chat-message-${chatMessage.reply_to_id}`
+                                  );
+
+                                target?.scrollIntoView({
+                                  behavior:
+                                    "smooth",
+                                  block:
+                                    "center",
+                                });
+                              }}
+                            >
+                              <span className="block truncate text-[11px] font-black text-sky-300">
+                                {chatMessage.reply_user_name ||
+                                  "رسالة"}
+                              </span>
+
+                              <span className="mt-1 block line-clamp-2 text-xs leading-5 text-slate-400">
+                                {chatMessage.reply_message ||
+                                  "الرسالة الأصلية غير متاحة"}
+                              </span>
+                            </button>
+                          ) : null}
+
                           <p
                             className={[
                               "mt-1.5 whitespace-pre-wrap break-words text-sm leading-6",
@@ -851,7 +1141,75 @@ export default function MarketChatClient() {
                             {chatMessage.message}
                           </p>
 
+                          {!chatMessage.is_deleted ? (
+                            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                              {REACTION_EMOJIS.map(
+                                (emoji) => {
+                                  const info =
+                                    reactions[
+                                      chatMessage.id
+                                    ]?.[
+                                      emoji
+                                    ];
+
+                                  const active =
+                                    Boolean(
+                                      info?.reactedByCurrentUser
+                                    );
+
+                                  const count =
+                                    info?.count || 0;
+
+                                  const key =
+                                    `${chatMessage.id}:${emoji}`;
+
+                                  return (
+                                    <button
+                                      key={emoji}
+                                      type="button"
+                                      disabled={
+                                        reactingKey ===
+                                        key
+                                      }
+                                      onClick={() =>
+                                        void toggleReaction(
+                                          chatMessage,
+                                          emoji
+                                        )
+                                      }
+                                      className={[
+                                        "inline-flex min-h-8 items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-bold transition disabled:opacity-50",
+                                        active
+                                          ? "border-sky-400/40 bg-sky-400/15 text-sky-200"
+                                          : "border-white/[0.08] bg-white/[0.04] text-slate-400 hover:border-white/[0.16] hover:bg-white/[0.08]",
+                                      ].join(
+                                        " "
+                                      )}
+                                      aria-label={`تفاعل ${emoji}`}
+                                    >
+                                      <span>
+                                        {emoji}
+                                      </span>
+
+                                      {count > 0 ? (
+                                        <span>
+                                          {count}
+                                        </span>
+                                      ) : null}
+                                    </button>
+                                  );
+                                }
+                              )}
+                            </div>
+                          ) : null}
+
                           <div className="mt-1 flex items-center justify-end gap-1.5">
+                            {chatMessage.edited_at ? (
+                              <span className="text-[10px] font-medium text-slate-600">
+                                تم التعديل
+                              </span>
+                            ) : null}
+
                             <span className="text-[10px] font-medium text-slate-500">
                               {formatMessageTime(
                                 chatMessage.created_at
@@ -895,6 +1253,61 @@ export default function MarketChatClient() {
             }
             className="sticky bottom-0 z-30 border-t border-white/[0.07] bg-[#0b1625]/95 p-3 shadow-[0_-12px_30px_rgba(0,0,0,0.22)] backdrop-blur-xl sm:p-4"
           >
+            {editingMessage ? (
+              <div className="mb-3 flex items-center gap-3 rounded-2xl border border-amber-400/20 bg-amber-400/[0.07] px-3 py-2.5">
+                <div className="min-w-0 flex-1 border-r-2 border-amber-400 pr-3">
+                  <p className="text-xs font-black text-amber-300">
+                    تعديل الرسالة
+                  </p>
+
+                  <p className="mt-1 truncate text-xs text-slate-400">
+                    {editingMessage.message}
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingMessage(
+                      null
+                    );
+
+                    setMessage("");
+                  }}
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-lg text-slate-400 transition hover:bg-white/[0.07] hover:text-rose-300"
+                  aria-label="إلغاء التعديل"
+                >
+                  ×
+                </button>
+              </div>
+            ) : null}
+
+            {replyingTo ? (
+              <div className="mb-3 flex items-center gap-3 rounded-2xl border border-sky-400/20 bg-sky-400/[0.07] px-3 py-2.5">
+                <div className="min-w-0 flex-1 border-r-2 border-sky-400 pr-3">
+                  <p className="truncate text-xs font-black text-sky-300">
+                    الرد على{" "}
+                    {replyingTo.user_name}
+                  </p>
+
+                  <p className="mt-1 truncate text-xs text-slate-400">
+                    {replyingTo.message}
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setReplyingTo(null)
+                  }
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-lg text-slate-400 transition hover:bg-white/[0.07] hover:text-rose-300"
+                  aria-label="إلغاء الرد"
+                >
+                  ×
+                </button>
+              </div>
+            ) : null}
+
             <div className="flex items-end gap-2">
               <textarea
                 value={message}
@@ -939,7 +1352,9 @@ export default function MarketChatClient() {
               >
                 {sending
                   ? "…"
-                  : "➤"}
+                  : editingMessage
+                    ? "✓"
+                    : "➤"}
               </button>
             </div>
 
