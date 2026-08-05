@@ -480,8 +480,37 @@ function TradeCard({
       </div>
 
       {trade.status === "STOPPED" ? (
-        <div className="mt-5 rounded-2xl border border-rose-400/25 bg-rose-400/10 p-4 font-black leading-7 text-rose-200">
-          {tradeCloseMessage(trade)}
+        <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+          <p className="font-black leading-7 text-slate-200">
+            أعلى ربح تحقق للعقد:{" "}
+            <span className="text-emerald-300">
+              {`${Number(
+                trade.best_profit_dollars ?? 0
+              ) >= 0 ? "+" : ""}${Number(
+                trade.best_profit_dollars ?? 0
+              ).toFixed(2)}$ (${Number(
+                trade.best_profit_pct ?? 0
+              ) >= 0 ? "+" : ""}${Number(
+                trade.best_profit_pct ?? 0
+              ).toFixed(2)}%)`}
+            </span>
+          </p>
+
+          <p
+            className={`mt-2 text-sm font-black ${
+              Number(
+                trade.best_profit_dollars ?? 0
+              ) >= 100
+                ? "text-emerald-300"
+                : "text-rose-300"
+            }`}
+          >
+            {Number(
+              trade.best_profit_dollars ?? 0
+            ) >= 100
+              ? "صفقة ناجحة"
+              : "صفقة خاسرة"}
+          </p>
         </div>
       ) : null}
 
