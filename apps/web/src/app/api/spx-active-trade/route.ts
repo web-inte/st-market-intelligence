@@ -1268,17 +1268,13 @@ export async function GET(
         const telegramUrl =
           `${new URL(request.url).origin}/spx-whales`;
 
-        const previousBestProfitDollars =
-          round(
-            (previousBest - entryPrice) *
-              100
-          );
-
         const previousMilestone =
           Math.floor(
             Math.max(
               0,
-              previousBestProfitDollars
+              numberValue(
+                liveTrade.last_telegram_milestone
+              )
             ) / 50
           ) * 50;
 
@@ -1342,6 +1338,37 @@ export async function GET(
                     telegramResult.error,
                 }
               );
+              break;
+            }
+
+            const {
+              error:
+                telegramMilestoneUpdateError,
+            } = await supabase
+              .from("spx_trade_setups")
+              .update({
+                last_telegram_milestone:
+                  milestone,
+              })
+              .eq(
+                "id",
+                updatedTrade.id
+              );
+
+            if (
+              telegramMilestoneUpdateError
+            ) {
+              console.error(
+                "تعذر حفظ مستوى تيليجرام لصفقة SPX:",
+                {
+                  tradeId:
+                    updatedTrade.id,
+                  milestone,
+                  error:
+                    telegramMilestoneUpdateError,
+                }
+              );
+              break;
             }
           }
         }
