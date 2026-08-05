@@ -474,13 +474,15 @@ export async function POST(
       "مستخدم";
 
     const userName =
-      authorization.profile
-        ?.full_name?.trim()
-        .slice(0, 80) ||
-      fallbackName.slice(
-        0,
-        80
-      );
+      isAdmin
+        ? "إدارة ST Market Intelligence"
+        : authorization.profile
+            ?.full_name?.trim()
+            .slice(0, 80) ||
+          fallbackName.slice(
+            0,
+            80
+          );
 
     const {
       data,
