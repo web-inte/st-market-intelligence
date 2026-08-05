@@ -2138,13 +2138,32 @@ export async function GET(
       }
     );
   } catch (error) {
+    const errorRecord =
+      error !== null &&
+      typeof error === "object"
+        ? (error as Record<string, unknown>)
+        : {};
+
+    const errorMessage =
+      error instanceof Error
+        ? error.message
+        : typeof errorRecord.message === "string"
+          ? errorRecord.message
+          : typeof errorRecord.details === "string"
+            ? errorRecord.details
+            : JSON.stringify(error);
+
+    console.error(
+      "SPX active-trade runtime error:",
+      error
+    );
+
     return NextResponse.json(
       {
         ok: false,
         error:
-          error instanceof Error
-            ? error.message
-            : "حدث خطأ غير معروف",
+          errorMessage ||
+          "حدث خطأ غير معروف",
       },
       {
         status: 500,
