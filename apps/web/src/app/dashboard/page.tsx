@@ -1,4 +1,5 @@
 "use client";
+import MarketChatUnreadButton from "./market-chat-unread-button";
 
 import Link from "next/link";
 
@@ -1340,17 +1341,7 @@ ${url}`);
               <span>انضم إلى قناة تيليجرام</span>
             </a>
 
-            <button
-              type="button"
-              onClick={() => router.push("/market-chat")}
-              className="group inline-flex flex-1 items-center justify-center gap-3 rounded-2xl border border-emerald-400/20 bg-emerald-400/[0.08] px-5 py-3 text-sm font-black text-emerald-300 shadow-lg shadow-emerald-950/20 transition duration-300 hover:-translate-y-0.5 hover:border-emerald-400/40 hover:bg-emerald-400/[0.14]"
-            >
-              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-400/10 text-lg">
-                💬
-              </span>
-
-              <span>الدخول إلى غرفة السوق</span>
-            </button>
+            <MarketChatUnreadButton />
           </div>
         </header>
 

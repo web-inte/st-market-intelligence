@@ -302,6 +302,44 @@ export default function MarketChatClient() {
   ] =
     useState("");
 
+  const markChatAsRead =
+    useCallback(
+      async () => {
+        try {
+          const response =
+            await fetch(
+              "/api/market-chat/unread",
+              {
+                method:
+                  "PATCH",
+              }
+            );
+
+          if (
+            !response.ok &&
+            response.status !==
+              401
+          ) {
+            const data =
+              (await response.json()) as {
+                error?: string;
+              };
+
+            throw new Error(
+              data.error ||
+                "تعذر تحديث حالة القراءة"
+            );
+          }
+        } catch (readError) {
+          console.error(
+            "تعذر تصفير عداد غرفة السوق:",
+            readError
+          );
+        }
+      },
+      []
+    );
+
   const loadReactions =
     useCallback(
       async () => {
@@ -416,6 +454,7 @@ export default function MarketChatClient() {
   useEffect(() => {
     void loadMessages();
     void loadReactions();
+    void markChatAsRead();
 
     const supabase =
       createClient();
@@ -437,6 +476,8 @@ export default function MarketChatClient() {
             void loadMessages(
               true
             );
+
+            void markChatAsRead();
           }
         )
         .on(
@@ -468,6 +509,7 @@ export default function MarketChatClient() {
   }, [
     loadMessages,
     loadReactions,
+    markChatAsRead,
   ]);
 
   useEffect(() => {
