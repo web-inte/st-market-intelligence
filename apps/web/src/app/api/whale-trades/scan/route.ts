@@ -9,7 +9,7 @@ import {
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const SYMBOLS = [
+const FALLBACK_SYMBOLS = [
   "SPY",
   "QQQ",
   "IWM",
@@ -42,6 +42,116 @@ const SYMBOLS = [
   "BAC",
   "XOM",
 ];
+
+async function loadScanSymbols() {
+  const supabaseUrl =
+    process.env.SUPABASE_URL;
+
+  const supabaseKey =
+    process.env.SUPABASE_SECRET_KEY ||
+    process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (
+    !supabaseUrl ||
+    !supabaseKey
+  ) {
+    console.warn(
+      "متغيرات Supabase غير مكتملة، سيتم استخدام القائمة الاحتياطية."
+    );
+
+    return FALLBACK_SYMBOLS;
+  }
+
+  try {
+    const url =
+      new URL(
+        `${supabaseUrl.replace(/\/+$/, "")}/rest/v1/whale_scan_symbols`
+      );
+
+    url.searchParams.set(
+      "select",
+      "symbol"
+    );
+
+    url.searchParams.set(
+      "is_active",
+      "eq.true"
+    );
+
+    url.searchParams.set(
+      "order",
+      "symbol.asc"
+    );
+
+    const response =
+      await fetch(
+        url,
+        {
+          headers: {
+            apikey:
+              supabaseKey,
+            Authorization:
+              `Bearer ${supabaseKey}`,
+            Accept:
+              "application/json",
+          },
+          cache:
+            "no-store",
+        }
+      );
+
+    if (!response.ok) {
+      throw new Error(
+        await response.text()
+      );
+    }
+
+    const rows =
+      await response.json();
+
+    const symbols =
+      Array.isArray(rows)
+        ? rows
+            .map((row) =>
+              String(
+                row?.symbol || ""
+              )
+                .trim()
+                .toUpperCase()
+            )
+            .filter(
+              (symbol) =>
+                /^[A-Z0-9.-]{1,10}$/.test(
+                  symbol
+                )
+            )
+        : [];
+
+    const uniqueSymbols =
+      Array.from(
+        new Set(symbols)
+      );
+
+    if (
+      uniqueSymbols.length === 0
+    ) {
+      console.warn(
+        "جدول whale_scan_symbols فارغ، سيتم استخدام القائمة الاحتياطية."
+      );
+
+      return FALLBACK_SYMBOLS;
+    }
+
+    return uniqueSymbols;
+  } catch (error) {
+    console.error(
+      "تعذر تحميل رموز فحص الحيتان:",
+      error
+    );
+
+    return FALLBACK_SYMBOLS;
+  }
+}
 
 const MIN_PREMIUM_VALUE = 250_000;
 const MIN_WHALE_SCORE = 70;
@@ -2565,12 +2675,21 @@ export async function GET(
   const marketState =
     getRiyadhMarketState();
 
+  const symbols =
+    await loadScanSymbols();
+
+  console.log(
+    `WHALE SCAN SYMBOLS: ${symbols.length}`
+  );
+
   if (
     !marketState.isOpen &&
     !force
   ) {
     return NextResponse.json({
       ok: true,
+      symbolsScanned:
+        symbols.length,
       scanned: false,
       marketOpen: false,
       message:
@@ -2619,7 +2738,7 @@ export async function GET(
     error: string;
   }> = [];
 
-  for (const symbol of SYMBOLS) {
+  for (const symbol of symbols) {
     try {
       const contracts =
         await fetchOptionChain(
@@ -3155,7 +3274,7 @@ export async function GET(
       marketState.isOpen,
     forced: force,
     symbolsScanned:
-      SYMBOLS.length,
+      symbols.length,
     whalesDetected:
       uniqueRows.length,
     saved:

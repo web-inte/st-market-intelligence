@@ -3,6 +3,7 @@ import AutoRefresh from "./auto-refresh";
 
 import { hydrateWhaleTrade } from "@/lib/hydrate-whale-trade";
 import WhaleOpportunityCard from "./whale-opportunity-card";
+import WhaleAdminPanel from "./whale-admin-panel";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
@@ -828,6 +829,8 @@ export default async function WhaleTradesPage({
               </span>
             </div>
           </header>
+
+          <WhaleAdminPanel />
 
           {rankedTrades.length === 0 ? (
             <section className="rounded-3xl border border-dashed border-white/15 bg-white/[0.025] px-6 py-20 text-center">
