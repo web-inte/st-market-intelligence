@@ -2607,6 +2607,7 @@ function authorizeRequest(
   request: NextRequest
 ) {
   const cronSecret =
+    process.env.WHALE_CRON_SECRET ||
     process.env.CRON_SECRET;
 
   if (!cronSecret) {
