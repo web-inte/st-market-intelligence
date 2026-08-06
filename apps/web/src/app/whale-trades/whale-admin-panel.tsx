@@ -10,6 +10,7 @@ import {
 
 import {
   useRouter,
+  useSearchParams,
 } from "next/navigation";
 
 type ScanSymbol = {
@@ -55,6 +56,9 @@ function normalizeSymbol(
 export default function WhaleAdminPanel() {
   const router =
     useRouter();
+
+  const searchParams =
+    useSearchParams();
 
   const [
     symbols,
@@ -103,6 +107,12 @@ export default function WhaleAdminPanel() {
   const [
     success,
     setSuccess,
+  ] =
+    useState("");
+
+  const [
+    autoSavedSymbol,
+    setAutoSavedSymbol,
   ] =
     useState("");
 
@@ -159,6 +169,93 @@ export default function WhaleAdminPanel() {
   useEffect(() => {
     void loadSymbols();
   }, [loadSymbols]);
+
+  useEffect(() => {
+    const searchedSymbol =
+      normalizeSymbol(
+        searchParams.get(
+          "symbol"
+        ) || ""
+      );
+
+    if (
+      !searchedSymbol ||
+      loading ||
+      autoSavedSymbol ===
+        searchedSymbol
+    ) {
+      return;
+    }
+
+    const alreadyExists =
+      symbols.some(
+        (item) =>
+          item.symbol ===
+          searchedSymbol
+      );
+
+    if (alreadyExists) {
+      setAutoSavedSymbol(
+        searchedSymbol
+      );
+      return;
+    }
+
+    async function saveSearchedSymbol() {
+      try {
+        const response =
+          await fetch(
+            "/api/admin/whale-scan-symbols",
+            {
+              method: "POST",
+              headers: {
+                "Content-Type":
+                  "application/json",
+              },
+              body: JSON.stringify({
+                symbol:
+                  searchedSymbol,
+              }),
+            }
+          );
+
+        const data =
+          (await response.json()) as
+            SymbolsResponse;
+
+        if (!response.ok) {
+          throw new Error(
+            data.error ||
+              "تعذر حفظ رمز البحث"
+          );
+        }
+
+        setAutoSavedSymbol(
+          searchedSymbol
+        );
+
+        setSuccess(
+          `تمت إضافة ${searchedSymbol} تلقائيًا إلى قائمة الفحص`
+        );
+
+        await loadSymbols();
+      } catch (saveError) {
+        setError(
+          saveError instanceof Error
+            ? saveError.message
+            : "تعذر حفظ رمز البحث"
+        );
+      }
+    }
+
+    void saveSearchedSymbol();
+  }, [
+    autoSavedSymbol,
+    loadSymbols,
+    loading,
+    searchParams,
+    symbols,
+  ]);
 
   const activeCount =
     useMemo(
