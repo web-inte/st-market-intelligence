@@ -214,6 +214,33 @@ export async function updateSession(
       ? String(data.claims.sub)
       : null;
 
+  /*
+   * يسمح لمسار فحص الحيتان المجدول واليدوي
+   * بالمرور دون جلسة مستخدم، بشرط تطابق
+   * Authorization مع السر المحفوظ في البيئة.
+   *
+   * يبقى مسار الفحص نفسه مسؤولًا أيضًا عن
+   * إعادة التحقق من السر كطبقة حماية ثانية.
+   */
+  const whaleScanSecret =
+    process.env.WHALE_CRON_SECRET ||
+    process.env.CRON_SECRET;
+
+  const isAuthorizedWhaleScanRequest =
+    pathname ===
+      "/api/whale-trades/scan" &&
+    Boolean(whaleScanSecret) &&
+    request.headers.get(
+      "authorization"
+    ) ===
+      `Bearer ${whaleScanSecret}`;
+
+  if (
+    isAuthorizedWhaleScanRequest
+  ) {
+    return response;
+  }
+
   if (error || !userId) {
     if (isApi) {
       return copyCookies(
