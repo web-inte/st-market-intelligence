@@ -496,22 +496,11 @@ export async function GET(
       throw expiredCleanupError;
     }
 
-    const {
-      error: stoppedCleanupError,
-    } = await supabase
-      .from("spx_trade_setups")
-      .update({
-        hidden_after: nowIso,
-      })
-      .eq("status", "STOPPED")
-      .lt(
-        "stopped_at",
-        stoppedCutoff
-      );
-
-    if (stoppedCleanupError) {
-      throw stoppedCleanupError;
-    }
+    /*
+      لا نخفي STOPPED بعد 30 دقيقة.
+      تبقى جميع صفقات جلسة SPX ظاهرة
+      حتى ساعة بعد إغلاق السوق.
+    */
 
 
     const {
@@ -520,9 +509,18 @@ export async function GET(
     } = await supabase
       .from("spx_trade_setups")
       .select("*")
-      .or(
-        `status.in.(WATCH,ACTIVE),and(status.eq.STOPPED,hidden_after.gt.${nowIso})`
-      )
+      /*
+        أثناء الجلسة نحتفظ بجميع العقود:
+        ACTIVE / WATCH / STOPPED.
+
+        الإخفاء النهائي يتم بعد انتهاء السوق
+        بساعة، وليس بعد 30 دقيقة من الوقف.
+      */
+      .in("status", [
+        "WATCH",
+        "ACTIVE",
+        "STOPPED",
+      ])
       .order("created_at", {
         ascending: false,
       })
@@ -614,10 +612,61 @@ export async function GET(
 
     if (!regularSessionOpen) {
       /*
-        عند انتهاء الجلسة الرسمية:
-        - إغلاق جميع صفقات SPX المفتوحة.
-        - إخفاؤها فورًا من الصفحة.
-        - عدم إصدار أي صفقة جديدة حتى REGULAR التالية.
+        جميع صفقات جلسة SPX تبقى ظاهرة
+        حتى ساعة بعد نهاية الجلسة.
+
+        الجلسة الحالية تنتهي 23:00 بتوقيت الرياض،
+        لذلك وقت الإخفاء الثابت هو 00:00 الرياض
+        لليوم التالي.
+
+        استخدام وقت ثابت مهم حتى لا تتم إضافة
+        ساعة جديدة في كل طلب بعد الإغلاق.
+      */
+      const riyadhParts =
+        new Intl.DateTimeFormat(
+          "en-US",
+          {
+            timeZone:
+              "Asia/Riyadh",
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+          }
+        ).formatToParts(
+          new Date()
+        );
+
+      const riyadhValues =
+        Object.fromEntries(
+          riyadhParts.map(
+            (part) => [
+              part.type,
+              part.value,
+            ]
+          )
+        );
+
+      const sessionHideAfter =
+        new Date(
+          Date.UTC(
+            Number(
+              riyadhValues.year
+            ),
+            Number(
+              riyadhValues.month
+            ) - 1,
+            Number(
+              riyadhValues.day
+            ),
+            21,
+            0,
+            0
+          )
+        ).toISOString();
+
+      /*
+        الصفقات التي كانت لا تزال مفتوحة
+        تتحول إلى EXPIRED عند انتهاء الجلسة.
       */
       const {
         error: sessionCloseError,
@@ -625,7 +674,10 @@ export async function GET(
         .from("spx_trade_setups")
         .update({
           status: "EXPIRED",
-          hidden_after: nowIso,
+
+          hidden_after:
+            sessionHideAfter,
+
           last_error:
             "انتهت الجلسة الرسمية وتم إغلاق المتابعة تلقائيًا",
         })
@@ -638,18 +690,100 @@ export async function GET(
         throw sessionCloseError;
       }
 
+      /*
+        الصفقات التي ضربت الوقف أثناء الجلسة
+        تبقى أيضًا ظاهرة إلى نفس وقت الإخفاء.
+      */
+      const {
+        error:
+          stoppedRetentionError,
+      } = await supabase
+        .from("spx_trade_setups")
+        .update({
+          hidden_after:
+            sessionHideAfter,
+        })
+        .eq(
+          "status",
+          "STOPPED"
+        )
+        .eq(
+          "expiration",
+          today
+        );
+
+      if (stoppedRetentionError) {
+        throw stoppedRetentionError;
+      }
+
+      /*
+        بعد الإغلاق نرجع جميع صفقات الجلسة
+        إلى أن يحين وقت الإخفاء.
+      */
+      const {
+        data:
+          sessionTradesAfterClose,
+        error:
+          sessionTradesAfterCloseError,
+      } = await supabase
+        .from("spx_trade_setups")
+        .select("*")
+        .in("status", [
+          "STOPPED",
+          "EXPIRED",
+        ])
+        .eq(
+          "expiration",
+          today
+        )
+        .gt(
+          "hidden_after",
+          nowIso
+        )
+        .order(
+          "created_at",
+          {
+            ascending: false,
+          }
+        )
+        .limit(20);
+
+      if (
+        sessionTradesAfterCloseError
+      ) {
+        throw (
+          sessionTradesAfterCloseError
+        );
+      }
+
       return NextResponse.json(
         {
           ok: true,
           created: false,
-          activeTrade: null,
-          trades: [],
+
+          activeTrade:
+            null,
+
+          trades:
+            sessionTradesAfterClose ||
+            [],
+
           signal,
-          executionEnabled: false,
+
+          executionEnabled:
+            false,
+
           message:
-            "السوق خارج الجلسة الرسمية — التحليل متاح، لكن أسعار العقود غير معتمدة ولا يتم إصدار أو متابعة صفقات حتى افتتاح الجلسة الرئيسية.",
+            (
+              sessionTradesAfterClose ||
+              []
+            ).length > 0
+              ? "انتهت الجلسة الرسمية — صفقات جلسة اليوم تبقى ظاهرة لمدة ساعة بعد الإغلاق."
+              : "السوق خارج الجلسة الرسمية — لا توجد صفقات SPX ظاهرة حاليًا.",
+
           marketSession:
             session,
+
           updatedAt:
             nowIso,
         },

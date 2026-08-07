@@ -1198,7 +1198,8 @@ export default function SpxWhalesPage() {
   const stoppedTrades =
     trades.filter(
       (trade) =>
-        trade.status === "STOPPED"
+        trade.status === "STOPPED" ||
+        trade.status === "EXPIRED"
     );
 
   const decisionMessage =
@@ -2841,7 +2842,7 @@ export default function SpxWhalesPage() {
             {stoppedTrades.length > 0 ? (
               <section className="mt-8">
                 <h2 className="mb-4 text-xl font-black">
-                  الصفقات التي ضربت الوقف
+                  صفقات الجلسة المنتهية
                 </h2>
 
                 <div className="space-y-4">

@@ -67,60 +67,65 @@ export async function GET() {
     const tradeDate =
       riyadhDate();
 
+    /*
+      إحصائية SPX اليومية أصبحت مبنية على
+      جميع عقود الجلسة، وليس ACTIVE فقط.
+
+      كل عقد يحتفظ بمساهمته حتى لو أصبح:
+      STOPPED أو EXPIRED.
+
+      العقود النشطة تعتمد على الربح الحالي.
+      العقود المنتهية تعتمد على نتيجة الإغلاق
+      إن وجدت، وإلا آخر نتيجة حالية محفوظة.
+    */
     const {
-      data,
-      error,
-    } = await supabase
-      .from("spx_daily_statistics")
-      .select(`
-        trade_date,
-        trades_count,
-        wins_count,
-        losses_count,
-        profit_amount,
-        loss_amount,
-        net_profit,
-        updated_at
-      `)
-      .eq("trade_date", tradeDate)
-      .maybeSingle();
-
-    if (error) {
-      throw error;
-    }
-
-    const row =
-      data as DailyStatisticsRow | null;
-
-    const {
-      data: activeTrades,
-      error: activeTradesError,
+      data: sessionTrades,
+      error: sessionTradesError,
     } = await supabase
       .from("spx_trade_setups")
       .select(`
         id,
         status,
         current_profit_dollars,
-        best_profit_dollars,
+        stop_profit_dollars,
         statistics_recorded,
         activated_at,
-        created_at
-      `)
-      .eq("status", "ACTIVE")
-      .eq("statistics_recorded", false);
+        created_at,
+        last_error
+      `);
 
-    if (activeTradesError) {
-      throw activeTradesError;
+    if (sessionTradesError) {
+      throw sessionTradesError;
     }
 
-    const activeToday =
-      (activeTrades || []).filter(
+    const tradesToday =
+      (sessionTrades || []).filter(
         (trade) => {
           const timestamp =
             trade.activated_at ||
             trade.created_at;
 
           if (!timestamp) {
+            return false;
+          }
+
+          /*
+            استبعاد النسخ المكررة التي أُغلقت
+            أثناء تنظيف مشكلة التكرار السابقة.
+          */
+          const lastError =
+            String(
+              trade.last_error || ""
+            );
+
+          if (
+            lastError.includes(
+              "DUPLICATE_WAVE_CLEANUP"
+            ) ||
+            lastError.includes(
+              "نسخة مكررة"
+            )
+          ) {
             return false;
           }
 
@@ -146,112 +151,109 @@ export async function GET() {
               ])
             );
 
-          const activeDate =
+          const date =
             `${values.year}-${values.month}-${values.day}`;
 
-          return activeDate === tradeDate;
+          return date === tradeDate;
         }
       );
 
-    /*
-      الإحصائية الحية للعقود النشطة:
+    const pnlForTrade = (
+      trade: Record<string, unknown>
+    ) => {
+      const status =
+        String(
+          trade.status || ""
+        ).toUpperCase();
 
-      - المكسب يعتمد على أعلى ربح محفوظ للعقد،
-        لذلك لا ينخفض إذا تراجع السعر لاحقًا.
+      const current =
+        Number(
+          trade.current_profit_dollars ||
+          0
+        );
 
-      - الصفقة النشطة تُصنف ناجحة بمجرد وصول
-        best_profit_dollars إلى 100$ أو أكثر.
+      const stopped =
+        Number(
+          trade.stop_profit_dollars
+        );
 
-      - لا تُسجل أي خسارة نهائية أثناء بقاء
-        الصفقة ACTIVE. الخسارة تُسجل فقط عند
-        الإيقاف النهائي إذا لم تحقق شرط النجاح.
-    */
-    const activeProfit =
-      activeToday.reduce(
+      if (
+        (
+          status === "STOPPED" ||
+          status === "EXPIRED"
+        ) &&
+        Number.isFinite(stopped)
+      ) {
+        return stopped;
+      }
+
+      return Number.isFinite(current)
+        ? current
+        : 0;
+    };
+
+    const profitAmount =
+      tradesToday.reduce(
         (sum, trade) => {
-          const bestProfit =
-            Number(
-              trade.best_profit_dollars ||
-              0
-            );
+          const pnl =
+            pnlForTrade(trade);
 
-          return bestProfit > 0
-            ? sum + bestProfit
+          return pnl > 0
+            ? sum + pnl
             : sum;
         },
         0
       );
 
-    const activeLoss = 0;
+    const lossAmount =
+      tradesToday.reduce(
+        (sum, trade) => {
+          const pnl =
+            pnlForTrade(trade);
 
-    const activeWins =
-      activeToday.filter(
+          return pnl < 0
+            ? sum + Math.abs(pnl)
+            : sum;
+        },
+        0
+      );
+
+    const winsCount =
+      tradesToday.filter(
         (trade) =>
-          Number(
-            trade.best_profit_dollars ||
-            0
-          ) >= 100
+          pnlForTrade(trade) > 0
       ).length;
 
-    const activeLosses = 0;
-
-    const storedTradesCount =
-      Number(
-        row?.trades_count || 0
-      );
-
-    const storedProfitAmount =
-      Number(
-        row?.profit_amount || 0
-      );
-
-    const storedLossAmount =
-      Number(
-        row?.loss_amount || 0
-      );
-
-    const totalProfit =
-      storedProfitAmount +
-      activeProfit;
-
-    const totalLoss =
-      storedLossAmount +
-      activeLoss;
+    const lossesCount =
+      tradesToday.filter(
+        (trade) =>
+          pnlForTrade(trade) < 0
+      ).length;
 
     return NextResponse.json(
       {
         ok: true,
+
         statistics: {
           tradeDate,
 
           tradesCount:
-            storedTradesCount +
-            activeToday.length,
+            tradesToday.length,
 
-          winsCount:
-            Number(
-              row?.wins_count || 0
-            ) +
-            activeWins,
+          winsCount,
 
-          lossesCount:
-            Number(
-              row?.losses_count || 0
-            ) +
-            activeLosses,
+          lossesCount,
 
-          profitAmount:
-            totalProfit,
+          profitAmount,
 
-          lossAmount:
-            totalLoss,
+          lossAmount,
 
           netProfit:
-            totalProfit -
-            totalLoss,
+            profitAmount -
+            lossAmount,
 
           updatedAt:
-            row?.updated_at || null,
+            new Date().toISOString(),
         },
       },
       {
@@ -270,6 +272,7 @@ export async function GET() {
     return NextResponse.json(
       {
         ok: false,
+
         error:
           error instanceof Error
             ? error.message
@@ -281,3 +284,4 @@ export async function GET() {
     );
   }
 }
+
