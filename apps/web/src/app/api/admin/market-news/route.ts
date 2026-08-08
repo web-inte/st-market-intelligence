@@ -26,6 +26,8 @@ const ALLOWED_TYPES =
     "IMPORTANT",
     "UPDATE",
     "ANNOUNCEMENT",
+    "STATISTICS",
+    "NEWS",
   ]);
 
 const ALLOWED_IMAGE_TYPES =
@@ -48,7 +50,9 @@ type MarketNewsPostRow = {
     | "URGENT"
     | "IMPORTANT"
     | "UPDATE"
-    | "ANNOUNCEMENT";
+    | "ANNOUNCEMENT"
+    | "STATISTICS"
+    | "NEWS";
   is_pinned: boolean;
   is_published: boolean;
   expires_at: string | null;

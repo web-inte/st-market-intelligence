@@ -21,7 +21,9 @@ type MarketNewsPostRow = {
     | "URGENT"
     | "IMPORTANT"
     | "UPDATE"
-    | "ANNOUNCEMENT";
+    | "ANNOUNCEMENT"
+    | "STATISTICS"
+    | "NEWS";
   is_pinned: boolean;
   published_at: string;
   expires_at: string | null;

@@ -19,7 +19,9 @@ type NewsType =
   | "URGENT"
   | "IMPORTANT"
   | "UPDATE"
-  | "ANNOUNCEMENT";
+  | "ANNOUNCEMENT"
+  | "STATISTICS"
+  | "NEWS";
 
 type NewsPost = {
   id: string;
@@ -61,6 +63,14 @@ const TYPE_OPTIONS: Array<{
   {
     value: "ANNOUNCEMENT",
     label: "إعلان",
+  },
+  {
+    value: "STATISTICS",
+    label: "إحصائيات",
+  },
+  {
+    value: "NEWS",
+    label: "خبر",
   },
 ];
 
