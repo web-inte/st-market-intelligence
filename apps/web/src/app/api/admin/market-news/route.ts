@@ -635,7 +635,16 @@ export async function POST(
         error:
           error instanceof Error
             ? error.message
-            : "تعذر نشر الخبر",
+            : error &&
+                typeof error === "object" &&
+                "message" in error
+              ? String(
+                  (error as {
+                    message?: unknown;
+                  }).message ||
+                    "تعذر نشر الخبر"
+                )
+              : "تعذر نشر الخبر",
       },
       {
         status: 500,
