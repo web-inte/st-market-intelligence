@@ -506,7 +506,7 @@ export async function GET(
 
         let trialEligible = true;
         let trialEligibilityReason =
-          "مستحق لتجربة مجانية لمدة 5 أيام";
+          "مستحق لتجربة مجانية لمدة 3 أيام";
 
         if (
           (profile?.role || "user") ===
@@ -764,7 +764,7 @@ export async function PATCH(
       );
     }
 
-    if (action === "grant_trial_5_days") {
+    if (action === "grant_trial_3_days") {
       if (targetProfile.role === "admin") {
         return NextResponse.json(
           {
@@ -912,7 +912,7 @@ export async function PATCH(
       const endsAt =
         new Date(
           now.getTime() +
-            5 * DAY_MS
+            3 * DAY_MS
         ).toISOString();
 
       const {
@@ -1017,7 +1017,7 @@ export async function PATCH(
           created_by:
             currentUser.id,
           notes:
-            "تم منح تجربة مجانية لمدة 5 أيام من لوحة المسؤول",
+            "تم منح تجربة مجانية لمدة 3 أيام من لوحة المسؤول",
         })
         .select("id")
         .single();
@@ -1123,7 +1123,7 @@ export async function PATCH(
             "trial_started",
 
           new_data: {
-            days: 5,
+            days: 3,
             plan: "TRIAL",
             granted_by_admin: true,
             starts_at: nowIso,
@@ -1134,7 +1134,7 @@ export async function PATCH(
             currentUser.id,
 
           note:
-            "تم منح تجربة مجانية لمدة 5 أيام من لوحة المسؤول",
+            "تم منح تجربة مجانية لمدة 3 أيام من لوحة المسؤول",
         });
 
       if (trialEventError) {
@@ -1147,7 +1147,7 @@ export async function PATCH(
       return NextResponse.json({
         ok: true,
         message:
-          "تم منح المستخدم تجربة مجانية لمدة 5 أيام",
+          "تم منح المستخدم تجربة مجانية لمدة 3 أيام",
         startsAt: nowIso,
         endsAt,
       });

@@ -74,7 +74,7 @@ export default async function SubscriptionRequiredPage() {
 
         <p className="mx-auto mt-4 max-w-md text-sm leading-8 text-slate-400">
           {isExpiredTrial
-            ? "انتهت مدة التجربة المجانية البالغة 5 أيام. اشترك في ST MARKET Premium بسعر 249 ريال شهريًا لمواصلة استخدام جميع خدمات المنصة."
+            ? "انتهت مدة التجربة المجانية البالغة 3 أيام. اشترك في ST MARKET Premium بسعر 249 ريال شهريًا لمواصلة استخدام جميع خدمات المنصة."
             : "لا يوجد اشتراك فعال على هذا الحساب حاليًا. اختر الباقة المناسبة لمواصلة استخدام المنصة."}
         </p>
 

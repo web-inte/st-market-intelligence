@@ -555,19 +555,19 @@ export default function AdminUsersTable() {
                           onClick={() => {
                             if (
                               window.confirm(
-                                `منح ${user.email} تجربة مجانية لمدة 5 أيام؟`
+                                `منح ${user.email} تجربة مجانية لمدة 3 أيام؟`
                               )
                             ) {
                               void runAction(
                                 user.id,
-                                "grant_trial_5_days",
+                                "grant_trial_3_days",
                                 {}
                               );
                             }
                           }}
                           className="rounded-xl border border-violet-400/30 bg-violet-400/10 px-4 py-2 text-sm font-bold text-violet-300 disabled:opacity-50"
                         >
-                          🎁 منح تجربة 5 أيام
+                          🎁 منح تجربة 3 أيام
                         </button>
                       ) : null}
 

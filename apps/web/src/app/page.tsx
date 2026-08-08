@@ -140,7 +140,7 @@ export default function LandingPage() {
               href="/register"
               className="rounded-2xl bg-cyan-400 px-7 py-4 text-center font-black text-slate-950 shadow-lg shadow-cyan-500/10 transition hover:-translate-y-0.5 hover:bg-cyan-300"
             >
-              ابدأ تجربتك المجانية لمدة 5 أيام
+              ابدأ تجربتك المجانية لمدة 3 أيام
             </Link>
 
             <Link
@@ -339,7 +339,7 @@ export default function LandingPage() {
       <section className="relative z-10 px-5 pb-24">
         <div className="mx-auto max-w-5xl overflow-hidden rounded-[32px] border border-cyan-400/20 bg-gradient-to-l from-cyan-500/10 to-blue-600/10 p-8 text-center sm:p-12">
           <h2 className="text-3xl font-black sm:text-4xl">
-            ابدأ تجربتك المجانية لمدة 5 أيام
+            ابدأ تجربتك المجانية لمدة 3 أيام
           </h2>
 
           <p className="mx-auto mt-4 max-w-2xl leading-8 text-slate-300">
