@@ -88,7 +88,20 @@ export default function RegisterPage() {
         return;
       }
 
-      router.replace("/account");
+      const trialResponse =
+  await fetch("/api/trial/start", {
+    method: "POST",
+    cache: "no-store",
+  });
+
+if (!trialResponse.ok) {
+  console.error(
+    "Trial start request failed:",
+    await trialResponse.text()
+  );
+}
+
+router.replace("/account");
       router.refresh();
       return;
     }
