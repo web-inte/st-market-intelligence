@@ -1,20 +1,21 @@
 import { createHash } from "node:crypto";
 
 import {
+  createClient as createSupabaseClient,
+} from "@supabase/supabase-js";
+
+import {
   type NextRequest,
   NextResponse,
 } from "next/server";
 
-import { createClient } from "@/lib/supabase/server";
+import {
+  createClient as createServerClient,
+} from "@/lib/supabase/server";
 
 function getClientIp(
   request: NextRequest
 ) {
-  /*
-   * Vercel يضيف x-vercel-forwarded-for.
-   * نستخدم أول عنوان فقط إذا احتوى الهيدر
-   * على أكثر من قيمة.
-   */
   const forwardedFor =
     request.headers.get(
       "x-vercel-forwarded-for"
@@ -76,7 +77,7 @@ export async function GET(
   }
 
   const supabase =
-    await createClient();
+    await createServerClient();
 
   const {
     data: exchangeData,
@@ -102,12 +103,19 @@ export async function GET(
   }
 
   /*
-   * بعد نجاح تأكيد البريد وتكوين الجلسة
-   * نبدأ التجربة من هنا حتى نستطيع ربطها
-   * بعنوان IP الحقيقي للطلب.
+   * بعد تأكيد البريد وتكوين الجلسة،
+   * نستخدم access_token نفسه لتشغيل RPC.
+   *
+   * بهذا تكون auth.uid() داخل PostgreSQL
+   * هي هوية المستخدم المؤكد بشكل صريح،
+   * ولا نعتمد على توقيت تحديث الكوكي.
    */
   const userId =
     exchangeData.user?.id || "";
+
+  const accessToken =
+    exchangeData.session?.access_token ||
+    "";
 
   const clientIp =
     getClientIp(request);
@@ -115,40 +123,81 @@ export async function GET(
   const ipHash =
     hashIp(clientIp);
 
-  if (userId && ipHash) {
-    const {
-      data: trialStarted,
-      error: trialError,
-    } = await supabase.rpc(
-      "maybe_start_trial_with_ip",
-      {
-        p_user_id: userId,
-        p_ip_hash: ipHash,
-      }
-    );
+  if (
+    userId &&
+    accessToken &&
+    ipHash
+  ) {
+    const url =
+      process.env
+        .NEXT_PUBLIC_SUPABASE_URL;
 
-    console.log(
-      "Trial start result:",
-      {
-        userId,
-        started: trialStarted,
-        hasClientIp: Boolean(clientIp),
-        ipHashLength: ipHash.length,
-      }
-    );
+    const key =
+      process.env
+        .NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-    if (trialError) {
+    if (url && key) {
+      const authenticatedSupabase =
+        createSupabaseClient(
+          url,
+          key,
+          {
+            global: {
+              headers: {
+                Authorization:
+                  `Bearer ${accessToken}`,
+              },
+            },
+            auth: {
+              persistSession: false,
+              autoRefreshToken: false,
+              detectSessionInUrl: false,
+            },
+          }
+        );
+
+      const {
+        data: trialStarted,
+        error: trialError,
+      } =
+        await authenticatedSupabase.rpc(
+          "maybe_start_trial_with_ip",
+          {
+            p_user_id: userId,
+            p_ip_hash: ipHash,
+          }
+        );
+
+      if (trialError) {
+        console.error(
+          "Trial start after email confirmation failed:",
+          trialError.message
+        );
+      } else {
+        console.log(
+          "Trial start after email confirmation:",
+          {
+            userId,
+            started:
+              Boolean(trialStarted),
+          }
+        );
+      }
+    } else {
       console.error(
-        "Trial IP protection error:",
-        trialError.message
+        "Trial start skipped: Supabase environment variables missing"
       );
     }
   } else {
     console.error(
-      "Trial IP protection skipped:",
+      "Trial start after confirmation skipped:",
       {
-        hasUserId: Boolean(userId),
-        hasClientIp: Boolean(clientIp),
+        hasUserId:
+          Boolean(userId),
+        hasAccessToken:
+          Boolean(accessToken),
+        hasClientIp:
+          Boolean(clientIp),
       }
     );
   }
