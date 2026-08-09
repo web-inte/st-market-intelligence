@@ -103,6 +103,34 @@ export default function LoginPage() {
       return;
     }
 
+    /*
+     * بعد نجاح تسجيل الدخول وربط الجهاز،
+     * نحاول بدء التجربة للمستخدم المستحق.
+     *
+     * /api/trial/start يستخدم نفس دالة
+     * maybe_start_trial_with_ip، لذلك جميع
+     * شروط الجهاز وIP وtrial_used تبقى مطبقة.
+     */
+    try {
+      const trialResponse =
+        await fetch("/api/trial/start", {
+          method: "POST",
+          cache: "no-store",
+        });
+
+      if (!trialResponse.ok) {
+        console.error(
+          "Trial start after login failed:",
+          await trialResponse.text()
+        );
+      }
+    } catch (trialError) {
+      console.error(
+        "Trial start after login error:",
+        trialError
+      );
+    }
+
     router.replace("/account");
     router.refresh();
   }
