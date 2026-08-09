@@ -73,6 +73,7 @@ type ActiveTradesResponse = {
 };
 
 const REFRESH_INTERVAL_MS = 5_000;
+const NEW_TRADE_WINDOW_MS = 5 * 60 * 1_000;
 
 function numberText(
   value: number | null,
@@ -303,8 +304,31 @@ export default function ActiveTradesPage() {
     activeView,
     setActiveView,
   ] = useState<
-    "all" | "favorites"
+    "all" | "new" | "favorites"
   >("all");
+
+  const [
+    nowTimestamp,
+    setNowTimestamp,
+  ] = useState(() => Date.now());
+
+  useEffect(() => {
+    const interval =
+      window.setInterval(
+        () => {
+          setNowTimestamp(
+            Date.now()
+          );
+        },
+        1_000
+      );
+
+    return () => {
+      window.clearInterval(
+        interval
+      );
+    };
+  }, []);
 
   const [
     favoriteTradeIds,
@@ -359,6 +383,41 @@ export default function ActiveTradesPage() {
       .trim()
       .toUpperCase();
 
+  const newTrades =
+    useMemo(
+      () =>
+        trades.filter(
+          (trade) => {
+            const activatedTime =
+              new Date(
+                trade.activatedAt
+              ).getTime();
+
+            if (
+              !Number.isFinite(
+                activatedTime
+              )
+            ) {
+              return false;
+            }
+
+            const age =
+              nowTimestamp -
+              activatedTime;
+
+            return (
+              age >= 0 &&
+              age <
+                NEW_TRADE_WINDOW_MS
+            );
+          }
+        ),
+      [
+        trades,
+        nowTimestamp,
+      ]
+    );
+
   const filteredTrades =
     useMemo(
       () => {
@@ -371,7 +430,10 @@ export default function ActiveTradesPage() {
                     trade.id
                   )
               )
-            : trades;
+            : activeView ===
+              "new"
+              ? newTrades
+              : trades;
 
         if (
           !normalizedTradeSymbolSearch
@@ -392,6 +454,7 @@ export default function ActiveTradesPage() {
         trades,
         activeView,
         favoriteTradeIds,
+        newTrades,
         normalizedTradeSymbolSearch,
       ]
     );
@@ -1513,6 +1576,27 @@ export default function ActiveTradesPage() {
             type="button"
             onClick={() =>
               setActiveView(
+                "new"
+              )
+            }
+            className={[
+              "rounded-2xl border px-4 py-2.5 text-sm font-black transition",
+              activeView ===
+              "new"
+                ? "border-emerald-400/40 bg-emerald-400/15 text-emerald-200"
+                : "border-slate-700 bg-slate-950/60 text-slate-300 hover:border-slate-500",
+            ].join(" ")}
+          >
+            🆕 العقود الجديدة{" "}
+            <span className="text-xs opacity-80">
+              ({newTrades.length})
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() =>
+              setActiveView(
                 "favorites"
               )
             }
@@ -1645,6 +1729,33 @@ export default function ActiveTradesPage() {
           </div>
         ) : (
           <>
+            {activeView ===
+              "new" &&
+            !normalizedTradeSymbolSearch &&
+            filteredTrades.length === 0 ? (
+              <div className="mb-6 rounded-3xl border border-emerald-400/20 bg-emerald-400/[0.06] p-8 text-center">
+                <p className="text-lg font-black text-white">
+                  لا توجد عقود جديدة الآن
+                </p>
+
+                <p className="mt-2 text-sm text-slate-400">
+                  تظهر هنا العقود التي تم تفعيلها خلال آخر 5 دقائق فقط.
+                </p>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setActiveView(
+                      "all"
+                    )
+                  }
+                  className="mt-5 rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-bold text-slate-200 transition hover:border-slate-500"
+                >
+                  عرض كل الصفقات
+                </button>
+              </div>
+            ) : null}
+
             {activeView ===
               "favorites" &&
             !normalizedTradeSymbolSearch &&
