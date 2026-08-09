@@ -22,7 +22,7 @@ type FinnhubCandleResult = {
 const FINNHUB_BASE_URL =
   "https://finnhub.io/api/v1";
 
-const MAX_RETURNED_CANDLES = 600;
+const MAX_RETURNED_CANDLES = 1200;
 
 function normalizeSymbol(
   value: string

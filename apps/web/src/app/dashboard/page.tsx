@@ -149,55 +149,86 @@ const TELEGRAM_CHANNEL_URL = "https://t.me/STtradevip";
 type MarketOverviewResponse = {
   ok: boolean;
   updatedAt: string;
+  timeframe: string;
 
   market: {
-    score: number;
-    bias: "CALL" | "PUT" | "NEUTRAL";
-    status: string;
-    confidence: string;
-    agreementPct: number;
-    reasons: string[];
-    risks: string[];
-  };
-
-  flow: {
-    callVolumePct: number;
-    putVolumePct: number;
-    callOpenInterestPct: number;
-    putOpenInterestPct: number;
-  };
-
-  gamma: {
     regime:
-      | "POSITIVE"
-      | "NEGATIVE"
-      | "NEUTRAL";
-    totalNetGex: number;
-    weightedRegimeRatio: number;
-  };
+      | "TREND_UP"
+      | "TREND_DOWN"
+      | "RANGE"
+      | "TRANSITION"
+      | "IMPULSE_UP"
+      | "IMPULSE_DOWN";
 
-  ivSkew: {
-    weightedPutMinusCallPoints:
-      | number
-      | null;
-    direction:
-      | "PUT_PREMIUM"
-      | "CALL_PREMIUM"
-      | "BALANCED"
-      | "UNKNOWN";
+    title: string;
+    environment: string;
+    execution: string;
+    summary: string;
+
+    primaryAgreement: boolean;
+
+    aboveVwapCount: number;
+    belowVwapCount: number;
+
+    bullishCount: number;
+    bearishCount: number;
+    neutralCount: number;
   };
 
   indices: Array<{
     symbol: string;
     name: string;
-    score: number;
-    bias:
-      | "CALL"
-      | "PUT"
+    price: number;
+
+    direction:
+      | "BULLISH"
+      | "BEARISH"
       | "NEUTRAL";
+
+    aboveVwap: boolean;
+    vwap: number;
+    vwapDistancePct: number;
+
+    ema9: number;
+    ema21: number;
+
+    structure:
+      | "HIGHER"
+      | "LOWER"
+      | "MIXED";
+
+    momentum:
+      | "STRONG_UP"
+      | "UP"
+      | "NEUTRAL"
+      | "DOWN"
+      | "STRONG_DOWN";
+
+    move15mPct: number;
+    move30mPct: number;
+
+    volumeState:
+      | "STRONG"
+      | "NORMAL"
+      | "WEAK";
+
+    relativeVolume: number;
+
+    reasons: string[];
+  }>;
+
+  failed?: Array<{
+    symbol: string;
+    error: string;
   }>;
 };
 
+type MarketSession = {
+  isOpen: boolean;
+  phase: "REGULAR" | "PRE_MARKET" | "AFTER_HOURS" | "CLOSED";
+  label: string;
+  note: string;
+};
 
 function clamp(value: number, minimum: number, maximum: number) {
   return Math.min(Math.max(value, minimum), maximum);
@@ -402,12 +433,6 @@ function profitClasses(
   return "text-slate-300";
 }
 
-type MarketSession = {
-  isOpen: boolean;
-  phase: "REGULAR" | "PRE_MARKET" | "AFTER_HOURS" | "CLOSED";
-  label: string;
-  note: string;
-};
 
 function getNewYorkMarketFallback(): MarketSession {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -921,41 +946,6 @@ const validResults = allResults
       window.clearInterval(timer);
     };
   }, []);
-
-  const fallbackMarketScore = useMemo(() => {
-    if (opportunities.length === 0) {
-      return 0;
-    }
-
-    const total = opportunities.reduce(
-      (sum, item) => sum + item.score,
-      0,
-    );
-
-    return Math.round(total / opportunities.length);
-  }, [opportunities]);
-
-  const marketالتقييم =
-    marketOverview?.market.score ?? fallbackMarketScore;
-
-  const marketStatus =
-    marketOverview?.market.status ??
-    (marketالتقييم >= 85
-      ? "إيجابي قوي"
-      : marketالتقييم >= 70
-        ? "إيجابي بحذر"
-        : marketالتقييم >= 55
-          ? "محايد"
-          : marketالتقييم > 0
-            ? "سلبي"
-            : "جارٍ التحليل");
-
-  const marketStatusColor =
-    marketالتقييم >= 15
-      ? "text-emerald-400"
-      : marketالتقييم <= -15
-        ? "text-rose-400"
-        : "text-amber-400";
 
   const bestOpportunity = opportunities[0];
 
@@ -1740,264 +1730,311 @@ ${url}`);
           </div>
         </section>
 
-        <section className="mb-10 grid gap-4 lg:grid-cols-[1.4fr_1fr]">
-          <div className="group relative overflow-hidden rounded-3xl border border-white/[0.08] bg-slate-950/60 p-5 shadow-2xl shadow-black/20 backdrop-blur-xl sm:p-7">
-            <div className="relative">
-              <div className="flex flex-wrap items-start justify-between gap-4">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={[
-                        "h-2.5 w-2.5 rounded-full shadow-lg",
-                        marketSession.isOpen
-                          ? "bg-emerald-400 shadow-emerald-400/70"
-                          : "bg-amber-400 shadow-amber-400/70",
-                      ].join(" ")}
-                    />
+        <section className="mb-10">
+      <div className="relative overflow-hidden rounded-3xl border border-white/[0.08] bg-slate-950/60 p-5 shadow-2xl shadow-black/20 backdrop-blur-xl sm:p-7">
 
-                    <p className="text-sm font-bold text-slate-300">
-                      نظرة السوق الحالية
-                    </p>
-                  </div>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <span
+                className={[
+                  "h-2.5 w-2.5 rounded-full shadow-lg",
+                  marketSession.isOpen
+                    ? "bg-emerald-400 shadow-emerald-400/70"
+                    : "bg-amber-400 shadow-amber-400/70",
+                ].join(" ")}
+              />
 
-                  <p className="mt-2 text-xs font-bold text-slate-500">
-                    {marketSession.isOpen
-                      ? "أثناء الجلسة"
-                      : "بعد الإغلاق"}
-                  </p>
-                </div>
+              <p className="text-sm font-bold text-slate-300">
+                حالة السوق اللحظية
+              </p>
+            </div>
 
-                <div className="rounded-xl border border-slate-800 bg-slate-950/70 px-3 py-2 text-xs font-bold text-slate-400">
-                  الثقة:{" "}
-                  <span className="text-white">
-                    {marketOverview?.market.confidence ||
-                      "جارٍ التحليل"}
+            <p className="mt-2 text-xs font-bold text-slate-500">
+              {marketSession.isOpen
+                ? "تحليل حركة السوق — فريم 5 دقائق"
+                : "آخر جلسة تداول — فريم 5 دقائق"}
+            </p>
+          </div>
+
+          {marketOverview ? (
+            <div className="rounded-xl border border-slate-800 bg-slate-950/70 px-3 py-2 text-xs font-bold text-slate-400">
+              SPY + QQQ{" "}
+              <span
+                className={
+                  marketOverview.market.primaryAgreement
+                    ? "text-emerald-300"
+                    : "text-amber-300"
+                }
+              >
+                {marketOverview.market.primaryAgreement
+                  ? "متفقان"
+                  : "غير متفقين"}
+              </span>
+            </div>
+          ) : null}
+        </div>
+
+        {marketOverviewLoading && !marketOverview ? (
+          <div className="mt-8 rounded-2xl border border-slate-800 bg-slate-950/70 p-8 text-center text-sm font-bold text-slate-400">
+            جارٍ تشخيص حالة السوق...
+          </div>
+        ) : marketOverview ? (
+          <>
+            <div className="mt-7">
+              <div className="flex flex-wrap items-center gap-3">
+                <span
+                  className={[
+                    "rounded-xl border px-3 py-1.5 text-xs font-black",
+                    marketOverview.market.regime === "TREND_UP" ||
+                    marketOverview.market.regime === "IMPULSE_UP"
+                      ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-300"
+                      : marketOverview.market.regime === "TREND_DOWN" ||
+                          marketOverview.market.regime === "IMPULSE_DOWN"
+                        ? "border-rose-400/30 bg-rose-400/10 text-rose-300"
+                        : marketOverview.market.regime === "RANGE"
+                          ? "border-amber-400/30 bg-amber-400/10 text-amber-300"
+                          : "border-cyan-400/30 bg-cyan-400/10 text-cyan-300",
+                  ].join(" ")}
+                >
+                  {marketOverview.market.regime === "IMPULSE_UP" ||
+                  marketOverview.market.regime === "IMPULSE_DOWN"
+                    ? "⚡ اندفاع"
+                    : marketOverview.market.regime === "RANGE"
+                      ? "↔ تذبذب"
+                      : marketOverview.market.regime === "TRANSITION"
+                        ? "◌ مرحلة انتقال"
+                        : "اتجاه قائم"}
+                </span>
+
+                <span className="text-xs font-bold text-slate-500">
+                  {marketOverview.timeframe}
+                </span>
+              </div>
+
+              <h2
+                className={[
+                  "mt-4 text-3xl font-black sm:text-4xl",
+                  marketOverview.market.regime === "TREND_UP" ||
+                  marketOverview.market.regime === "IMPULSE_UP"
+                    ? "text-emerald-300"
+                    : marketOverview.market.regime === "TREND_DOWN" ||
+                        marketOverview.market.regime === "IMPULSE_DOWN"
+                      ? "text-rose-300"
+                      : marketOverview.market.regime === "RANGE"
+                        ? "text-amber-300"
+                        : "text-cyan-300",
+                ].join(" ")}
+              >
+                {marketOverview.market.title}
+              </h2>
+
+              <p className="mt-3 max-w-4xl text-sm leading-7 text-slate-300">
+                {marketOverview.market.summary}
+              </p>
+            </div>
+
+            <div className="mt-6 grid gap-3 sm:grid-cols-3">
+              <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
+                <p className="text-xs font-bold text-slate-500">
+                  بيئة السوق
+                </p>
+
+                <p className="mt-2 text-sm font-black leading-6 text-white">
+                  {marketOverview.market.environment}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
+                <p className="text-xs font-bold text-slate-500">
+                  موقع السوق من VWAP
+                </p>
+
+                <p className="mt-2 text-lg font-black text-white">
+                  <span className="text-emerald-300">
+                    {marketOverview.market.aboveVwapCount} فوق
                   </span>
-                </div>
+                  {" · "}
+                  <span className="text-rose-300">
+                    {marketOverview.market.belowVwapCount} تحت
+                  </span>
+                </p>
               </div>
 
-              <div className="mt-7 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
-                <div>
-                  <h2
-                    className={`text-3xl font-black sm:text-4xl ${marketStatusColor}`}
-                  >
-                    {marketStatus}
-                  </h2>
+              <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
+                <p className="text-xs font-bold text-slate-500">
+                  اتساق المؤشرات
+                </p>
 
-                  <p className="mt-2 text-sm leading-7 text-slate-400">
-                    {marketOverview?.market.bias === "PUT"
-                      ? "الزخم البيعي هو المسيطر حاليًا، والأفضل تخفيف التعرض للكول وانتظار تحسن التدفق والقاما."
-                      : marketOverview?.market.bias === "CALL"
-                        ? "الزخم الشرائي هو المسيطر حاليًا، مع أفضلية للكول ما دامت القاما والتدفقات داعمة."
-                        : "السوق متوازن حاليًا ولا توجد أفضلية واضحة، والأفضل انتظار تأكيد اتجاه جديد."}
-                  </p>
-                </div>
-
-                <div className="shrink-0 text-left">
-                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">
-                    تقييم السوق
-                  </p>
-
-                  <p
-                    dir="ltr"
-                    className={`mt-1 text-5xl font-black tracking-tight ${marketStatusColor}`}
-                  >
-                    {marketOverviewLoading && !marketOverview
-                      ? "..."
-                      : `${
-                          Math.round(marketالتقييم) > 0
-                            ? "+"
-                            : ""
-                        }${Math.round(marketالتقييم)}`}
-                  </p>
-
-                  <p
-                    dir="ltr"
-                    className="mt-1 text-xs font-bold text-slate-500"
-                  >
-                    من -100 إلى +100
-                  </p>
-                </div>
+                <p className="mt-2 text-sm font-black text-white">
+                  <span className="text-emerald-300">
+                    {marketOverview.market.bullishCount} صاعد
+                  </span>
+                  {" · "}
+                  <span className="text-rose-300">
+                    {marketOverview.market.bearishCount} هابط
+                  </span>
+                  {" · "}
+                  <span className="text-amber-300">
+                    {marketOverview.market.neutralCount} محايد
+                  </span>
+                </p>
               </div>
+            </div>
 
-              <div className="mt-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
-                <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
-                  <p className="text-xs font-bold text-slate-500">
-                    تدفق العقود
-                  </p>
+            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              {marketOverview.indices.map((index) => {
+                const directionLabel =
+                  index.direction === "BULLISH"
+                    ? "صاعد"
+                    : index.direction === "BEARISH"
+                      ? "هابط"
+                      : "محايد";
 
-                  <p
-                    dir="ltr"
-                    className={[
-                      "mt-2 text-lg font-black",
-                      (marketOverview?.flow.putVolumePct || 0) >
-                      (marketOverview?.flow.callVolumePct || 0)
-                        ? "text-rose-300"
-                        : "text-emerald-300",
-                    ].join(" ")}
+                const structureLabel =
+                  index.structure === "HIGHER"
+                    ? "قمم وقيعان أعلى"
+                    : index.structure === "LOWER"
+                      ? "قمم وقيعان أدنى"
+                      : "بنية مختلطة";
+
+                const momentumLabel =
+                  index.momentum === "STRONG_UP"
+                    ? "صاعد قوي"
+                    : index.momentum === "UP"
+                      ? "صاعد"
+                      : index.momentum === "STRONG_DOWN"
+                        ? "هابط قوي"
+                        : index.momentum === "DOWN"
+                          ? "هابط"
+                          : "محايد";
+
+                return (
+                  <div
+                    key={index.symbol}
+                    className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4"
                   >
-                    {marketOverview
-                      ? `${
-                          marketOverview.flow.callVolumePct >=
-                          marketOverview.flow.putVolumePct
-                            ? "CALL"
-                            : "PUT"
-                        } ${Math.max(
-                          marketOverview.flow.callVolumePct,
-                          marketOverview.flow.putVolumePct,
-                        ).toFixed(0)}%`
-                      : "—"}
-                  </p>
-                </div>
-
-                <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
-                  <p className="text-xs font-bold text-slate-500">
-                    Net GEX
-                  </p>
-
-                  <p
-                    dir="ltr"
-                    className={[
-                      "mt-2 text-lg font-black",
-                      (marketOverview?.gamma.totalNetGex || 0) >= 0
-                        ? "text-emerald-300"
-                        : "text-rose-300",
-                    ].join(" ")}
-                  >
-                    {marketOverview
-                      ? new Intl.NumberFormat(
-                          "en-US",
-                          {
-                            notation: "compact",
-                            maximumFractionDigits: 1,
-                          },
-                        ).format(
-                          marketOverview.gamma.totalNetGex,
-                        )
-                      : "—"}
-                  </p>
-                </div>
-
-                <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
-                  <p className="text-xs font-bold text-slate-500">
-                    IV Skew
-                  </p>
-
-                  <p
-                    dir="ltr"
-                    className={[
-                      "mt-2 text-lg font-black",
-                      marketOverview?.ivSkew.direction ===
-                      "PUT_PREMIUM"
-                        ? "text-rose-300"
-                        : marketOverview?.ivSkew.direction ===
-                            "CALL_PREMIUM"
-                          ? "text-emerald-300"
-                          : "text-amber-300",
-                    ].join(" ")}
-                  >
-                    {marketOverview?.ivSkew
-                      .weightedPutMinusCallPoints !== null &&
-                    marketOverview?.ivSkew
-                      .weightedPutMinusCallPoints !== undefined
-                      ? `${
-                          marketOverview.ivSkew
-                            .weightedPutMinusCallPoints > 0
-                            ? "+"
-                            : ""
-                        }${marketOverview.ivSkew.weightedPutMinusCallPoints.toFixed(
-                          2,
-                        )}`
-                      : "—"}
-                  </p>
-                </div>
-
-                <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
-                  <p className="text-xs font-bold text-slate-500">
-                    توافق المؤشرات
-                  </p>
-
-                  <p
-                    dir="ltr"
-                    className="mt-2 text-lg font-black text-cyan-300"
-                  >
-                    {marketOverview
-                      ? `${marketOverview.market.agreementPct.toFixed(
-                          0,
-                        )}%`
-                      : "—"}
-                  </p>
-                </div>
-              </div>
-
-              <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-                {(marketOverview?.indices || []).map(
-                  (index) => (
-                    <div
-                      key={index.symbol}
-                      className="rounded-2xl border border-slate-800 bg-slate-900/60 p-3"
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="font-black text-white">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-lg font-black text-white">
                           {index.symbol}
                         </p>
 
+                        <p className="mt-0.5 text-[11px] font-bold text-slate-500">
+                          {index.name}
+                        </p>
+                      </div>
+
+                      <span
+                        className={[
+                          "rounded-lg border px-2 py-1 text-[10px] font-black",
+                          index.direction === "BULLISH"
+                            ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-300"
+                            : index.direction === "BEARISH"
+                              ? "border-rose-400/30 bg-rose-400/10 text-rose-300"
+                              : "border-amber-400/30 bg-amber-400/10 text-amber-300",
+                        ].join(" ")}
+                      >
+                        {directionLabel}
+                      </span>
+                    </div>
+
+                    <div className="mt-4 space-y-2 text-xs font-bold">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-slate-500">
+                          VWAP
+                        </span>
+
                         <span
-                          className={[
-                            "rounded-lg border px-2 py-1 text-[10px] font-black",
-                            index.bias === "CALL"
-                              ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-300"
-                              : index.bias === "PUT"
-                                ? "border-rose-400/30 bg-rose-400/10 text-rose-300"
-                                : "border-amber-400/30 bg-amber-400/10 text-amber-300",
-                          ].join(" ")}
+                          dir="ltr"
+                          className={
+                            index.aboveVwap
+                              ? "text-emerald-300"
+                              : "text-rose-300"
+                          }
                         >
-                          {index.bias === "CALL"
-                            ? "إيجابي"
-                            : index.bias === "PUT"
-                              ? "سلبي"
-                              : "محايد"}
+                          {index.aboveVwap ? "فوق" : "تحت"}{" "}
+                          {Math.abs(index.vwapDistancePct).toFixed(2)}%
                         </span>
                       </div>
 
-                      <p
-                        dir="ltr"
-                        className={[
-                          "mt-3 text-xl font-black",
-                          index.score > 0
-                            ? "text-emerald-300"
-                            : index.score < 0
-                              ? "text-rose-300"
-                              : "text-amber-300",
-                        ].join(" ")}
-                      >
-                        {index.score > 0 ? "+" : ""}
-                        {Math.round(index.score)}
-                      </p>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-slate-500">
+                          البنية
+                        </span>
+
+                        <span className="text-slate-200">
+                          {structureLabel}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-slate-500">
+                          الزخم
+                        </span>
+
+                        <span className="text-slate-200">
+                          {momentumLabel}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-slate-500">
+                          الحجم
+                        </span>
+
+                        <span
+                          dir="ltr"
+                          className={
+                            index.volumeState === "STRONG"
+                              ? "text-cyan-300"
+                              : index.volumeState === "WEAK"
+                                ? "text-amber-300"
+                                : "text-slate-200"
+                          }
+                        >
+                          {index.relativeVolume.toFixed(2)}x
+                        </span>
+                      </div>
                     </div>
-                  ),
-                )}
-              </div>
-
-              <div
-                className={[
-                  "mt-5 rounded-2xl border px-4 py-3 text-xs font-bold leading-6",
-                  marketSession.isOpen
-                    ? "border-emerald-400/20 bg-emerald-400/[0.06] text-emerald-300"
-                    : "border-amber-400/20 bg-amber-400/[0.06] text-amber-300",
-                ].join(" ")}
-              >
-                {marketSession.label} —{" "}
-                {marketSession.isOpen
-                  ? "البيانات تتحدث أثناء الجلسة."
-                  : "النتائج مبنية على بيانات آخر جلسة مكتملة."}
-              </div>
+                  </div>
+                );
+              })}
             </div>
+
+            <div className="mt-5 rounded-2xl border border-cyan-400/15 bg-cyan-400/[0.05] p-4">
+              <p className="text-xs font-black text-cyan-300">
+                ماذا يعني هذا للمتداول؟
+              </p>
+
+              <p className="mt-2 text-sm font-bold leading-7 text-slate-200">
+                {marketOverview.market.execution}
+              </p>
+            </div>
+
+            <div
+              className={[
+                "mt-4 rounded-2xl border px-4 py-3 text-xs font-bold leading-6",
+                marketSession.isOpen
+                  ? "border-emerald-400/20 bg-emerald-400/[0.06] text-emerald-300"
+                  : "border-amber-400/20 bg-amber-400/[0.06] text-amber-300",
+              ].join(" ")}
+            >
+              {marketSession.label} —{" "}
+              {marketSession.isOpen
+                ? "التشخيص يتحدث أثناء الجلسة."
+                : "التشخيص مبني على آخر جلسة تداول متوفرة."}
+            </div>
+          </>
+        ) : (
+          <div className="mt-8 rounded-2xl border border-rose-400/20 bg-rose-400/[0.06] p-6 text-center text-sm font-bold text-rose-300">
+            تعذر تشخيص حالة السوق حاليًا.
           </div>
+        )}
+      </div>
+    </section>
 
-        </section>
-
-        <SectorRadar />
+    <SectorRadar />
 
         <div className="mb-5 flex items-end justify-between gap-4">
           <div>
