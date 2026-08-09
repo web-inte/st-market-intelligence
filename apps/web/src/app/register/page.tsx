@@ -89,10 +89,14 @@ export default function RegisterPage() {
       }
 
       const trialResponse =
-  await fetch("/api/trial/start", {
-    method: "POST",
-    cache: "no-store",
-  });
+        await fetch("/api/trial/start", {
+          method: "POST",
+          cache: "no-store",
+          headers: {
+            Authorization:
+              `Bearer ${data.session.access_token}`,
+          },
+        });
 
 if (!trialResponse.ok) {
   console.error(

@@ -5,7 +5,13 @@ import {
   NextResponse,
 } from "next/server";
 
-import { createClient } from "@/lib/supabase/server";
+import {
+  createClient as createSupabaseClient,
+} from "@supabase/supabase-js";
+
+import {
+  createClient as createServerClient,
+} from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
@@ -48,26 +54,102 @@ export async function POST(
   request: NextRequest
 ) {
   try {
-    const supabase =
-      await createClient();
+    const serverSupabase =
+        await createServerClient();
 
-    const {
-      data: { user },
-      error: userError,
-    } =
-      await supabase.auth.getUser();
+      const authorization =
+        request.headers.get("authorization")?.trim() || "";
 
-    if (userError || !user) {
-      return NextResponse.json(
-        {
-          error:
-            "يجب تسجيل الدخول لبدء التجربة",
-        },
-        {
-          status: 401,
+      const accessToken =
+        authorization
+          .toLowerCase()
+          .startsWith("bearer ")
+          ? authorization.slice(7).trim()
+          : "";
+
+      let supabase = serverSupabase;
+      let user;
+
+      if (accessToken) {
+        const {
+          data: { user: tokenUser },
+          error: tokenError,
+        } =
+          await serverSupabase.auth.getUser(
+            accessToken
+          );
+
+        if (tokenError || !tokenUser) {
+          return NextResponse.json(
+            {
+              error:
+                "جلسة المستخدم غير صالحة",
+            },
+            {
+              status: 401,
+            }
+          );
         }
-      );
-    }
+
+        const url =
+          process.env.NEXT_PUBLIC_SUPABASE_URL;
+
+        const key =
+          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+        if (!url || !key) {
+          return NextResponse.json(
+            {
+              error:
+                "إعدادات Supabase غير مكتملة",
+            },
+            {
+              status: 500,
+            }
+          );
+        }
+
+        supabase =
+          createSupabaseClient(
+            url,
+            key,
+            {
+              global: {
+                headers: {
+                  Authorization:
+                    `Bearer ${accessToken}`,
+                },
+              },
+              auth: {
+                persistSession: false,
+                autoRefreshToken: false,
+                detectSessionInUrl: false,
+              },
+            }
+          );
+
+        user = tokenUser;
+      } else {
+        const {
+          data: { user: cookieUser },
+          error: userError,
+        } =
+          await serverSupabase.auth.getUser();
+
+        if (userError || !cookieUser) {
+          return NextResponse.json(
+            {
+              error:
+                "يجب تسجيل الدخول لبدء التجربة",
+            },
+            {
+              status: 401,
+            }
+          );
+        }
+
+        user = cookieUser;
+      }
 
     const clientIp =
       getClientIp(request);
