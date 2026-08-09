@@ -1613,6 +1613,50 @@ ${url}`);
                 </div>
               </div>
             </button>
+
+            <button
+              type="button"
+              onClick={() =>
+                router.push(
+                  "/best-opportunities"
+                )
+              }
+              className="group relative min-h-[160px] overflow-hidden xl:min-h-[205px] rounded-[28px] border border-cyan-400/25 bg-gradient-to-br from-cyan-500/[0.14] via-slate-950/95 to-emerald-500/[0.08] p-5 text-right shadow-[0_20px_55px_rgba(34,211,238,0.08)] transition duration-300 hover:-translate-y-1 hover:border-cyan-300/50 hover:shadow-[0_24px_65px_rgba(34,211,238,0.16)] sm:p-6"
+            >
+              <div className="pointer-events-none absolute -left-16 -top-20 h-48 w-48 rounded-full bg-cyan-400/10 blur-3xl" />
+
+              <div className="relative flex h-full flex-col justify-between gap-7">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-cyan-300/20 bg-cyan-400/10 text-xl font-black text-cyan-300">
+                    ★
+                  </div>
+
+                  <span className="inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-400/10 px-3 py-1.5 text-[11px] font-black tracking-wide text-cyan-300">
+                    LIVE
+                  </span>
+                </div>
+
+                <div className="flex items-end justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-bold tracking-[0.14em] text-cyan-400/90">
+                      رصد الفرص
+                    </p>
+
+                    <h2 className="mt-2 text-2xl font-black text-white">
+                      أفضل الفرص
+                    </h2>
+
+                    <p className="mt-2 text-sm leading-6 text-slate-400">
+                      اعرض الفرص التي اجتازت شروط الاتجاه والعقد والتوافق والمخاطرة.
+                    </p>
+                  </div>
+
+                  <span className="shrink-0 text-2xl text-cyan-300/70 transition duration-300 group-hover:-translate-x-1 group-hover:text-cyan-200">
+                    ←
+                  </span>
+                </div>
+              </div>
+            </button>
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:contents">
@@ -2036,316 +2080,7 @@ ${url}`);
 
     <SectorRadar />
 
-        <div className="mb-5 flex items-end justify-between gap-4">
-          <div>
-            <p className="text-xs font-bold uppercase tracking-[0.16em] text-cyan-400">
-              فرص السوق
-            </p>
-
-            <h2 className="mt-2 text-2xl font-black sm:text-3xl">
-              أفضل الفرص الآن
-            </h2>
-          </div>
-
-          <div className="flex items-center gap-2 text-xs text-slate-500">
-            <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-50" />
-
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
-            </span>
-            تحديث مباشر
-          </div>
-        </div>
-
-        {loading ? (
-          <div className="grid gap-4 sm:grid-cols-2">
-            {WATCHLIST.map((stock) => (
-              <div
-                key={stock}
-                className="animate-pulse rounded-3xl border border-white/[0.06] bg-slate-950/60 p-6"
-              >
-                <div className="flex justify-between gap-5">
-                  <div>
-                    <div className="h-8 w-24 rounded-lg bg-slate-800" />
-
-                    <div className="mt-4 h-4 w-36 rounded bg-slate-800/70" />
-
-                    <div className="mt-3 h-4 w-28 rounded bg-slate-800/50" />
-                  </div>
-
-                  <div className="h-20 w-20 rounded-full bg-slate-800" />
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : null}
-
-        {error ? (
-          <div className="rounded-3xl border border-rose-500/20 bg-rose-500/[0.06] p-6 text-rose-300 backdrop-blur-xl">
-            <p className="font-bold">تعذر تحميل البيانات</p>
-
-            <p className="mt-2 text-sm text-rose-300/70">{error}</p>
-          </div>
-        ) : null}
-
-        {!loading && !error && opportunities.length === 0 ? (
-          <div className="rounded-3xl border border-white/[0.07] bg-slate-950/60 p-10 text-center text-slate-400 backdrop-blur-xl">
-            لا توجد فرصة اجتازت شروط العقد والتوافق والمخاطرة حاليًا.
-          </div>
-        ) : null}
-
-        {!loading && !error ? (
-          <div className="grid gap-4 sm:grid-cols-2">
-            {opportunities.map((item) => {
-              const plan = getTradePlan(item);
-              const contract = item.contract;
-
-              return (
-                <article
-                  key={item.symbol}
-                  role="button"
-                  tabIndex={0}
-                  aria-label={`فتح تحليل ${item.symbol}`}
-                  onClick={() =>
-                    router.push(`/stocks/${encodeURIComponent(item.symbol)}`)
-                  }
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-
-                      router.push(`/stocks/${encodeURIComponent(item.symbol)}`);
-                    }
-                  }}
-                  className="group relative cursor-pointer overflow-hidden rounded-3xl border border-white/[0.07] bg-slate-950/65 p-6 shadow-xl shadow-black/10 backdrop-blur-xl transition duration-500 hover:-translate-y-1 hover:border-cyan-400/25 hover:shadow-2xl hover:shadow-cyan-950/20 focus:border-cyan-400/40 focus:outline-none"
-                >
-                  <div className="relative">
-                    <div className="flex items-start justify-between gap-5">
-                      <div>
-                        <div className="flex items-center gap-3">
-                          <h3 className="text-3xl font-black tracking-tight">
-                            {item.symbol}
-                          </h3>
-
-                          <span
-                            className={`rounded-lg border px-2.5 py-1 text-[11px] font-black ${sideBackground(
-                              item.side,
-                            )} ${sideColor(item.side)}`}
-                          >
-                            {item.side}
-                          </span>
-                        </div>
-
-                        <p className="mt-3 text-sm font-medium text-slate-300">
-                          {item.status}
-                        </p>
-
-                        <p className="mt-2 text-xs text-slate-500">
-                          مستوى الثقة:{" "}
-                          <span className="text-slate-300">
-                            {item.confidence}
-                          </span>
-                        </p>
-
-                        <div className="mt-3 flex flex-wrap gap-2 text-[10px] font-bold">
-                          <span className="rounded-lg border border-cyan-400/15 bg-cyan-400/[0.06] px-2.5 py-1 text-cyan-300">
-                            {item.contractQuality} • {item.contractScore}/100
-                          </span>
-
-                          <span className="rounded-lg border border-white/[0.07] bg-white/[0.03] px-2.5 py-1 text-slate-300">
-                            {item.consensusLabel}
-                          </span>
-
-                          <span className="rounded-lg border border-amber-400/15 bg-amber-400/[0.05] px-2.5 py-1 text-amber-300">
-                            مخاطرة القاما: {gammaRiskText(item.gammaRiskLevel)}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div
-                        className={`flex h-20 w-20 shrink-0 flex-col items-center justify-center rounded-full border bg-slate-950/80 shadow-xl ${scoreRing(
-                          item.score,
-                        )}`}
-                      >
-                        <span
-                          className={`text-2xl font-black ${scoreColor(
-                            item.score,
-                          )}`}
-                        >
-                          {item.score}
-                        </span>
-
-                        <span className="mt-0.5 text-[9px] uppercase tracking-wider text-slate-600">
-                          التقييم
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="my-5 h-px bg-gradient-to-r from-transparent via-white/[0.07] to-transparent" />
-
-                    {contract ? (
-                      <div className="mb-4 overflow-hidden rounded-2xl border border-cyan-400/15 bg-cyan-400/[0.035]">
-                        <div className="flex flex-col gap-2 border-b border-white/[0.06] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                          <div>
-                            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-cyan-400">
-                              العقد المختار
-                            </p>
-                            <p dir="ltr" className="mt-1 break-all text-left text-sm font-black text-white">
-                              {cleanContractTicker(contract.ticker)}
-                            </p>
-                          </div>
-
-                          <div className="text-right sm:text-left">
-                            <p className="text-[10px] text-slate-500">سعر العقد المرجعي</p>
-                            <p className="mt-1 text-lg font-black text-cyan-300">
-                              ${contract.midpoint.toFixed(2)}
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="grid grid-cols-3 gap-px bg-white/[0.05] sm:grid-cols-6">
-                          {[
-                            ["السترايك", `$${contract.strike.toFixed(2)}`],
-                            ["الانتهاء", formatExpiration(contract.expiration)],
-                            ["دلتا", Math.abs(contract.delta).toFixed(2)],
-                            ["السبريد", contract.spreadPct === null ? "—" : `${contract.spreadPct.toFixed(1)}%`],
-                            ["الفوليوم", contract.volume.toLocaleString("en-US")],
-                            ["OI", contract.openInterest.toLocaleString("en-US")],
-                          ].map(([label, value]) => (
-                            <div key={label} className="bg-[#07111f]/90 px-2 py-3 text-center">
-                              <p className="text-[9px] text-slate-600">{label}</p>
-                              <p className="mt-1 text-[11px] font-black text-slate-200">{value}</p>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null}
-
-                    <div className="grid grid-cols-3 gap-2">
-                      <div className="rounded-2xl border border-white/[0.05] bg-white/[0.025] p-3 text-center">
-                        <p className="text-[11px] text-slate-500">دخول السهم</p>
-                        <p className="mt-1 font-black text-white">
-                          ${plan.entry.toFixed(2)}
-                        </p>
-                      </div>
-
-                      <div className="rounded-2xl border border-emerald-400/10 bg-emerald-400/[0.04] p-3 text-center">
-                        <p className="text-[11px] text-slate-500">هدف السهم</p>
-                        <p className="mt-1 font-black text-emerald-400">
-                          ${plan.target.toFixed(2)}
-                        </p>
-                      </div>
-
-                      <div className="rounded-2xl border border-amber-400/10 bg-amber-400/[0.04] p-3 text-center">
-                        <p className="text-[11px] text-slate-500">وقف السهم</p>
-                        <p className="mt-1 font-black text-amber-400">
-                          ${plan.stop.toFixed(2)}
-                        </p>
-                      </div>
-                    </div>
-
-                    {item.tradePlan ? (
-                      <div className="mt-3 grid grid-cols-3 gap-2">
-                        <div className="rounded-xl border border-white/[0.05] bg-white/[0.02] p-3 text-center">
-                          <p className="text-[10px] text-slate-500">
-                            أول ظهور
-                          </p>
-                          <p className="mt-1 text-xs font-black text-cyan-300">
-                            {formatFirstSeen(
-                              item.tradePlan.firstSeenAt
-                            )}
-                          </p>
-                          <p className="mt-1 text-[10px] text-slate-600">
-                            {formatAge(
-                              item.tradePlan.ageMinutes
-                            )}
-                          </p>
-                        </div>
-
-                        <div className="rounded-xl border border-white/[0.05] bg-white/[0.02] p-3 text-center">
-                          <p className="text-[10px] text-slate-500">
-                            السعر الحالي
-                          </p>
-                          <p className="mt-1 text-xs font-black text-white">
-                            ${item.price.toFixed(2)}
-                          </p>
-                          <p className="mt-1 text-[10px] text-slate-600">
-                            {item.tradePlan.lifecycleLabel}
-                          </p>
-                        </div>
-
-                        <div className="rounded-xl border border-white/[0.05] bg-white/[0.02] p-3 text-center">
-                          <p className="text-[10px] text-slate-500">
-                            منذ الظهور
-                          </p>
-                          <p
-                            className={`mt-1 text-xs font-black ${profitClasses(
-                              item.tradePlan.currentProfitPct
-                            )}`}
-                          >
-                            {item.tradePlan.currentProfitPct >= 0
-                              ? "+"
-                              : ""}
-                            {item.tradePlan.currentProfitPct.toFixed(2)}%
-                          </p>
-                          <p className="mt-1 text-[10px] text-slate-600">
-                            حسب اتجاه الفرصة
-                          </p>
-                        </div>
-                      </div>
-                    ) : null}
-
-                    <div className="mt-3 rounded-xl border border-emerald-400/10 bg-emerald-400/[0.05] px-4 py-3">
-                      <div className="flex items-center justify-between gap-3 text-sm">
-                        <span className="font-bold text-emerald-300">
-                          نسبة الوصول التقديرية: {plan.reachProbability}%
-                        </span>
-                        <span className="text-xs text-slate-400">
-                          المخاطرة السعرية: {plan.risk}
-                        </span>
-                      </div>
-
-                      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-800">
-                        <div
-                          className="h-full rounded-full bg-emerald-400"
-                          style={{ width: `${plan.reachProbability}%` }}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="mt-4 grid grid-cols-[1fr_auto] gap-2">
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          router.push(
-                            `/stocks/${encodeURIComponent(item.symbol)}`,
-                          );
-                        }}
-                        className="rounded-2xl bg-cyan-400 px-4 py-3 text-sm font-black text-slate-950 transition hover:bg-cyan-300"
-                      >
-                        تفاصيل أكثر ←
-                      </button>
-
-                      <button
-                        type="button"
-                        aria-label={`مشاركة تحليل ${item.symbol}`}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void shareOpportunity(item);
-                        }}
-                        className="flex h-12 w-12 items-center justify-center rounded-2xl border border-white/[0.08] bg-white/[0.035] text-xl text-cyan-300 transition hover:border-cyan-400/25 hover:bg-cyan-400/[0.08]"
-                      >
-                        ↗
-                      </button>
-                    </div>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        ) : null}
-
-        <footer className="mt-16 border-t border-white/[0.06] pt-6 text-center">
+    <footer className="mt-16 border-t border-white/[0.06] pt-6 text-center">
           <p className="text-xs leading-6 text-slate-600">
             التحليلات مبنية على بيانات السوق ولا تمثل توصية مباشرة بالشراء أو
             البيع.
