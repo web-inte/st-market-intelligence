@@ -117,12 +117,23 @@ export async function GET(
 
   if (userId && ipHash) {
     const {
+      data: trialStarted,
       error: trialError,
     } = await supabase.rpc(
       "maybe_start_trial_with_ip",
       {
         p_user_id: userId,
         p_ip_hash: ipHash,
+      }
+    );
+
+    console.log(
+      "Trial start result:",
+      {
+        userId,
+        started: trialStarted,
+        hasClientIp: Boolean(clientIp),
+        ipHashLength: ipHash.length,
       }
     );
 
