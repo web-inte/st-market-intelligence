@@ -2186,7 +2186,8 @@ export async function GET(
       الخارجي هو المسؤول عنه، منعًا لتكرار الصفقة.
     */
     const shouldSaveWatching =
-      mode === "MANUAL";
+      mode === "MANUAL" ||
+      mode === "AUTO";
 
     let selectedContract:
       BotDecisionContract |
