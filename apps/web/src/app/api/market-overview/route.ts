@@ -353,6 +353,18 @@ function analyzeIndex(
   const session =
     sessionCandles(candles);
 
+/*
+EMA9 و EMA21 يحتاجان تاريخًا أطول من جلسة اليوم،
+خصوصًا في بداية التداول.
+نستخدم جميع شموع الجلسات النظامية المتاحة للمتوسطات،
+بينما VWAP والحركة والبنية تبقى من جلسة اليوم.
+*/
+const regularCandles =
+candles.filter(
+isRegularSessionCandle
+);
+
+
   const debugDateFormatter =
     new Intl.DateTimeFormat(
       "en-CA",
@@ -382,16 +394,31 @@ function analyzeIndex(
     );
   }
 
-  if (session.length < 22) {
-    throw new Error(
-      `${symbol}: لا توجد شموع كافية للتحليل.`,
-    );
-  }
+/*
+نبدأ التشخيص بعد توفر 3 شموع 5 دقائق
+من جلسة اليوم.
 
-  const closes =
-    session.map(
-      (item) => item.close,
-    );
+EMA9 و EMA21 يستخدمان الشموع النظامية
+التاريخية المتاحة من Finnhub.
+*/
+if (session.length < 3) {
+throw new Error(
+`${symbol}: ننتظر 3 شموع من جلسة اليوم للتحليل.`,
+);
+}
+
+if (regularCandles.length < 21) {
+throw new Error(
+`${symbol}: لا توجد شموع تاريخية كافية لحساب EMA21.`,
+);
+}
+
+const closes =
+regularCandles
+.slice(-60)
+.map(
+(item) => item.close,
+);
 
   const latest =
     session[
