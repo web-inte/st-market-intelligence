@@ -598,7 +598,7 @@ export default function TradeNotificationBell() {
       try {
         const response =
           await fetch(
-            `/api/active-trades?t=${Date.now()}`,
+            `/api/active-trades/notifications?t=${Date.now()}`,
             {
               cache: "no-store",
               credentials:
