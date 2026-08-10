@@ -109,7 +109,7 @@ export async function GET(
     } = await supabase
       .from("stock_trade_setups")
       .select(
-        "symbol,status,contract_status"
+        "symbol,status,contract_status,expires_at"
       )
       .or(
         [
@@ -137,6 +137,25 @@ export async function GET(
                   row.contract_status ||
                   ""
                 ).toUpperCase();
+
+              const expiresAt =
+                row.expires_at
+                  ? new Date(
+                      String(
+                        row.expires_at
+                      )
+                    ).getTime()
+                  : null;
+
+              if (
+                expiresAt !== null &&
+                Number.isFinite(
+                  expiresAt
+                ) &&
+                expiresAt <= Date.now()
+              ) {
+                return false;
+              }
 
               if (
                 CLOSED_CONTRACT_STATUSES.has(
