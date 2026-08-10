@@ -179,63 +179,17 @@ async function getFinnhubPrice(
     `?symbol=${encodeURIComponent(symbol)}` +
     `&token=${encodeURIComponent(apiKey)}`;
 
-  let response: Response | null =
-    null;
-
-  for (
-    let attempt = 1;
-    attempt <= 2;
-    attempt += 1
-  ) {
-    try {
-      response =
-        await fetch(
-          url,
-          {
-            cache: "no-store",
-            signal:
-              AbortSignal.timeout(
-                10_000
-              ),
-          }
-        );
-
-      break;
-    } catch (error) {
-      const isTimeout =
-        error instanceof Error &&
-        (
-          error.name ===
-            "TimeoutError" ||
-          error.name ===
-            "AbortError" ||
-          error.message
-            .toLowerCase()
-            .includes("timeout")
-        );
-
-      if (
-        !isTimeout ||
-        attempt >= 2
-      ) {
-        throw error;
+  const response =
+    await fetch(
+      url,
+      {
+        cache: "no-store",
+        signal:
+          AbortSignal.timeout(
+            20_000
+          ),
       }
-
-      await new Promise(
-        (resolve) =>
-          setTimeout(
-            resolve,
-            750
-          )
-      );
-    }
-  }
-
-  if (!response) {
-    throw new Error(
-      `تعذر جلب سعر ${symbol} من Finnhub`
     );
-  }
 
   if (!response.ok) {
     throw new Error(
