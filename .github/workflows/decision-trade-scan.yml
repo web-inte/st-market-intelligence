@@ -8,18 +8,22 @@ on:
         required: true
         default: "1"
 
+      auto_chain:
+        description: "Continue automatic sequential cycle"
+        required: false
+        default: "false"
+
   schedule:
-    # يبدأ بعد الافتتاح بـ30 دقيقة
-    # ويتوقف قبل الإغلاق بـ30 دقيقة
-    # 10:00 → 15:30 بتوقيت نيويورك
-    - cron: "0,15,30,45 10-14 * * 1-5"
-      timezone: "America/New_York"
-    - cron: "0,15,30 15 * * 1-5"
+    # بداية واحدة يوميًا بعد الافتتاح بـ30 دقيقة.
+    # بعدها السلسلة تكمل:
+    # 1 -> 2 -> 3 -> 4 -> راحة 15 دقيقة -> 1
+    - cron: "0 10 * * 1-5"
       timezone: "America/New_York"
 
 
 permissions:
   contents: read
+  actions: write
 
 concurrency:
   group: decision-trade-scanner
@@ -35,6 +39,7 @@ jobs:
         env:
           DECISION_SCAN_SECRET: ${{ secrets.DECISION_SCAN_SECRET }}
           DECISION_AUTO_SCAN_ENABLED: ${{ vars.DECISION_AUTO_SCAN_ENABLED }}
+          GH_TOKEN: ${{ github.token }}
           BASE_URL: https://www.st-market.com
         shell: bash
         run: |
@@ -45,34 +50,32 @@ jobs:
             exit 1
           fi
 
+          auto_chain="false"
+
           if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            # التشغيل اليدوي يبقى كما هو تمامًا
+            # البحث اليدوي يبقى كما هو.
             round_number="${{ github.event.inputs.round }}"
+            auto_chain="${{ github.event.inputs.auto_chain }}"
+
+            # التشغيل المتسلسل يتوقف إذا تم إيقاف
+            # البحث التلقائي من لوحة الأدمن.
+            if               [ "${auto_chain}" = "true" ] &&               [ "${DECISION_AUTO_SCAN_ENABLED:-true}" = "false" ]; then
+              echo "⏸️ البحث التلقائي متوقف من لوحة الأدمن"
+              exit 0
+            fi
           else
-            # إذا تم إيقاف التلقائي من لوحة الأدمن
-            # نخرج بدون تشغيل أي دائرة.
-            # إذا المتغير غير موجود نعتبر التلقائي شغال
-            # حتى نحافظ على الجدولة الحالية.
+            # التشغيل اليومي المجدول يبدأ بالدائرة الأولى.
             if [ "${DECISION_AUTO_SCAN_ENABLED:-true}" = "false" ]; then
               echo "⏸️ البحث التلقائي متوقف من لوحة الأدمن"
               exit 0
             fi
 
-            # التشغيل التلقائي:
-            # 10:00 = الدائرة 1
-            # 10:15 = الدائرة 2
-            # 10:30 = الدائرة 3
-            # 10:45 = الدائرة 4
-            # ثم يعاد التسلسل كل ساعة
-            ny_hour=$(TZ=America/New_York date +%H)
-            ny_minute=$(TZ=America/New_York date +%M)
-
-            minutes_since_start=$((               10#${ny_hour} * 60 +               10#${ny_minute} -               (10 * 60)             ))
-
-            cycle_slot=$((               minutes_since_start / 15             ))
-
-            round_number=$((               cycle_slot % 4 + 1             ))
+            round_number="1"
+            auto_chain="true"
           fi
+
+          echo "Round: ${round_number}"
+          echo "Auto chain: ${auto_chain}"
 
           failures=0
           successes=0
@@ -414,6 +417,73 @@ jobs:
             echo "⚠️ فشل مسار المتابعة: HTTP ${monitor_code}"
             head -c 700 "${monitor_file}" 2>/dev/null || true
             echo
+          fi
+
+
+          # =====================================================
+          # AUTO SEQUENTIAL CHAIN
+          # 1 -> 2 -> 3 -> 4 -> 15 min rest -> 1
+          # =====================================================
+
+          if [ "${auto_chain}" = "true" ]; then
+            if [ "${round_number}" = "4" ]; then
+              echo "✅ انتهت الدوائر الأربع"
+              echo "😴 راحة 15 دقيقة قبل بدء دورة جديدة"
+
+              sleep 900
+
+              next_round="1"
+            else
+              next_round=$((round_number + 1))
+
+              echo \
+                "➡️ انتهت الدائرة ${round_number} — سيتم تشغيل الدائرة ${next_round} الآن"
+            fi
+
+            # نعيد قراءة وقت نيويورك بعد انتهاء الدائرة/الراحة.
+            ny_day=$(
+              TZ=America/New_York date +%u
+            )
+
+            ny_hour=$(
+              TZ=America/New_York date +%H
+            )
+
+            ny_minute=$(
+              TZ=America/New_York date +%M
+            )
+
+            ny_hour=$((10#${ny_hour}))
+            ny_minute=$((10#${ny_minute}))
+
+            ny_total_minutes=$(( \
+              ny_hour * 60 + ny_minute \
+            ))
+
+            # فترة التشغيل:
+            # 10:00 إلى 15:30 بتوقيت نيويورك.
+            if \
+              [ "${ny_day}" -ge 1 ] && \
+              [ "${ny_day}" -le 5 ] && \
+              [ "${ny_total_minutes}" -ge 600 ] && \
+              [ "${ny_total_minutes}" -le 930 ]; then
+
+              echo \
+                "🚀 تشغيل الدائرة ${next_round} التالية"
+
+              gh workflow run \
+                decision-trade-scan.yml \
+                --repo "${GITHUB_REPOSITORY}" \
+                --ref main \
+                -f round="${next_round}" \
+                -f auto_chain="true"
+
+              echo \
+                "✅ تم إرسال الدائرة ${next_round}"
+            else
+              echo \
+                "🛑 انتهت فترة البحث اليومية — لن تبدأ دائرة جديدة"
+            fi
           fi
 
           if [ "${failures}" -gt 8 ]; then

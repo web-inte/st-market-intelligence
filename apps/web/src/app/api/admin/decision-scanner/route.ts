@@ -403,18 +403,7 @@ export async function POST(
             sessionEnd;
 
         if (insideAutoWindow) {
-          const slot =
-            Math.floor(
-              (
-                totalMinutes -
-                sessionStart
-              ) / 15
-            );
-
-          startedRound =
-            String(
-              slot % 4 + 1
-            ) as RoundNumber;
+          startedRound = "1";
 
           const workflowResponse =
             await fetch(
@@ -437,6 +426,8 @@ export async function POST(
                     inputs: {
                       round:
                         startedRound,
+                      auto_chain:
+                        "true",
                     },
                   }),
                 cache: "no-store",
