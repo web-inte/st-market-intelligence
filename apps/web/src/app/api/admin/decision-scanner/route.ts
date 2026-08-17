@@ -337,13 +337,133 @@ export async function POST(
         enabled
       );
 
+      let startedRound:
+        RoundNumber | null =
+        null;
+
+      if (enabled) {
+        const now =
+          new Date();
+
+        const nyParts =
+          new Intl.DateTimeFormat(
+            "en-US",
+            {
+              timeZone:
+                "America/New_York",
+              weekday: "short",
+              hour: "2-digit",
+              minute: "2-digit",
+              hourCycle: "h23",
+            }
+          ).formatToParts(now);
+
+        const weekday =
+          nyParts.find(
+            (part) =>
+              part.type === "weekday"
+          )?.value || "";
+
+        const hour =
+          Number(
+            nyParts.find(
+              (part) =>
+                part.type === "hour"
+            )?.value || "0"
+          );
+
+        const minute =
+          Number(
+            nyParts.find(
+              (part) =>
+                part.type === "minute"
+            )?.value || "0"
+          );
+
+        const totalMinutes =
+          hour * 60 + minute;
+
+        const sessionStart =
+          10 * 60;
+
+        const sessionEnd =
+          15 * 60 + 30;
+
+        const weekdayOpen =
+          ![
+            "Sat",
+            "Sun",
+          ].includes(weekday);
+
+        const insideAutoWindow =
+          weekdayOpen &&
+          totalMinutes >=
+            sessionStart &&
+          totalMinutes <=
+            sessionEnd;
+
+        if (insideAutoWindow) {
+          const slot =
+            Math.floor(
+              (
+                totalMinutes -
+                sessionStart
+              ) / 15
+            );
+
+          startedRound =
+            String(
+              slot % 4 + 1
+            ) as RoundNumber;
+
+          const workflowResponse =
+            await fetch(
+              `https://api.github.com/repos/${repository}/actions/workflows/decision-trade-scan.yml/dispatches`,
+              {
+                method: "POST",
+                headers: {
+                  Accept:
+                    "application/vnd.github+json",
+                  Authorization:
+                    `Bearer ${githubToken}`,
+                  "X-GitHub-Api-Version":
+                    "2022-11-28",
+                  "Content-Type":
+                    "application/json",
+                },
+                body:
+                  JSON.stringify({
+                    ref: "main",
+                    inputs: {
+                      round:
+                        startedRound,
+                    },
+                  }),
+                cache: "no-store",
+              }
+            );
+
+          if (!workflowResponse.ok) {
+            const githubError =
+              await workflowResponse.text();
+
+            throw new Error(
+              `تم تفعيل التلقائي لكن فشل بدء أول دائرة: GitHub HTTP ${workflowResponse.status} — ${githubError}`
+            );
+          }
+        }
+      }
+
       return NextResponse.json({
         ok: true,
         autoEnabled:
           enabled,
+        startedRound,
         message:
           enabled
-            ? "تم تشغيل البحث التلقائي"
+            ? startedRound
+              ? `تم تشغيل البحث التلقائي وبدأت الدائرة ${startedRound} الآن`
+              : "تم تشغيل البحث التلقائي وسيبدأ عند دخول فترة البحث"
             : "تم إيقاف البحث التلقائي",
         changedBy:
           admin.email || admin.id,
