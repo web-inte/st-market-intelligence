@@ -1,4 +1,5 @@
 name: Decision Trade Scanner
+run-name: Decision Trade Scanner — Round ${{ github.event.inputs.round || '1' }}
 
 on:
   workflow_dispatch:

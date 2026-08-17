@@ -196,12 +196,15 @@ export default function DecisionScannerControl() {
         }
       } catch (statusError) {
         if (!cancelled) {
-          setAutoEnabled(null);
-
-          setError(
-            statusError instanceof Error
-              ? statusError.message
-              : "تعذر قراءة حالة البحث التلقائي"
+          // تحديث الحالة يعمل في الخلفية كل عدة ثوانٍ.
+          // على Safari قد يفشل أول fetch مؤقتًا بعد
+          // الرجوع للمتصفح برسالة "Load failed".
+          //
+          // لا نغيّر آخر حالة صحيحة ولا نعرض خطأ
+          // للمستخدم بسبب فشل تحديث لحظي فقط.
+          console.warn(
+            "تعذر تحديث حالة البحث التلقائي مؤقتًا:",
+            statusError
           );
         }
       }
