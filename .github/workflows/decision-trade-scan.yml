@@ -34,6 +34,7 @@ jobs:
       - name: Scan selected round
         env:
           DECISION_SCAN_SECRET: ${{ secrets.DECISION_SCAN_SECRET }}
+          DECISION_AUTO_SCAN_ENABLED: ${{ vars.DECISION_AUTO_SCAN_ENABLED }}
           BASE_URL: https://www.st-market.com
         shell: bash
         run: |
@@ -48,6 +49,15 @@ jobs:
             # التشغيل اليدوي يبقى كما هو تمامًا
             round_number="${{ github.event.inputs.round }}"
           else
+            # إذا تم إيقاف التلقائي من لوحة الأدمن
+            # نخرج بدون تشغيل أي دائرة.
+            # إذا المتغير غير موجود نعتبر التلقائي شغال
+            # حتى نحافظ على الجدولة الحالية.
+            if [ "${DECISION_AUTO_SCAN_ENABLED:-true}" = "false" ]; then
+              echo "⏸️ البحث التلقائي متوقف من لوحة الأدمن"
+              exit 0
+            fi
+
             # التشغيل التلقائي:
             # 10:00 = الدائرة 1
             # 10:15 = الدائرة 2

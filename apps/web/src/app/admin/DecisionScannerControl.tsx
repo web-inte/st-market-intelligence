@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  useEffect,
   useMemo,
   useState,
 } from "react";
@@ -77,6 +78,152 @@ export default function DecisionScannerControl() {
     error,
     setError,
   ] = useState("");
+
+  const [
+    autoEnabled,
+    setAutoEnabled,
+  ] = useState<boolean | null>(
+    null
+  );
+
+  const [
+    autoLoading,
+    setAutoLoading,
+  ] = useState(false);
+
+
+  async function sendAutoAction(
+    action:
+      | "auto_status"
+      | "auto_start"
+      | "auto_stop"
+  ) {
+    const {
+      data: sessionData,
+    } =
+      await supabase.auth
+        .getSession();
+
+    const accessToken =
+      sessionData.session
+        ?.access_token;
+
+    if (!accessToken) {
+      throw new Error(
+        "انتهت جلسة الدخول، سجّل الدخول من جديد"
+      );
+    }
+
+    const response =
+      await fetch(
+        "/api/admin/decision-scanner",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/json",
+            Authorization:
+              `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({
+            action,
+          }),
+        }
+      );
+
+    const result =
+      await response.json();
+
+    if (
+      !response.ok ||
+      !result.ok
+    ) {
+      throw new Error(
+        result.error ||
+        "تعذر تحديث البحث التلقائي"
+      );
+    }
+
+    return result;
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadAutoStatus() {
+      try {
+        const result =
+          await sendAutoAction(
+            "auto_status"
+          );
+
+        if (!cancelled) {
+          setAutoEnabled(
+            Boolean(
+              result.autoEnabled
+            )
+          );
+        }
+      } catch (statusError) {
+        if (!cancelled) {
+          setAutoEnabled(null);
+
+          setError(
+            statusError instanceof Error
+              ? statusError.message
+              : "تعذر قراءة حالة البحث التلقائي"
+          );
+        }
+      }
+    }
+
+    void loadAutoStatus();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [supabase]);
+
+  async function toggleAutoScan() {
+    if (
+      autoLoading ||
+      autoEnabled === null
+    ) {
+      return;
+    }
+
+    setAutoLoading(true);
+    setMessage("");
+    setError("");
+
+    try {
+      const result =
+        await sendAutoAction(
+          autoEnabled
+            ? "auto_stop"
+            : "auto_start"
+        );
+
+      setAutoEnabled(
+        Boolean(
+          result.autoEnabled
+        )
+      );
+
+      setMessage(
+        result.message ||
+        "تم تحديث حالة البحث التلقائي"
+      );
+    } catch (autoError) {
+      setError(
+        autoError instanceof Error
+          ? autoError.message
+          : "تعذر تحديث البحث التلقائي"
+      );
+    } finally {
+      setAutoLoading(false);
+    }
+  }
 
   async function startScan() {
     if (loading) {
@@ -240,9 +387,10 @@ export default function DecisionScannerControl() {
         </h2>
 
         <p className="mt-2 text-sm leading-7 text-slate-400">
-          اختر الدائرة ثم ابدأ البحث.
-          تم إيقاف الجدولة التلقائية،
-          ولن يبدأ أي فحص إلا من هذا الزر.
+          اختر الدائرة للتشغيل اليدوي،
+          أو استخدم التشغيل التلقائي
+          للتنقل بين الدوائر كل 15 دقيقة
+          خلال فترة البحث المحددة.
         </p>
       </div>
 
@@ -278,6 +426,62 @@ export default function DecisionScannerControl() {
             </button>
           );
         })}
+      </div>
+
+      <div className="mt-5 rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              <p className="font-black text-white">
+                البحث التلقائي
+              </p>
+
+              <span
+                className={[
+                  "rounded-full px-2.5 py-1 text-[11px] font-black",
+                  autoEnabled === true
+                    ? "bg-emerald-400/10 text-emerald-300"
+                    : autoEnabled === false
+                      ? "bg-rose-400/10 text-rose-300"
+                      : "bg-slate-800 text-slate-400",
+                ].join(" ")}
+              >
+                {autoEnabled === true
+                  ? "شغال"
+                  : autoEnabled === false
+                    ? "متوقف"
+                    : "جارٍ التحقق"}
+              </span>
+            </div>
+
+            <p className="mt-2 text-xs leading-6 text-slate-400">
+              1 ← 2 ← 3 ← 4 كل 15 دقيقة
+              من 10:00 إلى 15:30
+              بتوقيت نيويورك.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            disabled={
+              autoLoading ||
+              autoEnabled === null
+            }
+            onClick={toggleAutoScan}
+            className={[
+              "rounded-2xl px-5 py-3 text-sm font-black transition disabled:cursor-not-allowed disabled:opacity-50",
+              autoEnabled
+                ? "border border-rose-400/40 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20"
+                : "bg-emerald-400 text-slate-950 hover:bg-emerald-300",
+            ].join(" ")}
+          >
+            {autoLoading
+              ? "جارٍ التحديث..."
+              : autoEnabled
+                ? "إيقاف التلقائي"
+                : "تشغيل التلقائي"}
+          </button>
+        </div>
       </div>
 
       <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(160px,1fr)]">

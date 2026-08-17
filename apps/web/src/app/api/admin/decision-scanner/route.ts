@@ -101,6 +101,165 @@ async function requireAdmin(
   return userData.user;
 }
 
+
+const AUTO_SCAN_VARIABLE =
+  "DECISION_AUTO_SCAN_ENABLED";
+
+function githubVariableHeaders(
+  githubToken: string
+) {
+  return {
+    Accept:
+      "application/vnd.github+json",
+    Authorization:
+      `Bearer ${githubToken}`,
+    "X-GitHub-Api-Version":
+      "2022-11-28",
+    "Content-Type":
+      "application/json",
+  };
+}
+
+async function getAutoScanEnabled(
+  repository: string,
+  githubToken: string
+) {
+  const response =
+    await fetch(
+      `https://api.github.com/repos/${repository}/actions/variables/${AUTO_SCAN_VARIABLE}`,
+      {
+        headers:
+          githubVariableHeaders(
+            githubToken
+          ),
+        cache: "no-store",
+      }
+    );
+
+  // إذا المتغير غير موجود نعتبر التلقائي شغال،
+  // لأن الجدولة الحالية مفعلة بالفعل.
+  if (response.status === 404) {
+    return true;
+  }
+
+  if (!response.ok) {
+    const githubError =
+      await response.text();
+
+    throw new Error(
+      `تعذر قراءة حالة البحث التلقائي: GitHub HTTP ${response.status} — ${githubError}`
+    );
+  }
+
+  const payload =
+    await response.json() as {
+      value?: string;
+    };
+
+  return (
+    String(
+      payload.value || ""
+    ).toLowerCase() !== "false"
+  );
+}
+
+async function setAutoScanEnabled(
+  repository: string,
+  githubToken: string,
+  enabled: boolean
+) {
+  const variableUrl =
+    `https://api.github.com/repos/${repository}/actions/variables/${AUTO_SCAN_VARIABLE}`;
+
+  const lookup =
+    await fetch(
+      variableUrl,
+      {
+        headers:
+          githubVariableHeaders(
+            githubToken
+          ),
+        cache: "no-store",
+      }
+    );
+
+  if (
+    !lookup.ok &&
+    lookup.status !== 404
+  ) {
+    const githubError =
+      await lookup.text();
+
+    throw new Error(
+      `تعذر قراءة حالة البحث التلقائي: GitHub HTTP ${lookup.status} — ${githubError}`
+    );
+  }
+
+  if (lookup.status === 404) {
+    const createResponse =
+      await fetch(
+        `https://api.github.com/repos/${repository}/actions/variables`,
+        {
+          method: "POST",
+          headers:
+            githubVariableHeaders(
+              githubToken
+            ),
+          body: JSON.stringify({
+            name:
+              AUTO_SCAN_VARIABLE,
+            value:
+              enabled
+                ? "true"
+                : "false",
+          }),
+          cache: "no-store",
+        }
+      );
+
+    if (!createResponse.ok) {
+      const githubError =
+        await createResponse.text();
+
+      throw new Error(
+        `تعذر إنشاء حالة البحث التلقائي: GitHub HTTP ${createResponse.status} — ${githubError}`
+      );
+    }
+
+    return;
+  }
+
+  const updateResponse =
+    await fetch(
+      variableUrl,
+      {
+        method: "PATCH",
+        headers:
+          githubVariableHeaders(
+            githubToken
+          ),
+        body: JSON.stringify({
+          name:
+            AUTO_SCAN_VARIABLE,
+          value:
+            enabled
+              ? "true"
+              : "false",
+        }),
+        cache: "no-store",
+      }
+    );
+
+  if (!updateResponse.ok) {
+    const githubError =
+      await updateResponse.text();
+
+    throw new Error(
+      `تعذر تحديث حالة البحث التلقائي: GitHub HTTP ${updateResponse.status} — ${githubError}`
+    );
+  }
+}
+
 export async function POST(
   request: NextRequest
 ) {
@@ -150,6 +309,48 @@ export async function POST(
       process.env
         .GITHUB_ACTIONS_REPOSITORY ||
       "web-inte/st-market-intelligence";
+
+    if (action === "auto_status") {
+      const enabled =
+        await getAutoScanEnabled(
+          repository,
+          githubToken
+        );
+
+      return NextResponse.json({
+        ok: true,
+        autoEnabled:
+          enabled,
+      });
+    }
+
+    if (
+      action === "auto_start" ||
+      action === "auto_stop"
+    ) {
+      const enabled =
+        action === "auto_start";
+
+      await setAutoScanEnabled(
+        repository,
+        githubToken,
+        enabled
+      );
+
+      return NextResponse.json({
+        ok: true,
+        autoEnabled:
+          enabled,
+        message:
+          enabled
+            ? "تم تشغيل البحث التلقائي"
+            : "تم إيقاف البحث التلقائي",
+        changedBy:
+          admin.email || admin.id,
+        changedAt:
+          new Date().toISOString(),
+      });
+    }
 
     if (action === "stop") {
       const runsResponse =
