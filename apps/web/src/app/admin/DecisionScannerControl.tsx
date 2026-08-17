@@ -91,6 +91,22 @@ export default function DecisionScannerControl() {
     setAutoLoading,
   ] = useState(false);
 
+  const [
+    scanStatus,
+    setScanStatus,
+  ] = useState<
+    "searching" |
+    "waiting" |
+    "stopped"
+  >("stopped");
+
+  const [
+    activeRound,
+    setActiveRound,
+  ] = useState<
+    string | null
+  >(null);
+
 
   async function sendAutoAction(
     action:
@@ -163,6 +179,20 @@ export default function DecisionScannerControl() {
               result.autoEnabled
             )
           );
+
+          setScanStatus(
+            result.scanStatus ||
+              (
+                result.autoEnabled
+                  ? "waiting"
+                  : "stopped"
+              )
+          );
+
+          setActiveRound(
+            result.activeRound ||
+              null
+          );
         }
       } catch (statusError) {
         if (!cancelled) {
@@ -179,8 +209,19 @@ export default function DecisionScannerControl() {
 
     void loadAutoStatus();
 
+    const interval =
+      window.setInterval(
+        () => {
+          void loadAutoStatus();
+        },
+        10000
+      );
+
     return () => {
       cancelled = true;
+      window.clearInterval(
+        interval
+      );
     };
   }, [supabase]);
 
@@ -208,6 +249,19 @@ export default function DecisionScannerControl() {
         Boolean(
           result.autoEnabled
         )
+      );
+
+      setScanStatus(
+        result.autoEnabled
+          ? result.startedRound
+            ? "searching"
+            : "waiting"
+          : "stopped"
+      );
+
+      setActiveRound(
+        result.startedRound ||
+          null
       );
 
       setMessage(
@@ -389,8 +443,8 @@ export default function DecisionScannerControl() {
         <p className="mt-2 text-sm leading-7 text-slate-400">
           اختر الدائرة للتشغيل اليدوي،
           أو استخدم التشغيل التلقائي
-          للتنقل بين الدوائر كل 15 دقيقة
-          خلال فترة البحث المحددة.
+          لتشغيل الدوائر بالتتابع، ثم
+          راحة 15 دقيقة بعد اكتمال الأربع.
         </p>
       </div>
 
@@ -455,10 +509,31 @@ export default function DecisionScannerControl() {
             </div>
 
             <p className="mt-2 text-xs leading-6 text-slate-400">
-              1 ← 2 ← 3 ← 4 كل 15 دقيقة
-              من 10:00 إلى 15:30
-              بتوقيت نيويورك.
+              1 ← 2 ← 3 ← 4، ثم راحة
+              15 دقيقة وإعادة الدورة حتى
+              15:30 بتوقيت نيويورك.
             </p>
+
+            {autoEnabled === true && (
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <span
+                  className={[
+                    "rounded-full px-3 py-1.5 text-xs font-black",
+                    scanStatus ===
+                    "searching"
+                      ? "bg-cyan-400/10 text-cyan-300"
+                      : "bg-amber-400/10 text-amber-300",
+                  ].join(" ")}
+                >
+                  {scanStatus ===
+                  "searching"
+                    ? activeRound
+                      ? `🔍 جاري البحث — الدائرة ${activeRound}`
+                      : "🔍 جاري البحث الآن"
+                    : "⏱️ في انتظار الدائرة التالية / استراحة"}
+                </span>
+              </div>
+            )}
           </div>
 
           <button

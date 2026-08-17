@@ -317,10 +317,205 @@ export async function POST(
           githubToken
         );
 
+      let scanStatus:
+        "searching" |
+        "waiting" |
+        "stopped" =
+        enabled
+          ? "waiting"
+          : "stopped";
+
+      let activeRound:
+        RoundNumber | null =
+        null;
+
+      let activeRunStartedAt:
+        string | null =
+        null;
+
+      if (enabled) {
+        const runsResponse =
+          await fetch(
+            `https://api.github.com/repos/${repository}/actions/workflows/decision-trade-scan.yml/runs?per_page=20`,
+            {
+              headers: {
+                Accept:
+                  "application/vnd.github+json",
+                Authorization:
+                  `Bearer ${githubToken}`,
+                "X-GitHub-Api-Version":
+                  "2022-11-28",
+              },
+              cache: "no-store",
+            }
+          );
+
+        if (runsResponse.ok) {
+          const runsData =
+            await runsResponse.json();
+
+          const runs =
+            Array.isArray(
+              runsData.workflow_runs
+            )
+              ? runsData.workflow_runs
+              : [];
+
+          const activeRun =
+            runs.find(
+              (run: {
+                status?: string;
+              }) =>
+                run.status ===
+                  "in_progress" ||
+                run.status ===
+                  "queued"
+            );
+
+          if (activeRun) {
+            scanStatus =
+              "searching";
+
+            activeRunStartedAt =
+              typeof activeRun
+                .run_started_at ===
+                "string"
+                ? activeRun
+                    .run_started_at
+                : typeof activeRun
+                    .created_at ===
+                    "string"
+                  ? activeRun
+                      .created_at
+                  : null;
+
+            const runId =
+              activeRun.id;
+
+            if (runId) {
+              const jobsResponse =
+                await fetch(
+                  `https://api.github.com/repos/${repository}/actions/runs/${runId}/jobs`,
+                  {
+                    headers: {
+                      Accept:
+                        "application/vnd.github+json",
+                      Authorization:
+                        `Bearer ${githubToken}`,
+                      "X-GitHub-Api-Version":
+                        "2022-11-28",
+                    },
+                    cache:
+                      "no-store",
+                  }
+                );
+
+              if (
+                jobsResponse.ok
+              ) {
+                const jobsData =
+                  await jobsResponse
+                    .json();
+
+                const jobs =
+                  Array.isArray(
+                    jobsData.jobs
+                  )
+                    ? jobsData.jobs
+                    : [];
+
+                const scanJob =
+                  jobs.find(
+                    (job: {
+                      name?: string;
+                    }) =>
+                      job.name ===
+                      "scan"
+                  );
+
+                const stepName =
+                  scanJob?.steps?.find(
+                    (step: {
+                      status?: string;
+                      name?: string;
+                    }) =>
+                      step.status ===
+                        "in_progress"
+                  )?.name;
+
+                const roundMatch =
+                  typeof stepName ===
+                    "string"
+                    ? stepName.match(
+                        /(?:round|دائرة)\s*([1-4])/i
+                      )
+                    : null;
+
+                if (roundMatch) {
+                  activeRound =
+                    roundMatch[
+                      1
+                    ] as RoundNumber;
+                }
+              }
+            }
+
+            if (!activeRound) {
+              const inputsResponse =
+                await fetch(
+                  `https://api.github.com/repos/${repository}/actions/runs/${activeRun.id}`,
+                  {
+                    headers: {
+                      Accept:
+                        "application/vnd.github+json",
+                      Authorization:
+                        `Bearer ${githubToken}`,
+                      "X-GitHub-Api-Version":
+                        "2022-11-28",
+                    },
+                    cache:
+                      "no-store",
+                  }
+                );
+
+              if (
+                inputsResponse.ok
+              ) {
+                const runDetails =
+                  await inputsResponse
+                    .json();
+
+                const displayTitle =
+                  String(
+                    runDetails
+                      .display_title ||
+                    ""
+                  );
+
+                const match =
+                  displayTitle.match(
+                    /(?:round|دائرة)\s*([1-4])/i
+                  );
+
+                if (match) {
+                  activeRound =
+                    match[
+                      1
+                    ] as RoundNumber;
+                }
+              }
+            }
+          }
+        }
+      }
+
       return NextResponse.json({
         ok: true,
         autoEnabled:
           enabled,
+        scanStatus,
+        activeRound,
+        activeRunStartedAt,
       });
     }
 
