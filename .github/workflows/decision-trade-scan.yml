@@ -67,19 +67,11 @@ jobs:
             ny_hour=$(TZ=America/New_York date +%H)
             ny_minute=$(TZ=America/New_York date +%M)
 
-            minutes_since_start=$(
-              10#${ny_hour} * 60 +
-              10#${ny_minute} -
-              (10 * 60)
-            )
+            minutes_since_start=$((               10#${ny_hour} * 60 +               10#${ny_minute} -               (10 * 60)             ))
 
-            cycle_slot=$(
-              minutes_since_start / 15
-            )
+            cycle_slot=$((               minutes_since_start / 15             ))
 
-            round_number=$(
-              cycle_slot % 4 + 1
-            )
+            round_number=$((               cycle_slot % 4 + 1             ))
           fi
 
           failures=0
