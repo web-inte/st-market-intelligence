@@ -8,6 +8,15 @@ on:
         required: true
         default: "1"
 
+  schedule:
+    # يبدأ بعد الافتتاح بـ30 دقيقة
+    # ويتوقف قبل الإغلاق بـ30 دقيقة
+    # 10:00 → 15:30 بتوقيت نيويورك
+    - cron: "0,15,30,45 10-14 * * 1-5"
+      timezone: "America/New_York"
+    - cron: "0,15,30 15 * * 1-5"
+      timezone: "America/New_York"
+
 
 permissions:
   contents: read
@@ -36,23 +45,31 @@ jobs:
           fi
 
           if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            # التشغيل اليدوي يبقى كما هو تمامًا
             round_number="${{ github.event.inputs.round }}"
           else
-            case "${{ github.event.schedule }}" in
-              "30,45 9 * * 1-5"|"0,15,30,45 10-15 * * 1-5")
-                round_number=1
-                ;;
-              "35,50 9 * * 1-5"|"5,20,35,50 10-15 * * 1-5")
-                round_number=2
-                ;;
-              "40,55 9 * * 1-5"|"10,25,40,55 10-15 * * 1-5")
-                round_number=3
-                ;;
-              *)
-                echo "❌ جدول تشغيل غير معروف"
-                exit 1
-                ;;
-            esac
+            # التشغيل التلقائي:
+            # 10:00 = الدائرة 1
+            # 10:15 = الدائرة 2
+            # 10:30 = الدائرة 3
+            # 10:45 = الدائرة 4
+            # ثم يعاد التسلسل كل ساعة
+            ny_hour=$(TZ=America/New_York date +%H)
+            ny_minute=$(TZ=America/New_York date +%M)
+
+            minutes_since_start=$(
+              10#${ny_hour} * 60 +
+              10#${ny_minute} -
+              (10 * 60)
+            )
+
+            cycle_slot=$(
+              minutes_since_start / 15
+            )
+
+            round_number=$(
+              cycle_slot % 4 + 1
+            )
           fi
 
           failures=0
@@ -316,6 +333,8 @@ jobs:
 
               bot_response_file="/tmp/${symbol}-bot-decision.json"
 
+              symbol_started_at=$(date +%s)
+
               bot_http_code=$(
                 curl \
                   --silent \
@@ -329,6 +348,11 @@ jobs:
                   "${BASE_URL}/api/bot-decision/${symbol}?mode=auto" \
                   || printf "000"
               )
+
+              symbol_finished_at=$(date +%s)
+              symbol_elapsed=$((symbol_finished_at - symbol_started_at))
+
+              echo "⏱️ ${symbol} — الزمن: ${symbol_elapsed}s — HTTP ${bot_http_code}"
 
               bot_http_code="${bot_http_code: -3}"
 
